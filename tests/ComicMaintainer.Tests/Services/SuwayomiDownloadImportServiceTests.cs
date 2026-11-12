@@ -11,13 +11,14 @@ using Moq;
 
 namespace ComicMaintainer.Tests.Services;
 
-public sealed class SuwayomiDownloadImportServiceTests : IDisposable
+public sealed partial class SuwayomiDownloadImportServiceTests : IDisposable
 {
     private readonly string _root;
     private readonly string _library;
     private readonly string _downloads;
     private readonly AppSettings _settings;
     private readonly Mock<ISeriesLibraryService> _seriesLibrary = new();
+    private ILibraryMutationLock _libraryMutationLock = new LibraryMutationLock();
 
     // An hour ahead, so everything a test writes counts as finished.
     private FakeTimeProvider _time = new(DateTimeOffset.UtcNow.AddHours(1));
@@ -59,6 +60,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         return new SuwayomiDownloadImportService(
             monitor.Object,
             _seriesLibrary.Object,
+            _libraryMutationLock,
             logger ?? NullLogger<SuwayomiDownloadImportService>.Instance,
             _time);
     }
@@ -122,6 +124,55 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
 
     private string Download(string source, string series, string chapter, string page = "page")
         => WriteCbz(Path.Join(_downloads, source, series, chapter), page);
+
+    /// <summary>
+    /// Counts acquisitions of a real lock and, as each locked section ends,
+    /// notes any staged chapter still in the library, so a chapter staged in
+    /// one section and published in another (or outside the lock) is caught.
+    /// </summary>
+    private sealed class RecordingLibraryMutationLock(string libraryRoot) : ILibraryMutationLock
+    {
+        private readonly LibraryMutationLock _inner = new();
+
+        public int Acquisitions { get; private set; }
+
+        public List<string> StagedFilesLeftAtRelease { get; } = new();
+
+        public T Execute<T>(Func<T> action, CancellationToken cancellationToken = default) =>
+            _inner.Execute(() =>
+            {
+                Acquisitions++;
+                try
+                {
+                    return action();
+                }
+                finally
+                {
+                    StagedFilesLeftAtRelease.AddRange(
+                        Directory.EnumerateFiles(libraryRoot, "*.suwayomi-import", SearchOption.AllDirectories));
+                }
+            }, cancellationToken);
+
+        public void Execute(Action action, CancellationToken cancellationToken = default) =>
+            Execute(() => { action(); return true; }, cancellationToken);
+
+        public Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> action, CancellationToken cancellationToken = default) =>
+            _inner.ExecuteAsync(action, cancellationToken);
+    }
+
+    [Fact]
+    public async Task ImportAsync_StagesAndPublishesEachChapterWhileHoldingTheInjectedLibraryMutationLock()
+    {
+        Download("MangaDex (EN)", "Solo Leveling", "Official_Chapter 1.cbz");
+        var recordingLock = new RecordingLibraryMutationLock(_library);
+        _libraryMutationLock = recordingLock;
+
+        var result = await CreateService().ImportAsync();
+
+        Assert.Single(result.Imported);
+        Assert.True(recordingLock.Acquisitions >= 1);
+        Assert.Empty(recordingLock.StagedFilesLeftAtRelease);
+    }
 
     [Fact]
     public async Task ImportAsync_MovesAFinishedChapterIntoASeriesFolderAndRemovesTheEmptiedFolders()
@@ -410,6 +461,16 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
 
     private string PendingMovesPath => Path.Join(_settings.ConfigDirectory, "suwayomi-import-pending.json");
 
+    /// <summary>
+    /// The staging paths recorded in the pending-move journal. The journal is JSON, which escapes the backslashes of a
+    /// Windows path, so it is parsed rather than searched for the path as text.
+    /// </summary>
+    private List<string?> JournaledStagingPaths()
+    {
+        using var journal = System.Text.Json.JsonDocument.Parse(File.ReadAllText(PendingMovesPath));
+        return journal.RootElement.EnumerateArray().Select(move => move.GetProperty("StagingPath").GetString()).ToList();
+    }
+
     private void WritePendingMove(string stagingPath, string sourcePath)
     {
         Directory.CreateDirectory(_settings.ConfigDirectory);
@@ -479,7 +540,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.Equal(1, result.Unreadable);
         Assert.False(result.PermissionDenied);
         Assert.True(File.Exists(staging));
-        Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+        Assert.Contains(staging, JournaledStagingPaths());
     }
 
     [Fact]
@@ -502,7 +563,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
             Assert.Equal(1, result.Failed);
             Assert.Equal(0, result.Unreadable);
             Assert.True(File.Exists(staging));
-            Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+            Assert.Contains(staging, JournaledStagingPaths());
         }
         finally
         {
@@ -529,7 +590,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
 
             Assert.True(result.PermissionDenied);
             Assert.Equal(1, result.Failed);
-            Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+            Assert.Contains(staging, JournaledStagingPaths());
         }
         finally
         {
@@ -578,7 +639,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.Equal(1, result.StillDownloading);
         Assert.Equal(partial, File.ReadAllBytes(source));
         Assert.Equal("complete staged archive", ReadPage(staging));
-        Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+        Assert.Contains(staging, JournaledStagingPaths());
         Assert.False(File.Exists(Path.Join(_library, "Solo Leveling", "Chapter 1.cbz")));
     }
 
@@ -629,7 +690,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
             Assert.Equal("original chapter", ReadPage(source));
             Assert.Equal("staged copy", ReadPage(staging));
             Assert.Single(Directory.GetFiles(stagingFolder));
-            Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+            Assert.Contains(staging, JournaledStagingPaths());
             Assert.False(Directory.Exists(Path.Join(_library, "Solo Leveling")));
         }
         finally
@@ -689,7 +750,7 @@ public sealed class SuwayomiDownloadImportServiceTests : IDisposable
         Assert.Equal(newDownload, File.ReadAllBytes(source));
         var staging = Assert.Single(Directory.GetFiles(destinationFolder, ".tmp_*.suwayomi-import"));
         Assert.Equal("original chapter", ReadPage(staging));
-        Assert.Contains(staging, File.ReadAllText(PendingMovesPath));
+        Assert.Contains(staging, JournaledStagingPaths());
         Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(source)!, ".tmp_*"));
         foreach (var attempt in Enumerable.Range(1, 1000))
         {

@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Reader.Models;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
@@ -18,9 +19,6 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
 
     public DbSet<ComicFileEntity> ComicFiles { get; set; } = null!;
     public DbSet<ProcessingHistoryEntity> ProcessingHistory { get; set; } = null!;
-#pragma warning disable CS0618 // FileReadStatuses is retained for migration rollback only.
-    public DbSet<FileReadStatusEntity> FileReadStatuses { get; set; } = null!;
-#pragma warning restore CS0618
     public DbSet<UserFileReadStatusEntity> UserFileReadStatuses { get; set; } = null!;
     public DbSet<ReadingProgressEntity> ReadingProgresses { get; set; } = null!;
     public DbSet<ReaderPreferencesEntity> ReaderPreferences { get; set; } = null!;
@@ -34,17 +32,24 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<SeriesEmailSubscriptionEntity> SeriesEmailSubscriptions { get; set; } = null!;
     public DbSet<ComicEmailDeliveryEntity> ComicEmailDeliveries { get; set; } = null!;
     public DbSet<ErrorReportEntity> ErrorReports { get; set; } = null!;
+    public DbSet<RevokedTokenEntity> RevokedTokens { get; set; } = null!;
+    public DbSet<LibraryScanEntity> LibraryScans { get; set; } = null!;
+    public DbSet<ComicMaintainer.Core.Notifications.NotificationDeliveryEntity> NotificationDeliveries { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
-        // Index ApiKey for fast lookup in AuthService.GetUserByApiKeyAsync.
-        // ApiKey is nullable, so this is a sparse index on a low-cardinality
-        // column (one entry per user with an API key).
+        // Signed-out session tokens (AuthSessionValidator).
+        modelBuilder.ApplyConfiguration(new RevokedTokenEntityConfiguration());
+
+        // API keys are looked up by their hash on every request that sends one
+        // (AuthService.GetUserByApiKeyAsync). The hash is unique: one key per account,
+        // and accounts without a key (NULL) do not collide.
         modelBuilder.Entity<ApplicationUser>(entity =>
         {
-            entity.HasIndex(e => e.ApiKey);
+            entity.Property(e => e.ApiKeyHash).HasMaxLength(64);
+            entity.HasIndex(e => e.ApiKeyHash).IsUnique();
         });
 
         // Configure ComicFileEntity
@@ -55,22 +60,26 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.FileName).IsRequired().HasMaxLength(512);
             entity.Property(e => e.Directory).IsRequired().HasMaxLength(2048);
             entity.HasIndex(e => e.FilePath).IsUnique();
-            entity.HasIndex(e => e.IsProcessed);
-            entity.HasIndex(e => e.IsRenamed);
-            entity.HasIndex(e => e.IsNormalized);
-            entity.HasIndex(e => e.IsDuplicate);
-            entity.HasIndex(e => e.IsRead);
-            // Hot filter/sort columns identified during EF query profiling:
-            // - Directory: file-list queries often filter or group by folder
-            // - UpdatedAt / CreatedAt: "recently added/modified" listings and ordering
-            entity.HasIndex(e => e.Directory);
-            entity.HasIndex(e => e.UpdatedAt);
-            entity.HasIndex(e => e.CreatedAt);
+            // Indexes follow the queries FileStoreService actually runs. There are
+            // deliberately none on the status flags (IsRenamed/IsNormalized/IsProcessed),
+            // the legacy IsRead column, CreatedAt or UpdatedAt: no query seeks or sorts on
+            // them (status filters are low-selectivity scans, and IsRead is never read), so
+            // those indexes only made every per-file status write slower.
+            // - "duplicates" filter: duplicates are rare, so a partial index on the flag
+            //   answers it without touching the rest of the table. The filter is the same
+            //   bare-column term EF emits for `Where(f => f.IsDuplicate)`, which is what
+            //   lets SQLite use a partial index.
+            entity.HasIndex(e => e.IsDuplicate).HasFilter("\"IsDuplicate\"");
             // Composite indexes for fast DB-backed file listing:
-            // - (Directory, FileName) covers folder-scoped file pages sorted by name.
-            // - FileName alone covers the default global "sort by name" listing.
+            // - (Directory, FileName) covers folder-scoped file pages sorted by name and the
+            //   `Directory IN (...)` folder lookup (it is also a Directory-prefix index).
+            // - FileName / LastModified / FileSize cover the global "sort by name / date /
+            //   size" listings, so a page is read in index order instead of sorting the
+            //   whole table for every request.
             entity.HasIndex(e => new { e.Directory, e.FileName });
             entity.HasIndex(e => e.FileName);
+            entity.HasIndex(e => e.LastModified);
+            entity.HasIndex(e => e.FileSize);
             // Used by LibraryScanJobHandler to find files whose series-metadata
             // stamp is lower than the current cache record's MetadataVersion.
             entity.HasIndex(e => e.SeriesMetadataVersion);
@@ -105,10 +114,10 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.HasKey(e => e.Id);
             entity.Property(e => e.FilePath).IsRequired().HasMaxLength(2048);
             entity.Property(e => e.Action).IsRequired().HasMaxLength(100);
+            // Timestamp orders the history pages and drives retention pruning. There is
+            // no index on Success or FilePath: nothing filters on them, and a 2048-char
+            // FilePath index entry per row made the table (and every backup) much larger.
             entity.HasIndex(e => e.Timestamp);
-            entity.HasIndex(e => e.Success);
-            // Used for "show history for a file" lookups and lookup-by-GUID API endpoints.
-            entity.HasIndex(e => e.FilePath);
             entity.HasIndex(e => e.EntryId).IsUnique();
             
             // Configure before/after fields
@@ -125,19 +134,6 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.BeforeVolume).HasMaxLength(50);
             entity.Property(e => e.AfterVolume).HasMaxLength(50);
         });
-
-        // Configure FileReadStatusEntity (legacy; see UserFileReadStatusEntity)
-#pragma warning disable CS0618
-        modelBuilder.Entity<FileReadStatusEntity>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.FilePath).IsRequired().HasMaxLength(2048);
-            entity.Property(e => e.CurrentPage).HasDefaultValue(1);
-            entity.HasIndex(e => e.FilePath).IsUnique();
-            entity.HasIndex(e => e.IsRead);
-            entity.HasIndex(e => e.LastReadDate);
-        });
-#pragma warning restore CS0618
 
         // Configure UserFileReadStatusEntity
         modelBuilder.Entity<UserFileReadStatusEntity>(entity =>
@@ -192,7 +188,6 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.UserId).IsRequired().HasMaxLength(450);
             entity.Property(e => e.Theme).HasMaxLength(32);
             entity.Property(e => e.ReadingMode).HasMaxLength(32);
-            entity.Property(e => e.LibraryViewMode).HasMaxLength(32);
             entity.Property(e => e.FilterMode).HasMaxLength(64);
             entity.Property(e => e.SortMode).HasMaxLength(64);
             entity.Property(e => e.SortDirection).HasMaxLength(32);
@@ -216,7 +211,11 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.NormalizedKey).HasMaxLength(512);
             entity.Property(e => e.CanonicalTitle).IsRequired().HasMaxLength(512);
             entity.Property(e => e.Source).HasMaxLength(128);
+            entity.Property(e => e.SourceId).HasMaxLength(128);
             entity.Property(e => e.LookupStatus).HasMaxLength(64);
+            entity.Property(e => e.SiteUrl).HasMaxLength(ProviderMetadataText.MaxSiteUrlLength);
+            entity.Property(e => e.PublicationStatus).HasMaxLength(32);
+            entity.Property(e => e.Origin).HasMaxLength(ProviderMetadataText.MaxOriginLength);
             // Aliases and UserAliases are stored as newline-delimited strings to
             // keep the entity model portable across providers without requiring
             // additional join tables.
@@ -272,7 +271,11 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.Name).IsRequired().HasMaxLength(128);
             entity.Property(e => e.EmailAddress).IsRequired().HasMaxLength(320);
             entity.Property(e => e.DeliveryFormat).IsRequired().HasMaxLength(16);
-            entity.HasIndex(e => e.EmailAddress).IsUnique();
+            entity.Property(e => e.OwnerUserId).HasMaxLength(450);
+            // Unique per owner: users cannot see each other's devices, so a
+            // global constraint would reveal another user's address through
+            // the conflict error.
+            entity.HasIndex(e => new { e.OwnerUserId, e.EmailAddress }).IsUnique();
         });
 
         // Configure SeriesEmailSubscriptionEntity
@@ -302,6 +305,9 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.Source).IsRequired().HasMaxLength(16);
             entity.Property(e => e.ErrorMessage).HasMaxLength(1024);
             entity.Property(e => e.DisplayName).HasMaxLength(512);
+            entity.Property(e => e.OwnerUserId).HasMaxLength(450);
+            // The delivery history is listed per owner, newest first.
+            entity.HasIndex(e => new { e.OwnerUserId, e.CreatedAt });
             // Auto-send dedupe looks up "was this file already delivered to this device".
             entity.HasIndex(e => new { e.FilePath, e.DeviceId, e.Status });
             entity.HasIndex(e => e.CreatedAt);
@@ -336,7 +342,51 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             // Supports the rolling "issues created in the last 24 hours" cap.
             entity.HasIndex(e => e.IssueCreatedAt);
         });
+
+        // Configure LibraryScanEntity
+        modelBuilder.Entity<LibraryScanEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Directory).IsRequired().HasMaxLength(2048);
+            entity.HasIndex(e => e.Directory).IsUnique();
+        });
+
+        // Configure NotificationDeliveryEntity
+        modelBuilder.Entity<ComicMaintainer.Core.Notifications.NotificationDeliveryEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Target).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.EventType).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.GroupKey).HasMaxLength(512);
+            entity.Property(e => e.Title).IsRequired().HasMaxLength(512);
+            entity.Property(e => e.Body).HasMaxLength(4000);
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.LastError).HasMaxLength(1024);
+            // The dispatcher's next-due read.
+            entity.HasIndex(e => new { e.Status, e.DueAt });
+            // Merging a new-chapter batch and suppressing a repeated job event.
+            entity.HasIndex(e => new { e.Target, e.EventType, e.GroupKey, e.Status });
+            // Pruning by age.
+            entity.HasIndex(e => e.CreatedAt);
+        });
     }
+}
+
+/// <summary>
+/// The watched directory the file watcher last scanned completely, every comic under it added
+/// to the store. A file the store does not track under a directory scanned this way arrived
+/// after that scan, so the watcher's catch-up at its next start processes it; under any other
+/// directory it may belong to a collection the application has not seen yet, which the
+/// catch-up only adds. The store keeps one row, replaced by each newly scanned directory.
+/// </summary>
+public class LibraryScanEntity
+{
+    public int Id { get; set; }
+
+    /// <summary>The scanned directory, a full path without a trailing separator.</summary>
+    public string Directory { get; set; } = string.Empty;
+
+    public DateTime CompletedAt { get; set; }
 }
 
 /// <summary>
@@ -375,6 +425,40 @@ public class ComicFileEntity
     public DateTime? LastDbEditAt { get; set; }
     public DateTime? LastWriteAt { get; set; }
     public string MetadataSource { get; set; } = "Scanned";
+
+    /// <summary>
+    /// Set while the file watcher has queued this file for automatic processing that has not
+    /// run yet (the file is still settling, or waits for a free worker). A queued file used to
+    /// be held only in memory, so a restart or a watcher stop in the meantime left it
+    /// unprocessed for good; at its next start the watcher queues every file with this flag
+    /// set again. Cleared once the watcher has processed the file or decided it needs nothing.
+    /// </summary>
+    public bool IsProcessingPending { get; set; }
+
+    /// <summary>
+    /// When the stale-entry cleanup first failed to find this file on disk (UTC), or
+    /// <c>null</c> while the file is present. Unless an administrator confirms, a cleanup
+    /// deletes the row only when a later run, at least
+    /// <c>AppSettings.StaleCleanupMissingGraceHours</c> after this stamp, still cannot find
+    /// it; the stamp is cleared as soon as the file is seen again, so a briefly unavailable
+    /// library keeps every row and everything stored on it.
+    /// </summary>
+    public DateTime? MissingSince { get; set; }
+
+    /// <summary>
+    /// <see cref="FileSize"/> of the archive when <see cref="Metadata"/> was last read from
+    /// (or written to) it, or <c>null</c> when it never was. Together with
+    /// <see cref="MetadataScannedModified"/> this says whether the cached metadata still
+    /// describes the archive: once the stored size or modification time moves on, the
+    /// background archive-metadata scan reads the archive again.
+    /// </summary>
+    public long? MetadataScannedSize { get; set; }
+
+    /// <summary>
+    /// <see cref="LastModified"/> of the archive when <see cref="Metadata"/> was last read
+    /// from (or written to) it; see <see cref="MetadataScannedSize"/>.
+    /// </summary>
+    public DateTime? MetadataScannedModified { get; set; }
 }
 
 /// <summary>
@@ -408,32 +492,11 @@ public class ProcessingHistoryEntity
 }
 
 /// <summary>
-/// Database entity for file read status tracking.
-/// </summary>
-/// <remarks>
-/// Superseded by <see cref="UserFileReadStatusEntity"/>, which scopes the same state to a
-/// user. Retained so the AddPerUserFileReadStatus migration is reversible and so an
-/// operator can roll back to a previous release without losing read state; it is no longer
-/// read or written by the application and can be dropped in a future major version.
-/// </remarks>
-[Obsolete("Use UserFileReadStatusEntity. Retained only for migration rollback; scheduled for removal in v3.0.")]
-public class FileReadStatusEntity
-{
-    public int Id { get; set; }
-    public string FilePath { get; set; } = string.Empty;
-    public bool IsRead { get; set; }
-    public int CurrentPage { get; set; } = 1; // Track current page for resuming reading
-    public DateTime? LastReadDate { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
-}
-
-/// <summary>
 /// Database entity for per-user file read status and resume position.
 /// </summary>
 /// <remarks>
-/// Read state used to live on <c>ComicFileEntity.IsRead</c> and in
-/// <see cref="FileReadStatusEntity"/>, both of which were global: in a multi-user
+/// Read state used to live on <c>ComicFileEntity.IsRead</c> and in a table of its own,
+/// both of which were global: in a multi-user
 /// deployment one user marking an issue read flipped it for everyone, and the global state
 /// could disagree with the per-user <see cref="ReadingProgressEntity"/> shown by the reader.
 /// This entity is now the single source of truth for "has this user read this file", and is
@@ -523,7 +586,7 @@ public class ReaderPreferencesEntity
 }
 
 /// <summary>
-/// Database entity for per-user web UI preferences (theme, pagination, library view).
+/// Database entity for per-user web UI preferences (theme, pagination, library filter and sort).
 /// All preference columns are nullable so an unset preference falls back to the
 /// application-level default rather than being pinned to a stored default value.
 /// </summary>
@@ -534,7 +597,6 @@ public class UserPreferencesEntity
     public string? Theme { get; set; }
     public int? PerPage { get; set; }
     public string? ReadingMode { get; set; }
-    public string? LibraryViewMode { get; set; }
     public string? FilterMode { get; set; }
     public string? SortMode { get; set; }
     public string? SortDirection { get; set; }
@@ -591,6 +653,13 @@ public class SeriesMetadataCacheEntity
 
     /// <summary>Provider source name (e.g. ComicVine, MangaDex), null when unknown.</summary>
     public string? Source { get; set; }
+
+    /// <summary>
+    /// Id of the matched entry at <see cref="Source"/> (MangaDex manga id,
+    /// AniList media id, ComicVine volume id), null when unknown. Lets a
+    /// refresh of a manual match re-fetch exactly that entry.
+    /// </summary>
+    public string? SourceId { get; set; }
 
     /// <summary>Last successful or attempted external lookup time, null if never.</summary>
     public DateTime? LastLookupUtc { get; set; }
@@ -667,6 +736,21 @@ public class SeriesMetadataCacheEntity
     /// provider returned no description or the series is unmatched.
     /// </summary>
     public string? Synopsis { get; set; }
+
+    /// <summary>The series' page on the provider's website, null until a lookup reports it.</summary>
+    public string? SiteUrl { get; set; }
+
+    /// <summary>JSON array of the provider's genre names, null until a lookup reports any.</summary>
+    public string? GenresJson { get; set; }
+
+    /// <summary>A <see cref="SeriesPublicationStatus"/> value, null until a lookup reports one.</summary>
+    public string? PublicationStatus { get; set; }
+
+    /// <summary>Chapters or issues the provider reports, null until a lookup reports them.</summary>
+    public int? TotalChapters { get; set; }
+
+    /// <summary>Primary language tag the series was first published in, null until a lookup reports it.</summary>
+    public string? Origin { get; set; }
 }
 
 /// <summary>
@@ -676,6 +760,15 @@ public class SeriesMetadataCacheEntity
 public class EreaderDeviceEntity
 {
     public int Id { get; set; }
+
+    /// <summary>
+    /// Id of the user who saved the device. Only that user (and administrators)
+    /// can see it, send to it, change it or subscribe it to series; its
+    /// subscriptions and deliveries belong to the same user. Null only for
+    /// devices saved before devices had owners when no administrator existed
+    /// to inherit them, which only administrators can reach.
+    /// </summary>
+    public string? OwnerUserId { get; set; }
 
     /// <summary>Friendly device name shown in the UI.</summary>
     public string Name { get; set; } = string.Empty;
@@ -730,6 +823,14 @@ public class SeriesEmailSubscriptionEntity
 public class ComicEmailDeliveryEntity
 {
     public int Id { get; set; }
+
+    /// <summary>
+    /// Owner of the device the delivery was sent to, copied when it was queued
+    /// so the history stays private to that user after the device is deleted.
+    /// Null only for unowned legacy rows, which only administrators can reach.
+    /// </summary>
+    public string? OwnerUserId { get; set; }
+
     public string FilePath { get; set; } = string.Empty;
     public int DeviceId { get; set; }
     public string DeviceName { get; set; } = string.Empty;
@@ -765,9 +866,30 @@ public class ComicEmailDeliveryEntity
     /// </summary>
     public string? DisplayName { get; set; }
 
+    /// <summary>
+    /// Why the delivery failed, or, while it is pending after a temporary
+    /// failure, why the last attempt failed and when it is tried again.
+    /// </summary>
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? SentAt { get; set; }
+
+    /// <summary>How many times the message has been handed to the mail server.</summary>
+    public int AttemptCount { get; set; }
+
+    /// <summary>
+    /// When a pending delivery whose last attempt failed temporarily is tried
+    /// again (UTC); null when no retry is waiting.
+    /// </summary>
+    public DateTime? NextAttemptAt { get; set; }
+
+    /// <summary>
+    /// How many times work on this delivery has begun since a result was last
+    /// recorded. Saved before converting or sending, so a process that dies
+    /// partway leaves a trace; a delivery that keeps doing so is given up on
+    /// rather than replayed on every start.
+    /// </summary>
+    public int StartsWithoutOutcome { get; set; }
 }
 
 /// <summary>
@@ -855,6 +977,15 @@ public class ErrorReportEntity
     /// forever; changing any part of the configuration clears the block.
     /// </summary>
     public string? PermanentFailureSignature { get; set; }
+
+    /// <summary>
+    /// When an attempt to file the issue started whose outcome is unknown: the
+    /// request timed out or failed after it may have reached GitHub, so the
+    /// issue may exist without its number being recorded. Before filing again
+    /// the repository is searched for an issue carrying this fingerprint that
+    /// was created since then. Null once the outcome is known.
+    /// </summary>
+    public DateTime? IssueCreationAttemptedAt { get; set; }
 }
 
 /// <summary>

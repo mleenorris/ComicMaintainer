@@ -12,13 +12,12 @@ namespace ComicMaintainer.Tests.Services;
 public sealed class ScheduledJobServiceCoverageTests
 {
     [Fact]
-    public void Handlers_AndGetHandler_ExposeTheRegisteredHandlersCaseInsensitively()
+    public void GetHandler_FindsTheRegisteredHandlersCaseInsensitively()
     {
         var alpha = new FakeHandler("alpha");
         var beta = new FakeHandler("beta");
         var (service, _) = BuildService(alpha, beta);
 
-        Assert.Equal(new[] { "alpha", "beta" }, service.Handlers.Select(h => h.JobKey).OrderBy(k => k).ToArray());
         Assert.Same(alpha, service.GetHandler("alpha"));
         Assert.Same(beta, service.GetHandler("BETA"));
         Assert.Null(service.GetHandler("gamma"));

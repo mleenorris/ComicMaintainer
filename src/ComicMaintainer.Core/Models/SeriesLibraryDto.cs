@@ -45,6 +45,12 @@ public class SeriesIssueDto
 
     [JsonPropertyName("read")]
     public bool Read { get; set; }
+
+    /// <summary>
+    /// A field-for-field copy. The series library shares one instance per issue between
+    /// every user's requests, so per-user values such as <see cref="Read"/> are set on a copy.
+    /// </summary>
+    public SeriesIssueDto ShallowCopy() => (SeriesIssueDto)MemberwiseClone();
 }
 
 /// <summary>
@@ -118,6 +124,18 @@ public class SeriesLibraryDto
     /// <summary>Plain-text synopsis from external metadata; null when none.</summary>
     [JsonPropertyName("synopsis")]
     public string? Synopsis { get; set; }
+
+    /// <summary>Genres from external metadata; empty until a lookup reports any.</summary>
+    [JsonPropertyName("genres")]
+    public List<string> Genres { get; set; } = new();
+
+    /// <summary>A <see cref="SeriesPublicationStatus"/> value; null until a lookup reports one.</summary>
+    [JsonPropertyName("publication_status")]
+    public string? PublicationStatus { get; set; }
+
+    /// <summary>The series' page on the provider's website; null when unknown.</summary>
+    [JsonPropertyName("site_url")]
+    public string? SiteUrl { get; set; }
 }
 
 public class SeriesLibraryResult
@@ -183,6 +201,18 @@ public class SeriesSummaryDto
     /// <summary>Plain-text synopsis from external metadata; null when none.</summary>
     [JsonPropertyName("synopsis")]
     public string? Synopsis { get; set; }
+
+    /// <summary>Genres from external metadata; empty until a lookup reports any.</summary>
+    [JsonPropertyName("genres")]
+    public List<string> Genres { get; set; } = new();
+
+    /// <summary>A <see cref="SeriesPublicationStatus"/> value; null until a lookup reports one.</summary>
+    [JsonPropertyName("publication_status")]
+    public string? PublicationStatus { get; set; }
+
+    /// <summary>The series' page on the provider's website; null when unknown.</summary>
+    [JsonPropertyName("site_url")]
+    public string? SiteUrl { get; set; }
 }
 
 public class SeriesSummaryResult
@@ -235,4 +265,16 @@ public class SeriesIssuesResult
     public int Page { get; set; }
     public int PerPage { get; set; }
     public int TotalPages { get; set; }
+
+    /// <summary>Plain-text synopsis from external metadata; null when none.</summary>
+    public string? Synopsis { get; set; }
+
+    /// <summary>Genres from external metadata; empty until a lookup reports any.</summary>
+    public List<string> Genres { get; set; } = new();
+
+    /// <summary>A <see cref="SeriesPublicationStatus"/> value; null until a lookup reports one.</summary>
+    public string? PublicationStatus { get; set; }
+
+    /// <summary>The series' page on the provider's website; null when unknown.</summary>
+    public string? SiteUrl { get; set; }
 }

@@ -226,13 +226,19 @@ test('an expired session sends every cover update to the login page', async () =
 test('cover update errors close the progress window and are reported', async () => {
     const page = await bootSeries({
         routes: {
-            [`POST ${ALL}`]: respond(500, 'Error updating series covers'),
+            [`POST ${ALL}`]: respond(500, {
+                title: 'An unexpected error occurred.',
+                status: 500,
+                detail: 'Error updating series covers',
+                error: 'Error updating series covers',
+                correlationId: 'corr-covers'
+            }, { 'Content-Type': 'application/problem+json', 'X-Correlation-Id': 'corr-covers' }),
             [`POST ${SELECTED}`]: respond(400, 'No series specified')
         }
     });
 
     await choose(page, 'Update Covers All Series');
-    assert.deepEqual(lastMessage(page), { text: 'Failed to update series covers: Error updating series covers', type: 'error' });
+    assert.deepEqual(lastMessage(page), { text: 'Failed to update series covers: Error updating series covers (ref: corr-covers)', type: 'error' });
     assert.equal(progressOpen(page), false);
 
     page.click(selectedItem(page));

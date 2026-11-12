@@ -16,10 +16,10 @@
     <ApplicationId>com.comicmaintainer.app</ApplicationId>
 
     <!-- Version -->
-    <ApplicationDisplayVersion>2.0.1</ApplicationDisplayVersion>
-    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>3.0.0</ApplicationDisplayVersion>
+    <ApplicationVersion>2</ApplicationVersion>
 
-    <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">21.0</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">23.0</SupportedOSPlatformVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -29,11 +29,8 @@
     <!-- Splash Screen -->
     <MauiSplashScreen Include="Resources\Images\appiconfg.svg" Color="#512BD4" BaseSize="128,128" />
 
-    <!-- Images -->
-    <MauiImage Include="Resources\Images\*" />
-
-    <!-- Custom Fonts -->
-    <MauiFont Include="Resources\Fonts\*" />
+    <!-- Images, apart from the two the app icon and splash screen already use: an output name must be unique -->
+    <MauiImage Include="Resources\Images\*" Exclude="Resources\Images\appicon.svg;Resources\Images\appiconfg.svg" />
 
     <!-- Raw Assets (also remove the "Resources\Raw" prefix) -->
     <MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
@@ -42,12 +39,9 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Maui.Controls" Version="10.0.120" />
     <PackageReference Include="Microsoft.Maui.Controls.Compatibility" Version="10.0.120" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.14" />
     <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.14" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\ComicMaintainer.Core\ComicMaintainer.Core.csproj" />
   </ItemGroup>
 
 </Project>

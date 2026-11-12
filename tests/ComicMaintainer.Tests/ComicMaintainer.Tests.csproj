@@ -19,10 +19,23 @@
     <PackageReference Include="Moq" Version="4.21.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1" />
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!--
+    The Android app needs a workload to build, but its API, session and view-model code is free of MAUI types. It is
+    compiled here as well, so that it runs against the real API. Only Services/Platform and the pages stay out.
+  -->
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <Compile Include="..\..\src\ComicMaintainer.MauiApp\Models\*.cs" LinkBase="AndroidApp\Linked\Models" />
+    <Compile Include="..\..\src\ComicMaintainer.MauiApp\Services\*.cs" LinkBase="AndroidApp\Linked\Services" />
+    <Compile Include="..\..\src\ComicMaintainer.MauiApp\ViewModels\*.cs" LinkBase="AndroidApp\Linked\ViewModels" />
+    <Compile Include="..\..\src\ComicMaintainer.MauiApp\Extensions\*.cs" LinkBase="AndroidApp\Linked\Extensions" />
   </ItemGroup>
 
   <ItemGroup>

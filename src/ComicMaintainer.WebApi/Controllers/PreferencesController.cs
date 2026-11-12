@@ -21,7 +21,6 @@ public class PreferencesController : ControllerBase
 
     private static readonly string[] ValidThemes = { "light", "dark" };
     private static readonly string[] ValidReadingModes = { "manga", "webcomic" };
-    private static readonly string[] ValidLibraryViewModes = { "files", "series" };
     private static readonly string[] ValidSortModes = { "name", "date", "size" };
     private static readonly string[] ValidSortDirections = { "asc", "desc" };
 
@@ -98,11 +97,6 @@ public class PreferencesController : ControllerBase
             return BadRequest(new { error = $"ReadingMode must be one of: {string.Join(", ", ValidReadingModes)}." });
         }
 
-        if (!TryNormalize(preferences.LibraryViewMode, ValidLibraryViewModes, out var libraryViewMode))
-        {
-            return BadRequest(new { error = $"LibraryViewMode must be one of: {string.Join(", ", ValidLibraryViewModes)}." });
-        }
-
         if (!TryNormalize(preferences.FilterMode, ValidFilterModes, out var filterMode))
         {
             return BadRequest(new { error = $"FilterMode must be one of: {string.Join(", ", ValidFilterModes)}." });
@@ -129,7 +123,6 @@ public class PreferencesController : ControllerBase
             Theme = theme,
             PerPage = preferences.PerPage,
             ReadingMode = readingMode,
-            LibraryViewMode = libraryViewMode,
             FilterMode = filterMode,
             SortMode = sortMode,
             SortDirection = sortDirection
@@ -148,12 +141,6 @@ public class PreferencesController : ControllerBase
     {
         var settings = _appSettings.CurrentValue;
 
-        var defaultView = settings.DefaultLibraryView;
-        if (string.IsNullOrWhiteSpace(defaultView) || !ValidLibraryViewModes.Contains(defaultView))
-        {
-            defaultView = "files";
-        }
-
         return new
         {
             // Theme is deliberately returned as null when the user has never
@@ -165,7 +152,6 @@ public class PreferencesController : ControllerBase
             issueNumberPadding = settings.IssueNumberPadding,
             watcherEnabled = true,
             readingMode = stored.ReadingMode ?? DefaultReadingMode,
-            libraryViewMode = stored.LibraryViewMode ?? defaultView,
             filterMode = stored.FilterMode ?? DefaultFilterMode,
             sortMode = stored.SortMode ?? DefaultSortMode,
             sortDirection = stored.SortDirection ?? DefaultSortDirection
@@ -202,7 +188,6 @@ public class PreferencesController : ControllerBase
         public string? Theme { get; set; }
         public int? PerPage { get; set; }
         public string? ReadingMode { get; set; } // "manga" or "webcomic"
-        public string? LibraryViewMode { get; set; } // "files" or "series"
         public string? FilterMode { get; set; }
         public string? SortMode { get; set; }
         public string? SortDirection { get; set; } // "asc" or "desc"

@@ -386,7 +386,7 @@ echo "JWT_SECRET=$(cat jwt_secret.txt)" >> .env
 3. **Set Admin Credentials:**
 ```bash
 echo "ADMIN_USERNAME=youradmin" >> .env
-echo "ADMIN_PASSWORD=YourSecurePassword123!" >> .env
+echo "ADMIN_PASSWORD=<a strong password of your own>" >> .env
 echo "ADMIN_EMAIL=admin@your-domain.com" >> .env
 ```
 

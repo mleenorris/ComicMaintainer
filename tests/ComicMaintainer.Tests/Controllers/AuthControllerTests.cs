@@ -1,9 +1,15 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Services.Auth;
+using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Controllers;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -16,7 +22,6 @@ public class AuthControllerTests
     private readonly Mock<ILogger<AuthController>> _mockLogger;
     private readonly Mock<IOptions<AutheliaSettings>> _mockAutheliaSettings;
     private readonly Mock<IAuthorizationService> _mockAuthorizationService;
-    private readonly Mock<IOptionsMonitor<AppSettings>> _mockAppSettings;
     private readonly AuthController _controller;
 
     public AuthControllerTests()
@@ -35,17 +40,12 @@ public class AuthControllerTests
             .Setup(x => x.AuthorizeAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<object?>(), It.IsAny<string>()))
             .ReturnsAsync(AuthorizationResult.Success());
 
-        // Registration gating reads AllowRegistration; enable it by default so
-        // the existing Register tests keep exercising the happy path.
-        _mockAppSettings = new Mock<IOptionsMonitor<AppSettings>>();
-        _mockAppSettings.Setup(x => x.CurrentValue).Returns(new AppSettings { AllowRegistration = true });
-
         _controller = new AuthController(
-            _mockAuthService.Object, 
+            _mockAuthService.Object,
             _mockLogger.Object,
             _mockAutheliaSettings.Object,
             _mockAuthorizationService.Object,
-            _mockAppSettings.Object);
+            ClientAddressResolver.Direct);
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public class AuthControllerTests
         var request = new LoginRequest("testuser", "password123");
         var expectedToken = "test-jwt-token";
         _mockAuthService
-            .Setup(s => s.LoginAsync("testuser", "password123"))
+            .Setup(s => s.LoginAsync("testuser", "password123", It.IsAny<string?>()))
             .ReturnsAsync((true, expectedToken, null));
 
         // Act
@@ -77,7 +77,7 @@ public class AuthControllerTests
         // Arrange
         var request = new LoginRequest("testuser", "wrongpassword");
         _mockAuthService
-            .Setup(s => s.LoginAsync("testuser", "wrongpassword"))
+            .Setup(s => s.LoginAsync("testuser", "wrongpassword", It.IsAny<string?>()))
             .ReturnsAsync((false, string.Empty, "Invalid username or password"));
 
         // Act
@@ -99,7 +99,7 @@ public class AuthControllerTests
         // Arrange
         var request = new LoginRequest("nonexistent", "password123");
         _mockAuthService
-            .Setup(s => s.LoginAsync("nonexistent", "password123"))
+            .Setup(s => s.LoginAsync("nonexistent", "password123", It.IsAny<string?>()))
             .ReturnsAsync((false, string.Empty, "Invalid username or password"));
 
         // Act
@@ -195,7 +195,7 @@ public class AuthControllerTests
         SetupAuthenticatedUser("user-id-123");
         var request = new ChangePasswordRequest("OldPassword123!", "NewPassword456!");
         _mockAuthService
-            .Setup(s => s.ChangePasswordAsync("user-id-123", "OldPassword123!", "NewPassword456!"))
+            .Setup(s => s.ChangePasswordAsync("user-id-123", "OldPassword123!", "NewPassword456!", It.IsAny<string?>()))
             .ReturnsAsync((true, null));
 
         // Act
@@ -217,7 +217,7 @@ public class AuthControllerTests
         SetupAuthenticatedUser("user-id-123");
         var request = new ChangePasswordRequest("WrongPassword!", "NewPassword456!");
         _mockAuthService
-            .Setup(s => s.ChangePasswordAsync("user-id-123", "WrongPassword!", "NewPassword456!"))
+            .Setup(s => s.ChangePasswordAsync("user-id-123", "WrongPassword!", "NewPassword456!", It.IsAny<string?>()))
             .ReturnsAsync((false, "Current password is incorrect"));
 
         // Act
@@ -249,11 +249,14 @@ public class AuthControllerTests
         SetupAuthenticatedUser("user-id-123");
         var expectedApiKey = "api-key-12345";
         _mockAuthService
+            .Setup(s => s.ConfirmPasswordAsync("user-id-123", "Corr3ctPassword", It.IsAny<string?>()))
+            .ReturnsAsync((true, null));
+        _mockAuthService
             .Setup(s => s.GenerateApiKeyAsync("user-id-123"))
             .ReturnsAsync((true, expectedApiKey, null));
 
         // Act
-        var result = await _controller.GenerateApiKey();
+        var result = await _controller.GenerateApiKey(new CreateApiKeyRequest("Corr3ctPassword"));
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
@@ -283,11 +286,14 @@ public class AuthControllerTests
         // Arrange
         SetupAuthenticatedUser("user-id-123");
         _mockAuthService
+            .Setup(s => s.ConfirmPasswordAsync("user-id-123", "Corr3ctPassword", It.IsAny<string?>()))
+            .ReturnsAsync((true, null));
+        _mockAuthService
             .Setup(s => s.GenerateApiKeyAsync("user-id-123"))
             .ReturnsAsync((false, string.Empty, "Failed to generate API key"));
 
         // Act
-        var result = await _controller.GenerateApiKey();
+        var result = await _controller.GenerateApiKey(new CreateApiKeyRequest("Corr3ctPassword"));
 
         // Assert
         var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
@@ -295,76 +301,148 @@ public class AuthControllerTests
     }
 
     [Fact]
-    public async Task SetupAdmin_WhenSetupIsRequired_CreatesInitialAdmin()
+    public async Task GenerateApiKey_WithoutTheCurrentPassword_IsForbiddenAndCreatesNoKey()
+    {
+        SetupAuthenticatedUser("user-id-123");
+        _mockAuthService
+            .Setup(s => s.ConfirmPasswordAsync("user-id-123", null, It.IsAny<string?>()))
+            .ReturnsAsync((false, AuthService.WrongCurrentPasswordError));
+
+        var result = await _controller.GenerateApiKey();
+
+        var forbidden = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(403, forbidden.StatusCode);
+        _mockAuthService.Verify(s => s.GenerateApiKeyAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    // Accounts signed in through Authelia have a random local password nobody knows.
+    [Fact]
+    public async Task GenerateApiKey_ForAnAutheliaSession_NeedsNoPassword()
+    {
+        SetupUserWithAuthMethod("user-id-123", AutheliaAuthenticationHandler.AuthMethod);
+        _mockAuthService
+            .Setup(s => s.GenerateApiKeyAsync("user-id-123"))
+            .ReturnsAsync((true, "api-key-12345", null));
+
+        var result = await _controller.GenerateApiKey();
+
+        Assert.IsType<OkObjectResult>(result);
+        _mockAuthService.Verify(s => s.ConfirmPasswordAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GenerateApiKey_WithAnApiKey_IsForbiddenWithoutCheckingAPassword()
+    {
+        SetupUserWithAuthMethod("user-id-123", ApiKeys.AuthMethod);
+
+        var result = await _controller.GenerateApiKey(new CreateApiKeyRequest("Corr3ctPassword"));
+
+        Assert.Equal(403, Assert.IsType<ObjectResult>(result).StatusCode);
+        _mockAuthService.Verify(s => s.ConfirmPasswordAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ChangePassword_WithAnApiKey_IsForbiddenWithoutCheckingThePassword()
+    {
+        SetupUserWithAuthMethod("user-id-123", ApiKeys.AuthMethod);
+
+        var result = await _controller.ChangePassword(new ChangePasswordRequest("OldPassword123!", "NewPassword456!"));
+
+        Assert.Equal(403, Assert.IsType<ObjectResult>(result).StatusCode);
+        _mockAuthService.Verify(s => s.ChangePasswordAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    // These check a password, so they must not offer unlimited guesses to whoever holds a session token.
+    [Theory]
+    [InlineData(nameof(AuthController.ChangePassword))]
+    [InlineData(nameof(AuthController.GenerateApiKey))]
+    public void PasswordCheckingEndpoints_AreRateLimitedPerClient(string action)
+    {
+        var limit = typeof(AuthController).GetMethod(action)!.GetCustomAttributes(typeof(EnableRateLimitingAttribute), false)
+            .Cast<EnableRateLimitingAttribute>()
+            .Single();
+
+        Assert.Equal(AuthenticationRateLimit.PolicyName, limit.PolicyName);
+    }
+
+    private void SetupUserWithAuthMethod(string userId, string authMethod)
+    {
+        var identity = new System.Security.Claims.ClaimsIdentity(
+        [
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, userId),
+            new System.Security.Claims.Claim("auth_method", authMethod),
+        ], "Test");
+        _controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(identity) }
+        };
+    }
+
+    [Fact]
+    public async Task SetupAdmin_WhenSetupIsAvailable_PassesTheSetupCodeAndCreatesTheAdmin()
     {
         SetupEmptyUserContext();
-        _mockAuthorizationService
-            .Setup(s => s.AuthorizeAsync(
-                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
-                It.IsAny<object?>(),
-                It.IsAny<string>()))
-            .ReturnsAsync(AuthorizationResult.Failed());
         _mockAuthService
             .Setup(s => s.IsSetupRequiredAsync())
             .ReturnsAsync(true);
         _mockAuthService
-            .Setup(s => s.SetupAdminAsync("admin", "Password123!", null))
-            .ReturnsAsync((true, null));
+            .Setup(s => s.SetupAdminAsync("admin", "Password123!", null, "ABCDE-FGHJK", It.IsAny<string?>()))
+            .ReturnsAsync((SetupOutcome.Created, null));
 
-        var result = await _controller.SetupAdmin(new SetupRequest("admin", "Password123!", null));
+        var result = await _controller.CompleteFirstRunSetup(new SetupRequest("admin", "Password123!", null, "ABCDE-FGHJK"));
 
         Assert.IsType<OkObjectResult>(result);
-        _mockAuthService.Verify(s => s.SetupAdminAsync("admin", "Password123!", null), Times.Once);
-        _mockAuthorizationService.Verify(
-            s => s.AuthorizeAsync(
-                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
-                It.IsAny<object?>(),
-                It.IsAny<string>()),
+        _mockAuthService.Verify(s => s.SetupAdminAsync("admin", "Password123!", null, "ABCDE-FGHJK", It.IsAny<string?>()), Times.Once);
+    }
+
+    // Setup used to stay open to administrators; now it only ever creates the first account of a fresh instance.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SetupAdmin_WhenSetupIsNotAvailable_Returns403ForEveryone(bool signedInAsAdmin)
+    {
+        if (signedInAsAdmin)
+        {
+            SetupAuthenticatedUser("admin-id", roles: new[] { "Admin" });
+        }
+        else
+        {
+            SetupEmptyUserContext();
+        }
+
+        _mockAuthService
+            .Setup(s => s.IsSetupRequiredAsync())
+            .ReturnsAsync(false);
+
+        var result = await _controller.CompleteFirstRunSetup(new SetupRequest("admin", "Password123!", null, "ABCDE-FGHJK"));
+
+        var forbidden = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(403, forbidden.StatusCode);
+        Assert.Equal(AuthService.SetupNotAvailableError, forbidden.Value!.GetType().GetProperty("error")!.GetValue(forbidden.Value));
+        _mockAuthService.Verify(
+            s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()),
             Times.Never);
     }
 
-    [Fact]
-    public async Task SetupAdmin_WhenSetupIsCompleteAndUserIsUnauthenticated_ReturnsChallenge()
+    [Theory]
+    [InlineData(SetupOutcome.InvalidSetupToken, 403)]
+    [InlineData(SetupOutcome.NotAvailable, 403)]
+    [InlineData(SetupOutcome.Rejected, 400)]
+    public async Task SetupAdmin_ReportsAFailedSetup(SetupOutcome outcome, int expectedStatus)
     {
         SetupEmptyUserContext();
         _mockAuthService
             .Setup(s => s.IsSetupRequiredAsync())
-            .ReturnsAsync(false);
-        _mockAuthorizationService
-            .Setup(s => s.AuthorizeAsync(
-                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
-                It.IsAny<object?>(),
-                AuthorizationPolicies.CanAdminister))
-            .ReturnsAsync(AuthorizationResult.Failed());
-
-        var result = await _controller.SetupAdmin(new SetupRequest("admin", "Password123!", null));
-
-        Assert.IsType<ChallengeResult>(result);
-        _mockAuthService.Verify(
-            s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()),
-            Times.Never);
-    }
-
-    [Fact]
-    public async Task SetupAdmin_WhenSetupIsCompleteAndUserIsNotAdmin_ReturnsForbid()
-    {
-        SetupAuthenticatedUser("user-id-123", roles: new[] { "User" });
+            .ReturnsAsync(true);
         _mockAuthService
-            .Setup(s => s.IsSetupRequiredAsync())
-            .ReturnsAsync(false);
-        _mockAuthorizationService
-            .Setup(s => s.AuthorizeAsync(
-                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
-                It.IsAny<object?>(),
-                AuthorizationPolicies.CanAdminister))
-            .ReturnsAsync(AuthorizationResult.Failed());
+            .Setup(s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()))
+            .ReturnsAsync((outcome, "why"));
 
-        var result = await _controller.SetupAdmin(new SetupRequest("admin", "Password123!", null));
+        var result = await _controller.CompleteFirstRunSetup(new SetupRequest("admin", "Password123!", null, "wrong"));
 
-        Assert.IsType<ForbidResult>(result);
-        _mockAuthService.Verify(
-            s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()),
-            Times.Never);
+        var failure = Assert.IsAssignableFrom<ObjectResult>(result);
+        Assert.Equal(expectedStatus, failure.StatusCode);
+        Assert.Equal("why", failure.Value!.GetType().GetProperty("error")!.GetValue(failure.Value));
     }
 
     [Fact]
@@ -400,7 +478,7 @@ public class AuthControllerTests
             _mockLogger.Object,
             _mockAutheliaSettings.Object,
             _mockAuthorizationService.Object,
-            _mockAppSettings.Object);
+            ClientAddressResolver.Direct);
         SetupAuthenticatedUserOnController(controller, "user-id-123", "testuser");
 
         // Act
@@ -522,7 +600,7 @@ public class AuthControllerTests
             _mockLogger.Object,
             _mockAutheliaSettings.Object,
             _mockAuthorizationService.Object,
-            _mockAppSettings.Object);
+            ClientAddressResolver.Direct);
         
         SetupAuthenticatedUserOnController(controller, "user-id-789", autheliaUsername);
 

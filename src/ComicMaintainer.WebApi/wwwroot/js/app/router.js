@@ -1,4 +1,4 @@
-        // ComicMaintainer SPA — hash routing (#/home, #/library, #/series/{id}, #/settings, #/jobs) and the overview page.
+        // ComicMaintainer SPA — hash routing (#/home, #/library, #/series/{id}, #/settings, #/jobs, #/users) and the overview page.
         //
         // Classic (non-module) script: its top-level declarations are globals
         // shared with the other app scripts and with inline onclick handlers.
@@ -16,20 +16,21 @@
         //   #/series/{id}    → a single series' page (synopsis + files)
         //   #/settings      → the settings page
         //   #/jobs          → the scheduled jobs page
-        let currentView = 'home';           // 'home' | 'library' | 'series' | 'settings' | 'jobs'
+        //   #/users         → the users page (account administration)
+        let currentView = 'home';           // 'home' | 'library' | 'series' | 'settings' | 'jobs' | 'users'
         let settingsReturnHash = '#/home';  // where leaving Settings goes back to
         let lastRoutedPage = null;          // top-level page last shown (see enterPage)
 
-        // Overview, Library, Settings and Scheduled Jobs are separate pages
+        // Overview, Library, Settings, Scheduled Jobs and Users are separate pages
         // that share one document. Give each its own tab title and, when the
         // user moves to a different page, start it at the top and move focus
         // to the content so assistive tech announces the change like a real
         // navigation. Moving between the library and a series stays on the
         // "library" page so its scroll position survives the round trip.
-        const PAGE_TITLES = { home: 'Overview', library: 'Library', settings: 'Settings', jobs: 'Scheduled Jobs' };
+        const PAGE_TITLES = { home: 'Overview', library: 'Library', settings: 'Settings', jobs: 'Scheduled Jobs', users: 'Users' };
         // Pages that scroll inside their own section (on desktop) rather than
         // the document.
-        const PAGE_SCROLLERS = { settings: 'settingsView', jobs: 'jobsView' };
+        const PAGE_SCROLLERS = { settings: 'settingsView', jobs: 'jobsView', users: 'usersView' };
         function enterPage(view) {
             const page = view === 'series' ? 'library' : view;
             document.title = (PAGE_TITLES[page] || 'Overview') + ' · Comic Maintainer';
@@ -56,6 +57,7 @@
             if (raw === '/library') return { view: 'library' };
             if (raw === '/settings') return { view: 'settings' };
             if (raw === '/jobs') return { view: 'jobs' };
+            if (raw === '/users') return { view: 'users' };
             return { view: 'home' };
         }
 
@@ -89,9 +91,13 @@
                 // Scheduled Jobs polls for status only while it is on screen.
                 stopScheduledJobsRefresh();
             }
+            if (route.view !== 'users') {
+                // A Users dialog acts on an account listed on that page.
+                closeUserDialogs();
+            }
             applyViewVisibility(route.view);
             enterPage(route.view);
-            if (route.view === 'settings' || route.view === 'jobs') {
+            if (route.view === 'settings' || route.view === 'jobs' || route.view === 'users') {
                 if (currentSeriesDetailId) {
                     currentSeriesDetailId = null;
                     currentSeriesDetailTitleKeys = null;
@@ -99,8 +105,10 @@
                 }
                 if (route.view === 'settings') {
                     loadSettings();
-                } else {
+                } else if (route.view === 'jobs') {
                     loadScheduledJobs();
+                } else {
+                    loadUsers();
                 }
             } else if (route.view === 'home') {
                 // The overview/home page is not a series detail. Clear any
@@ -135,15 +143,18 @@
             const isHome = view === 'home';
             const isSettings = view === 'settings';
             const isJobs = view === 'jobs';
-            const hideLibrary = isHome || isSettings || isJobs;
+            const isUsers = view === 'users';
+            const hideLibrary = isHome || isSettings || isJobs || isUsers;
             const overview = document.getElementById('overviewView');
             const health = document.getElementById('libraryHealthDashboard');
             const files = document.getElementById('libraryFilesView');
             const settings = document.getElementById('settingsView');
             const jobs = document.getElementById('jobsView');
+            const users = document.getElementById('usersView');
             if (overview) overview.hidden = !isHome;
             if (settings) settings.hidden = !isSettings;
             if (jobs) jobs.hidden = !isJobs;
+            if (users) users.hidden = !isUsers;
             if (health) health.style.display = hideLibrary ? 'none' : '';
             if (files) files.style.display = hideLibrary ? 'none' : '';
             document.body.classList.toggle('view-settings', isSettings);
@@ -171,11 +182,12 @@
                 sidebarOverviewBtn: currentView === 'home',
                 sidebarLibraryBtn: currentView === 'library' || currentView === 'series',
                 sidebarSettingsBtn: currentView === 'settings',
-                sidebarJobsBtn: currentView === 'jobs'
+                sidebarJobsBtn: currentView === 'jobs',
+                sidebarUsersBtn: currentView === 'users'
             };
             const topbarTitle = document.getElementById('topbarTitle');
             if (topbarTitle) {
-                topbarTitle.textContent = ({ home: 'Overview', library: 'Library', series: 'Library', settings: 'Settings', jobs: 'Scheduled Jobs' })[currentView] || '';
+                topbarTitle.textContent = ({ home: 'Overview', library: 'Library', series: 'Library', settings: 'Settings', jobs: 'Scheduled Jobs', users: 'Users' })[currentView] || '';
             }
             Object.entries(activeByView).forEach(([id, active]) => {
                 const el = document.getElementById(id);
@@ -196,7 +208,6 @@
             } else if (!seriesLoading) {
                 loadActiveLibraryView();
             }
-            updatePagination();
             updateLibraryViewLayout();
         }
 
@@ -239,13 +250,11 @@
             }
             let data;
             try {
-                const resp = await fetch(apiUrl('/api/overview'), {
-                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
-                    credentials: 'same-origin'
-                });
+                const resp = await apiFetch('/api/overview', { json: false });
                 if (!resp.ok) throw new Error('overview ' + resp.status);
                 data = await resp.json();
             } catch (err) {
+                if (err.authHandled) return;
                 console.error('Failed to load overview', err);
                 renderHtml(container, html`<div class="empty-state"><p>Couldn't load your overview. <button type="button" class="btn btn-small" onclick="renderOverview()">Retry</button></p></div>`);
                 return;

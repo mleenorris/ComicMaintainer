@@ -1,9 +1,13 @@
 name: PR Test Check
 
+# docs/TESTING_POLICY.md: code changes must come with tests. This check fails a pull request that
+# changes the server's C# code or the web UI's JavaScript without changing anything under tests/.
+# When a change genuinely needs no test (a pure refactor that existing tests cover, a log message),
+# say why in the description and add the "no-tests-needed" label, which passes the check.
 on:
   pull_request:
-    branches: [ main, master, develop ]
-    types: [opened, synchronize, reopened]
+    branches: [ dotnet ]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   contents: read
@@ -11,107 +15,82 @@ permissions:
 
 jobs:
   check-tests:
+    name: Tests included
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      
-      - name: Get changed files
-        id: changed-files
-        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
-        with:
-          files: |
-            src/**/*.cs
-          files_ignore: |
-            src/**/*.csproj
-            src/**/Program.cs
-      
-      - name: Get changed test files
-        id: changed-test-files
-        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
-        with:
-          files: |
-            tests/**/*.cs
-      
+
+      # File names come from the pull request, so they are only ever read from the environment and
+      # from files, never expanded into the script.
       - name: Check for tests
         id: check
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SKIP_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'no-tests-needed') }}
         run: |
-          SOURCE_FILES="${{ steps.changed-files.outputs.all_changed_files }}"
-          TEST_FILES="${{ steps.changed-test-files.outputs.all_changed_files }}"
-          DOC_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep -E '\.md$|\.txt$|^docs/|^LICENSE|^\.github/PULL_REQUEST_TEMPLATE\.md|^TESTING_POLICY\.md' || true)
-          CONFIG_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep -E '\.(yml|yaml|json|config|xml)$' | grep -v '\.csproj$' || true)
-          
-          echo "Source files changed: $SOURCE_FILES"
-          echo "Test files changed: $TEST_FILES"
-          echo "Doc files changed: $DOC_FILES"
-          echo "Config files changed: $CONFIG_FILES"
-          
-          # Check if only documentation or config files were changed
-          if [ -n "$DOC_FILES" ] || [ -n "$CONFIG_FILES" ]; then
-            ALL_CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }})
-            NON_DOC_NON_CONFIG=$(echo "$ALL_CHANGED" | grep -v -E '\.md$|\.txt$|^docs/|^LICENSE|\.(yml|yaml|json|config)$|^\.github/PULL_REQUEST_TEMPLATE\.md|^TESTING_POLICY\.md' || true)
-            
-            if [ -z "$NON_DOC_NON_CONFIG" ]; then
-              echo "status=docs_only" >> $GITHUB_OUTPUT
-              exit 0
-            fi
+          git diff --name-only "$BASE_SHA...$HEAD_SHA" > changed-files.txt
+          # The server and the web UI. EF Core migrations and their designer files are generated.
+          grep -E '^src/ComicMaintainer\.(Core|WebApi)/.*\.cs$|^src/ComicMaintainer\.WebApi/wwwroot/.*\.js$' changed-files.txt \
+            | grep -vE '/Migrations/' > source-files.txt || true
+          grep -E '^tests/' changed-files.txt > test-files.txt || true
+
+          echo "Source files changed: $(wc -l < source-files.txt)"
+          echo "Test files changed: $(wc -l < test-files.txt)"
+
+          if [ ! -s source-files.txt ]; then
+            echo "status=no_source_changes" >> "$GITHUB_OUTPUT"
+          elif [ -s test-files.txt ]; then
+            echo "status=tests_present" >> "$GITHUB_OUTPUT"
+          elif [ "$SKIP_LABEL" = "true" ]; then
+            echo "status=skipped_by_label" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=missing_tests" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Source files changed without test changes"
+              echo
+              sed 's/^/- /' source-files.txt
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
-          
-          # Check if source files were changed
-          if [ -z "$SOURCE_FILES" ]; then
-            echo "status=no_source_changes" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          # Check if test files were also changed
-          if [ -z "$TEST_FILES" ]; then
-            echo "status=missing_tests" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          echo "status=tests_present" >> $GITHUB_OUTPUT
-      
+
+      # A pull request from a fork gets a read-only token, so the comment is best effort; the
+      # failing step below is the check.
       - name: Comment on PR
         if: steps.check.outputs.status == 'missing_tests'
+        continue-on-error: true
         uses: actions/github-script@v9
         with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const message = `## ⚠️ Test Coverage Check
-            
-            This PR modifies source code but doesn't appear to include test changes.
-            
-            **Testing Requirements:**
-            - ✅ All bug fixes MUST include tests that reproduce the issue
-            - ✅ All new features MUST include unit and/or integration tests
-            - ✅ Tests should cover both success and failure scenarios
-            - ✅ Aim for at least 80% code coverage
-            
-            **If this is a special case:**
-            - Documentation-only changes don't require tests
-            - If tests aren't applicable, explain why in the PR description
-            - Reviewers may approve PRs without tests in exceptional cases
-            
-            📚 See [TESTING_POLICY.md](https://github.com/${{ github.repository }}/blob/${{ github.head_ref }}/docs/TESTING_POLICY.md) for detailed requirements.
-            
-            ---
-            *This is an automated reminder. If you've added tests but they weren't detected, please verify that test files are in the \`tests/\` directory.*`;
-            
-            // Check if we already commented
+            const policy = `https://github.com/${context.repo.owner}/${context.repo.repo}/blob/dotnet/docs/TESTING_POLICY.md`;
+            const message = [
+              '## ⚠️ Test Coverage Check',
+              '',
+              'This PR changes source code but no file under `tests/`.',
+              '',
+              '**Testing Requirements:**',
+              '- ✅ All bug fixes MUST include tests that reproduce the issue',
+              '- ✅ All new features MUST include unit and/or integration tests',
+              '- ✅ Tests should cover both success and failure scenarios',
+              '- ✅ Aim for at least 80% code coverage',
+              '',
+              'If the change genuinely needs no test, explain why in the PR description and add the `no-tests-needed` label.',
+              '',
+              `📚 See [TESTING_POLICY.md](${policy}) for detailed requirements.`
+            ].join('\n');
+
             const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
             });
-            
-            const botComment = comments.data.find(comment => 
-              comment.user.type === 'Bot' && 
-              comment.body.includes('Test Coverage Check')
-            );
-            
+            const botComment = comments.data.find(comment =>
+              comment.user.type === 'Bot' && comment.body.includes('Test Coverage Check'));
+
             if (botComment) {
-              // Update existing comment
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -119,7 +98,6 @@ jobs:
                 body: message
               });
             } else {
-              // Create new comment
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -127,13 +105,16 @@ jobs:
                 body: message
               });
             }
-      
-      - name: Success message
-        if: steps.check.outputs.status == 'tests_present'
+
+      - name: Fail when tests are missing
+        if: steps.check.outputs.status == 'missing_tests'
         run: |
-          echo "✅ Test files detected in this PR. Great job!"
-      
-      - name: Documentation only
-        if: steps.check.outputs.status == 'docs_only'
+          echo "::error::This pull request changes source code without changing tests. Add tests, or explain why none are needed and add the no-tests-needed label."
+          exit 1
+
+      - name: Result
+        if: steps.check.outputs.status != 'missing_tests'
+        env:
+          STATUS: ${{ steps.check.outputs.status }}
         run: |
-          echo "ℹ️ This PR contains only documentation/configuration changes. Tests are not required."
+          echo "Test check: $STATUS"

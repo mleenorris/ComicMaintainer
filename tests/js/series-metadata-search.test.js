@@ -61,9 +61,16 @@ const RESULTS = [
     {
         canonical_title: 'Saga (Image Comics)',
         source: 'ComicVine',
+        source_id: '4050-112',
         match_score: 96.5,
         aliases: ['サーガ', 'Saga Deluxe'],
         image_url: 'https://comicvine.example/saga.jpg',
+        synopsis: 'A family on the run.',
+        site_url: 'https://comicvine.example/saga/4050-112/',
+        genres: ['Sci-Fi'],
+        publication_status: 'ongoing',
+        total_chapters: 66,
+        origin: 'en',
         localized_titles: [
             { title: 'サーガ', language: 'ja' },
             { title: 'Saga (Image Comics)', language: 'en' },
@@ -166,7 +173,9 @@ test('failed and empty provider searches say so', async () => {
     const page = await bootSeries();
     await openManageNames(page);
     const outcomes = [
-        [respond(500, { error: 'Provider error' }), 'Search failed.'],
+        [respond(503, { error: 'External metadata providers unavailable: MangaDex did not answer within 15s' }),
+            'Search failed: External metadata providers unavailable: MangaDex did not answer within 15s'],
+        [respond(502, 'Bad Gateway'), 'Search failed.'],
         [offline, 'Search failed.'],
         [{ results: [] }, NO_MATCHES],
         [{}, NO_MATCHES]
@@ -539,8 +548,15 @@ test('Use This Match asks first, then replaces the cached provider metadata', as
         canonicalTitle: 'Saga (Image Comics)',
         aliases: ['サーガ', 'Saga Deluxe'],
         source: 'ComicVine',
+        sourceId: '4050-112',
         imageUrl: 'https://comicvine.example/saga.jpg',
         thumbnailUrl: null,
+        synopsis: 'A family on the run.',
+        siteUrl: 'https://comicvine.example/saga/4050-112/',
+        genres: ['Sci-Fi'],
+        publicationStatus: 'ongoing',
+        totalChapters: 66,
+        origin: 'en',
         localizedTitles: [
             { title: 'サーガ', language: 'ja' },
             { title: 'Saga (Image Comics)', language: 'en' },
@@ -580,6 +596,7 @@ test('Use This Match sends what a sparse candidate has and ignores one without a
         canonicalTitle: 'SAGA',
         aliases: [],
         source: null,
+        sourceId: null,
         imageUrl: null,
         thumbnailUrl: null,
         localizedTitles: []

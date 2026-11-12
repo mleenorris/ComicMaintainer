@@ -1,221 +1,202 @@
 using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.WebApi.Authorization;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
+/// <summary>
+/// Serves the raw application, watcher, metadata, auth and debug logs. They name every user and their roles,
+/// failed sign-ins and client addresses, host paths and exception details, so, like the diagnostics, they are
+/// administrator-only.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = AuthorizationPolicies.CanAdminister)]
 public class LogsController : ControllerBase
 {
     private readonly IOptionsMonitor<AppSettings> _settings;
-    private readonly ILogger<LogsController> _logger;
 
-    public LogsController(
-        IOptionsMonitor<AppSettings> settings,
-        ILogger<LogsController> logger)
+    public LogsController(IOptionsMonitor<AppSettings> settings)
     {
         _settings = settings;
-        _logger = logger;
     }
 
     [HttpGet("files")]
+    [FailureMessage("Error listing log files")]
     public ActionResult<object> GetLogFiles([FromQuery] string type = "debug")
     {
-        try
+        var configDir = _settings.CurrentValue.ConfigDirectory ?? "/Config";
+            
+        // Determine log file pattern based on type
+        string logFilePattern = type.ToLower() switch
         {
-            var configDir = _settings.CurrentValue.ConfigDirectory ?? "/Config";
+            "app" => "app*.log",
+            "watcher" => "watcher*.log",
+            "metadata" => "metadata*.log",
+            "auth" => "auth*.log",
+            "debug" => "debug*.log",
+            _ => "debug*.log"
+        };
             
-            // Determine log file pattern based on type
-            string logFilePattern = type.ToLower() switch
+        // Find all log files matching the pattern
+        var logFiles = Directory.GetFiles(configDir, logFilePattern)
+            .Select(f => new FileInfo(f))
+            .OrderByDescending(f => f.LastWriteTime)
+            .Select(f => new
             {
-                "app" => "app*.log",
-                "watcher" => "watcher*.log",
-                "metadata" => "metadata*.log",
-                "auth" => "auth*.log",
-                "debug" => "debug*.log",
-                _ => "debug*.log"
-            };
-            
-            // Find all log files matching the pattern
-            var logFiles = Directory.GetFiles(configDir, logFilePattern)
-                .Select(f => new FileInfo(f))
-                .OrderByDescending(f => f.LastWriteTime)
-                .Select(f => new
-                {
-                    filename = f.Name,
-                    last_modified = f.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                    size_mb = Math.Round(f.Length / 1024.0 / 1024.0, 2)
-                })
-                .ToArray();
+                filename = f.Name,
+                last_modified = f.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                size_mb = Math.Round(f.Length / 1024.0 / 1024.0, 2)
+            })
+            .ToArray();
 
-            return Ok(new
-            {
-                files = logFiles,
-                count = logFiles.Length
-            });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        return Ok(new
         {
-            _logger.LogError(ex, "Error listing log files");
-            return StatusCode(500, new
-            {
-                error = $"Error listing log files: {ex.Message}",
-                files = Array.Empty<object>(),
-                count = 0
-            });
-        }
+            files = logFiles,
+            count = logFiles.Length
+        });
     }
 
     [HttpGet]
+    [FailureMessage("Error reading log file")]
     public ActionResult<object> GetLogs([FromQuery] int lines = 500, [FromQuery] string type = "debug", [FromQuery] string? filename = null)
     {
-        try
+        var configDir = _settings.CurrentValue.ConfigDirectory ?? "/Config";
+            
+        // Determine log file pattern based on type
+        string logFilePattern = type.ToLower() switch
         {
-            var configDir = _settings.CurrentValue.ConfigDirectory ?? "/Config";
+            "app" => "app*.log",
+            "watcher" => "watcher*.log",
+            "metadata" => "metadata*.log",
+            "auth" => "auth*.log",
+            "debug" => "debug*.log",
+            _ => "debug*.log"
+        };
             
-            // Determine log file pattern based on type
-            string logFilePattern = type.ToLower() switch
+        string logFilePath;
+            
+        if (!string.IsNullOrEmpty(filename))
+        {
+            // Limit requested files to the configured log type and resolve
+            // the path from the directory listing, never from request data.
+            var sanitizedFilename = Path.GetFileName(filename);
+            var filenameOnly = sanitizedFilename;
+            var matchesPattern = type.ToLower() switch
             {
-                "app" => "app*.log",
-                "watcher" => "watcher*.log",
-                "metadata" => "metadata*.log",
-                "auth" => "auth*.log",
-                "debug" => "debug*.log",
-                _ => "debug*.log"
+                "app" => filenameOnly.StartsWith("app") && filenameOnly.EndsWith(".log"),
+                "watcher" => filenameOnly.StartsWith("watcher") && filenameOnly.EndsWith(".log"),
+                "metadata" => filenameOnly.StartsWith("metadata") && filenameOnly.EndsWith(".log"),
+                "auth" => filenameOnly.StartsWith("auth") && filenameOnly.EndsWith(".log"),
+                "debug" => filenameOnly.StartsWith("debug") && filenameOnly.EndsWith(".log"),
+                _ => filenameOnly.StartsWith("debug") && filenameOnly.EndsWith(".log")
             };
-            
-            string logFilePath;
-            
-            if (!string.IsNullOrEmpty(filename))
-            {
-                // Limit requested files to the configured log type and resolve
-                // the path from the directory listing, never from request data.
-                var sanitizedFilename = Path.GetFileName(filename);
-                var filenameOnly = sanitizedFilename;
-                var matchesPattern = type.ToLower() switch
-                {
-                    "app" => filenameOnly.StartsWith("app") && filenameOnly.EndsWith(".log"),
-                    "watcher" => filenameOnly.StartsWith("watcher") && filenameOnly.EndsWith(".log"),
-                    "metadata" => filenameOnly.StartsWith("metadata") && filenameOnly.EndsWith(".log"),
-                    "auth" => filenameOnly.StartsWith("auth") && filenameOnly.EndsWith(".log"),
-                    "debug" => filenameOnly.StartsWith("debug") && filenameOnly.EndsWith(".log"),
-                    _ => filenameOnly.StartsWith("debug") && filenameOnly.EndsWith(".log")
-                };
                 
-                if (!matchesPattern)
-                {
-                    return Ok(new
-                    {
-                        content = $"File does not match expected log type: {sanitizedFilename}",
-                        total_lines = 0,
-                        shown_lines = 0,
-                        filename = default(string?)
-                    });
-                }
-
-                // Directory enumeration already restricts candidates to the
-                // configured log pattern; compare filenames the same way the
-                // filesystem does so each listed name selects its own file.
-                var filenameComparison = OperatingSystem.IsWindows()
-                    ? StringComparison.OrdinalIgnoreCase
-                    : StringComparison.Ordinal;
-
-                var matchingLogFile = Directory.GetFiles(configDir, logFilePattern)
-                    .FirstOrDefault(path => string.Equals(
-                        Path.GetFileName(path),
-                        sanitizedFilename,
-                        filenameComparison));
-
-                if (matchingLogFile is null)
-                {
-                    return Ok(new
-                    {
-                        content = $"Log file not found: {sanitizedFilename}",
-                        total_lines = 0,
-                        shown_lines = 0,
-                        filename = default(string?)
-                    });
-                }
-
-                logFilePath = matchingLogFile;
-            }
-            else
+            if (!matchesPattern)
             {
-                // Find the most recent log file (Serilog uses rolling date suffix)
-                var logFiles = Directory.GetFiles(configDir, logFilePattern)
-                    .OrderByDescending(f => System.IO.File.GetLastWriteTime(f))
-                    .ToArray();
-
-                if (logFiles.Length == 0)
+                return Ok(new
                 {
-                    return Ok(new
-                    {
-                        content = $"No log files found matching pattern: {logFilePattern}",
-                        total_lines = 0,
-                        shown_lines = 0,
-                        filename = default(string?)
-                    });
-                }
-
-                logFilePath = logFiles[0]; // Most recent log file
+                    content = $"File does not match expected log type: {sanitizedFilename}",
+                    total_lines = 0,
+                    shown_lines = 0,
+                    filename = default(string?)
+                });
             }
 
-            // Use streaming for memory efficiency with large log files
-            string[] linesToShow;
-            int totalLines;
+            // Directory enumeration already restricts candidates to the
+            // configured log pattern; compare filenames the same way the
+            // filesystem does so each listed name selects its own file.
+            var filenameComparison = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+
+            var matchingLogFile = Directory.GetFiles(configDir, logFilePattern)
+                .FirstOrDefault(path => string.Equals(
+                    Path.GetFileName(path),
+                    sanitizedFilename,
+                    filenameComparison));
+
+            if (matchingLogFile is null)
+            {
+                return Ok(new
+                {
+                    content = $"Log file not found: {sanitizedFilename}",
+                    total_lines = 0,
+                    shown_lines = 0,
+                    filename = default(string?)
+                });
+            }
+
+            logFilePath = matchingLogFile;
+        }
+        else
+        {
+            // Find the most recent log file (Serilog uses rolling date suffix)
+            var logFiles = Directory.GetFiles(configDir, logFilePattern)
+                .OrderByDescending(f => System.IO.File.GetLastWriteTime(f))
+                .ToArray();
+
+            if (logFiles.Length == 0)
+            {
+                return Ok(new
+                {
+                    content = $"No log files found matching pattern: {logFilePattern}",
+                    total_lines = 0,
+                    shown_lines = 0,
+                    filename = default(string?)
+                });
+            }
+
+            logFilePath = logFiles[0]; // Most recent log file
+        }
+
+        // Use streaming for memory efficiency with large log files
+        string[] linesToShow;
+        int totalLines;
             
-            // Set a reasonable maximum to prevent memory issues
-            const int MAX_LINES = 10000;
-            int effectiveLines = lines == 0 ? MAX_LINES : Math.Min(lines, MAX_LINES);
+        // Set a reasonable maximum to prevent memory issues
+        const int MAX_LINES = 10000;
+        int effectiveLines = lines == 0 ? MAX_LINES : Math.Min(lines, MAX_LINES);
             
-            // Use ReadLines for streaming and take last N lines
-            var allLinesEnumerable = System.IO.File.ReadLines(logFilePath);
-            totalLines = 0;
-            
-            // Count lines efficiently while building queue of last N lines
-            var queue = new Queue<string>(effectiveLines);
-            foreach (var line in allLinesEnumerable)
+        // Stream the file and keep the last N lines. The current log is still open for writing by Serilog, which
+        // Windows only lets another reader open when that reader shares write access too.
+        totalLines = 0;
+        var queue = new Queue<string>(effectiveLines);
+        using (var stream = new FileStream(logFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+        using (var reader = new StreamReader(stream))
+        {
+            while (reader.ReadLine() is { } line)
             {
                 totalLines++;
                 if (queue.Count >= effectiveLines)
                     queue.Dequeue();
                 queue.Enqueue(line);
             }
+        }
             
-            linesToShow = queue.ToArray();
+        linesToShow = queue.ToArray();
 
-            // Reverse the order so the newest log entries appear at the top
-            // of the viewer. Log entries can span multiple lines (e.g. exception
-            // stack traces), so group continuation lines with their owning entry
-            // by detecting the leading "[YYYY-MM-DD HH:MM:SS" timestamp prefix
-            // emitted by the Serilog file output template, then reverse entries
-            // while keeping the lines within each entry in their original order.
-            linesToShow = ReverseLogEntries(linesToShow);
+        // Reverse the order so the newest log entries appear at the top
+        // of the viewer. Log entries can span multiple lines (e.g. exception
+        // stack traces), so group continuation lines with their owning entry
+        // by detecting the leading "[YYYY-MM-DD HH:MM:SS" timestamp prefix
+        // emitted by the Serilog file output template, then reverse entries
+        // while keeping the lines within each entry in their original order.
+        linesToShow = ReverseLogEntries(linesToShow);
 
-            var content = string.Join(Environment.NewLine, linesToShow);
+        var content = string.Join(Environment.NewLine, linesToShow);
 
-            return Ok(new
-            {
-                content,
-                total_lines = totalLines,
-                shown_lines = linesToShow.Length,
-                filename = Path.GetFileName(logFilePath)
-            });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        return Ok(new
         {
-            _logger.LogError(ex, "Error reading logs");
-            return StatusCode(500, new
-            {
-                content = $"Error reading log file: {ex.Message}",
-                total_lines = 0,
-                shown_lines = 0
-            });
-        }
+            content,
+            total_lines = totalLines,
+            shown_lines = linesToShow.Length,
+            filename = Path.GetFileName(logFilePath)
+        });
     }
 
     // Matches the start of a Serilog file log entry, e.g.

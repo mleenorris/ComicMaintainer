@@ -224,7 +224,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     }
 
     [Fact]
-    public async Task AddFileAsync_StatusReadFails_KeepsStateAndMetadataFromSnapshot()
+    public async Task AddFileAsync_DatabaseFails_KeepsTheTrackedStateAndMetadata()
     {
         var path = WriteComic(_library, "Saga 003.cbz");
         var edited = new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Utc);
@@ -240,11 +240,14 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         }));
         var service = CreateService();
         await service.InitializeFromDatabaseAsync();
-        _factory.FailNth(1); // the status read fails; the write that follows succeeds
+        var before = service.ChangeVersion;
+        _factory.FailNth(1);
 
         await service.AddFileAsync(path);
 
-        Assert.True(_logger.Contains(LogLevel.Error, "Error reading file status from database"));
+        Assert.True(_logger.Contains(LogLevel.Error, "Error persisting file to database"));
+        // Nothing was committed, so nothing changed in memory either.
+        Assert.Equal(before, service.ChangeVersion);
         var file = Assert.Single(await service.GetAllFilesAsync());
         // Regression: only metadata was taken from the snapshot, so the file came back as
         // unprocessed (and was reprocessed) and its series jumped to the top of Series Updates.
@@ -266,39 +269,43 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     }
 
     [Fact]
-    public async Task AddFileAsync_StatusReadFails_KeepsTheSnapshotsDuplicateFlagInMemoryAndInTheDatabase()
+    public async Task AddFileAsync_ReAddOfTrackedRow_KeepsItsDuplicateFlagInMemoryAndInTheDatabase()
     {
         // Tracked by AddFileAsync rather than InitializeFromDatabaseAsync (the startup scan does
-        // this when the initial load failed), so the duplicate flag is on the snapshot but not
-        // in the separate duplicate index.
+        // this when the initial load failed).
         var path = WriteComic(_library, "Saga 003 (2).cbz");
         await SeedAsync(Row(path, duplicate: true));
         var service = CreateService();
         await service.AddFileAsync(path);
-        _factory.FailNth(1); // the status read fails; the write that follows succeeds
 
         await service.AddFileAsync(path);
 
-        Assert.True(_logger.Contains(LogLevel.Error, "Error reading file status from database"));
-        // Regression: the flag came from that index instead, which cleared it in memory and,
-        // through the write that follows, in the database too.
+        // Regression: the flag came from a separate in-memory duplicate index instead of the
+        // row, which cleared it in memory and, through the write that follows, in the database.
         Assert.True(Assert.Single(await service.GetAllFilesAsync()).IsDuplicate);
         Assert.True((await FindRowAsync(path))!.IsDuplicate);
     }
 
     [Fact]
-    public async Task AddFileAsync_PersistFails_LogsErrorButStillTracksAndBroadcasts()
+    public async Task AddFileAsync_PersistFails_LogsErrorAndDoesNotTrackWhatTheDatabaseNeverSaw()
     {
         var path = WriteComic(_library, "Saga 004.cbz");
         var service = CreateService(broadcaster: _broadcaster.Object);
-        _factory.FailNth(2); // the status read succeeds; the write fails
+        _factory.FailNth(1);
 
         await service.AddFileAsync(path);
 
         Assert.True(_logger.Contains(LogLevel.Error, "Error persisting file to database"));
-        Assert.True(await service.FileExistsAsync(path));
+        // Regression: memory was updated first, so the file was listed (and counted) until a
+        // restart reloaded memory from the database and it silently disappeared again.
+        Assert.False(await service.FileExistsAsync(path));
         Assert.Null(await FindRowAsync(path));
-        _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
+        _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Never);
+
+        // The next add (the watcher or the next scan) tracks it once the database is back.
+        await service.AddFileAsync(path);
+        Assert.True(await service.FileExistsAsync(path));
+        Assert.NotNull(await FindRowAsync(path));
     }
 
     [Fact]
@@ -346,18 +353,22 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     }
 
     [Fact]
-    public async Task RemoveFileAsync_DatabaseUnavailable_StillUntracksFile()
+    public async Task RemoveFileAsync_DatabaseUnavailable_KeepsTheFileTrackedLikeTheDatabaseDoes()
     {
         var path = Path.Join(_library, "Saga 007.cbz");
         await SeedAsync(Row(path));
-        var service = CreateService();
+        var service = CreateService(broadcaster: _broadcaster.Object);
         await service.InitializeFromDatabaseAsync();
         _factory.FailAll();
 
         await service.RemoveFileAsync(path);
 
         Assert.True(_logger.Contains(LogLevel.Error, "Error removing file from database"));
-        Assert.False(await service.FileExistsAsync(path));
+        // The row is still there, so memory must not claim otherwise.
+        Assert.True(await service.FileExistsAsync(path));
+        _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Never);
+        _factory.Heal();
+        Assert.NotNull(await FindRowAsync(path));
     }
 
     [Fact]
@@ -504,14 +515,11 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         await service.UpdateFilePathAsync(oldPath, newPath);
 
         Assert.True(Assert.Single(await service.GetAllFilesAsync()).IsDuplicate);
+        Assert.True((await FindRowAsync(newPath))!.IsDuplicate);
         Assert.Equal(1, (await service.GetFileCountsAsync()).duplicates);
 
-        // The duplicate marker itself moved: a row recreated for the new path picks it up...
-        await DeleteRowAsync(newPath);
-        await service.AddFileAsync(newPath);
-        Assert.True((await FindRowAsync(newPath))!.IsDuplicate);
-
-        // ...while a file reappearing at the old path no longer carries it.
+        // The duplicate marker moved with the row: a file reappearing at the old path
+        // does not carry it.
         WriteComic(_library, "Dupe.cbz");
         await service.AddFileAsync(oldPath);
         Assert.False((await FindRowAsync(oldPath))!.IsDuplicate);
@@ -665,10 +673,10 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateFilePathAsync_OldPathMissingFromDatabase_KeepsTheMovedFilesStateInMemory()
+    public async Task UpdateFilePathAsync_OldPathMissingFromDatabase_RestoresTheMovedFilesLastCommittedState()
     {
         // The watcher can see a move as a delete plus a create and drop the old row before the
-        // move reaches the database, so the moved entry is re-added from the in-memory snapshot.
+        // move reaches the database, so the moved row is restored from the last committed copy.
         var oldPath = Path.Join(_library, "Old.cbz");
         await SeedAsync(Row(oldPath, renamed: true, normalized: true, configure: e => e.CreatedAt = Jan2020));
         var service = CreateService();
@@ -684,10 +692,15 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         Assert.True(file.IsProcessed);
         Assert.Equal(Jan2020, file.CreatedAt);
         Assert.Empty(await service.GetFilteredFilesAsync("unprocessed"));
+        // The database holds the same state, so it survives a restart.
+        var row = Assert.Single(await AllRowsAsync());
+        Assert.Equal(newPath, row.FilePath);
+        Assert.True(row.IsRenamed && row.IsNormalized);
+        Assert.Equal(Jan2020, row.CreatedAt);
     }
 
     [Fact]
-    public async Task UpdateFilePathAsync_DatabaseUnavailable_MovesSnapshotAndStillBroadcasts()
+    public async Task UpdateFilePathAsync_DatabaseUnavailable_LeavesBothStoresAtTheOldPath()
     {
         var oldPath = Path.Join(_library, "Old.cbz");
         await SeedAsync(Row(oldPath, renamed: true));
@@ -696,12 +709,58 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         var newPath = WriteComic(_library, "New.cbz");
         _factory.FailAll();
 
+        // The caller has to know the row did not move: a conversion undoes itself on this.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.UpdateFilePathAsync(oldPath, newPath));
+
+        Assert.True(_logger.Contains(LogLevel.Error, "Error updating file path in database"));
+        // Regression: memory moved first, so every endpoint reading it showed a move the
+        // database never saw, and a restart silently moved the file back.
+        Assert.True(await service.IsFileRenamedAsync(oldPath));
+        Assert.False(await service.FileExistsAsync(newPath));
+        _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Never);
+        _factory.Heal();
+        Assert.Equal(oldPath, Assert.Single(await AllRowsAsync()).FilePath);
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_Cancelled_ThrowsWithoutLoggingAnErrorAndLeavesBothStoresAtTheOldPath()
+    {
+        var oldPath = Path.Join(_library, "Old.cbz");
+        await SeedAsync(Row(oldPath, renamed: true));
+        var service = CreateService(broadcaster: _broadcaster.Object);
+        await service.InitializeFromDatabaseAsync();
+        var newPath = WriteComic(_library, "New.cbz");
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.UpdateFilePathAsync(oldPath, newPath, cts.Token));
+
+        Assert.False(_logger.Has(LogLevel.Error));
+        Assert.True(await service.IsFileRenamedAsync(oldPath));
+        Assert.False(await service.FileExistsAsync(newPath));
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_RepointingFailsAfterTheRowMoved_DoesNotThrowAndKeepsTheMovedRow()
+    {
+        var oldPath = Path.Join(_library, "Old.cbz");
+        await SeedAsync(Row(oldPath, renamed: true));
+        var service = CreateService(broadcaster: _broadcaster.Object);
+        await service.InitializeFromDatabaseAsync();
+        var newPath = WriteComic(_library, "New.cbz");
+        // The first save moves the row; the next one repoints the read state and fails.
+        _interceptor.BeforeNextSave = () =>
+        {
+            _interceptor.BeforeNextSave = () => throw new InvalidOperationException("database is locked");
+            return Task.CompletedTask;
+        };
+
         await service.UpdateFilePathAsync(oldPath, newPath);
 
         Assert.True(_logger.Contains(LogLevel.Error, "Error updating file path in database"));
+        Assert.Equal(newPath, Assert.Single(await AllRowsAsync()).FilePath);
+        Assert.True(await service.FileExistsAsync(newPath));
         Assert.False(await service.FileExistsAsync(oldPath));
-        Assert.True(await service.IsFileRenamedAsync(newPath));
-        _broadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
     }
 
     [Fact]
@@ -787,7 +846,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
     }
 
     [Fact]
-    public async Task SetFileSeriesMetadataVersionAsync_RowNotInSnapshot_UpdatesDatabaseOnly()
+    public async Task SetFileSeriesMetadataVersionAsync_RowNotInSnapshot_MirrorsTheCommittedRow()
     {
         var path = Path.Join(_library, "Saga 011.cbz");
         await SeedAsync(Row(path));
@@ -796,7 +855,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         await service.SetFileSeriesMetadataVersionAsync(path, 2);
 
         Assert.Equal(2, (await FindRowAsync(path))!.SeriesMetadataVersion);
-        Assert.Empty(await service.GetAllFilesAsync());
+        Assert.Equal(2, Assert.Single(await service.GetAllFilesAsync()).SeriesMetadataVersion);
     }
 
     [Fact]
@@ -930,7 +989,7 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         string duplicateDirectory = "",
         IEventBroadcaster? broadcaster = null,
         string? watchedDirectory = null) =>
-        new(
+        TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings
             {
                 WatchedDirectory = watchedDirectory ?? _library,
@@ -1008,6 +1067,8 @@ public sealed class FileStoreServiceWritesTests : IDisposable
         public int Created => Volatile.Read(ref _created);
 
         public void FailAll() => _shouldFail = _ => true;
+
+        public void Heal() => _shouldFail = null;
 
         /// <summary>Fails only the <paramref name="nth"/> (1-based) context requested from now on.</summary>
         public void FailNth(int nth)

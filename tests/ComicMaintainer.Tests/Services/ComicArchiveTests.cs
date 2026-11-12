@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Utilities;
 using System.IO.Compression;
 
 namespace ComicMaintainer.Tests.Services;
@@ -67,6 +68,24 @@ public class ComicArchiveTests : IDisposable
     }
 
     [Fact]
+    public void ReadTags_WithComicInfoOverTheReadLimit_IsRefused()
+    {
+        var filePath = Path.Join(_testDirectory, "huge-tags.cbz");
+        using (var zip = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            using var writer = new StreamWriter(zip.CreateEntry("ComicInfo.xml").Open());
+            writer.Write($"<ComicInfo><Notes>{new string('x', (int)ArchiveEntryReader.MaxComicInfoBytes)}</Notes></ComicInfo>");
+        }
+
+        _createdFiles.Add(filePath);
+
+        using var archive = new ComicArchive(filePath);
+        var ex = Assert.Throws<ArchiveLimitExceededException>(() => archive.ReadTags("cr"));
+
+        Assert.Contains("ComicInfo.xml", ex.Message);
+    }
+
+    [Fact]
     public void ReadTags_WithoutComicInfo_ReturnsEmptyComicInfo()
     {
         // Arrange
@@ -115,7 +134,7 @@ public class ComicArchiveTests : IDisposable
     {
         // Arrange
         var filePath = CreateTestCbzArchive("test.cbz");
-        var archive = new ComicArchive(filePath);
+        using var archive = new ComicArchive(filePath);
 
         // Act & Assert - Should not throw
         archive.Dispose();

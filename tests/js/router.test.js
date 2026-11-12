@@ -17,6 +17,7 @@ test('parseHash maps the top-level pages', () => {
     assert.deepEqual(parseHash('#/library'), { view: 'library' });
     assert.deepEqual(parseHash('#/settings'), { view: 'settings' });
     assert.deepEqual(parseHash('#/jobs'), { view: 'jobs' });
+    assert.deepEqual(parseHash('#/users'), { view: 'users' });
 });
 
 test('parseHash extracts and decodes the series id', () => {

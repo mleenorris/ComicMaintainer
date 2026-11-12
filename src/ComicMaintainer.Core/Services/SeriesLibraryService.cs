@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
@@ -9,13 +8,6 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class SeriesLibraryService : ISeriesLibraryService
 {
-    // Unicode-aware: keep any Unicode letter (\p{L}) or number (\p{N}) so
-    // non-ASCII titles (CJK, accented Latin, Cyrillic, etc.) produce rich,
-    // distinguishable keys instead of collapsing to a bare digit when every
-    // letter gets stripped. Pure-ASCII titles still produce the same output
-    // as the previous [^a-z0-9]+ sanitizer.
-    private static readonly Regex SeriesKeySanitizer = new(@"[^\p{L}\p{N}]+", RegexOptions.Compiled);
-
     // Series-level filters that operate on the grouped/series record (rather
     // than on individual files in the file store). These are applied AFTER
     // BuildGroupsAsync so the file-store call sees a no-op file filter.
@@ -24,12 +16,11 @@ public partial class SeriesLibraryService : ISeriesLibraryService
     private const string MissingIssuesFilter = "missing";
 
     private readonly IFileStoreService _fileStore;
-    private readonly IComicProcessorService _processor;
     private readonly ISeriesMetadataCacheService _metadataCache;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesLibraryService> _logger;
-    private readonly ISeriesNameResolver? _seriesNameResolver;
-    private readonly IUserContextAccessor? _userContext;
+    private readonly ISeriesNameResolver _seriesNameResolver;
+    private readonly IUserContextAccessor _userContext;
 
     /// <summary>
     /// Safety net on top of version-based invalidation: a snapshot is never
@@ -42,20 +33,26 @@ public partial class SeriesLibraryService : ISeriesLibraryService
     private const int MaxSummaryViewsPerSnapshot = 32;
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<GroupsCacheKey, GroupsSnapshot> _snapshotCache = new();
-    private readonly SemaphoreSlim _snapshotBuildLock = new(1, 1);
+
+    /// <summary>
+    /// One build lock per snapshot key: concurrent requests for the same view share a single
+    /// build, while other filters (and other users' read-filtered views) build independently
+    /// instead of queueing behind one global lock. Bounded by the number of distinct keys.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<GroupsCacheKey, SemaphoreSlim> _snapshotBuildLocks = new();
+
+    private static readonly IReadOnlySet<string> NoReadPaths = new HashSet<string>(StringComparer.Ordinal);
 
     public SeriesLibraryService(
         IFileStoreService fileStore,
-        IComicProcessorService processor,
         ISeriesMetadataCacheService metadataCache,
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesLibraryService> logger,
-        ISeriesNameResolver? seriesNameResolver = null,
-        IUserContextAccessor? userContext = null)
+        ISeriesNameResolver seriesNameResolver,
+        IUserContextAccessor userContext)
     {
         _userContext = userContext;
         _fileStore = fileStore;
-        _processor = processor;
         _metadataCache = metadataCache;
         _settings = settings;
         _logger = logger;
@@ -64,17 +61,6 @@ public partial class SeriesLibraryService : ISeriesLibraryService
 
     private static string? FirstNonEmpty(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
-
-    private static string NormalizeKey(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return "unknown-series";
-        }
-
-        var normalized = SeriesKeySanitizer.Replace(value.ToLowerInvariant(), "-").Trim('-');
-        return string.IsNullOrWhiteSpace(normalized) ? "unknown-series" : normalized;
-    }
 
     /// <summary>
     /// Computes the public series id used in <c>#/series/{id}</c> deep links and
@@ -92,7 +78,7 @@ public partial class SeriesLibraryService : ISeriesLibraryService
             return representative;
         }
 
-        var slug = NormalizeKey(pinnedName);
+        var slug = SeriesKey.Normalize(pinnedName);
         return IsAmbiguousNormalizedKey(slug) ? representative : slug;
     }
 

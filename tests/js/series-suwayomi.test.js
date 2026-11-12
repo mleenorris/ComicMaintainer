@@ -43,7 +43,7 @@ test('a reachable Suwayomi server adds a download action to the missing-issues b
     // The answer is remembered for the rest of the session.
     page.click('#seriesDetailPanel .series-detail-back');
     await page.settle();
-    page.click('#fileList .series-card');
+    page.click('#fileList .series-card-open');
     await page.settle();
     assert.equal(page.window.location.hash, '#/series/saga');
     assert.ok(downloadButton(page));
@@ -156,6 +156,50 @@ test('partial source failures are reported without hiding successful downloads',
         text: 'Queued 1 chapter on Suwayomi (first match: Working (EN)). 1 issue has no matching chapter. 1 source check failed. First failure: Broken (EN): site unavailable',
         type: 'success'
     });
+});
+
+test('searches that were cut short are mentioned without being called failures', async () => {
+    const page = await bootMissing();
+    page.route(DOWNLOAD, {
+        series: { id: 7, title: 'SAGA' },
+        queuedChapters: [],
+        unmatchedIssueNumbers: [2],
+        cutShortSearches: [{ target: 'Fuzzy (EN)', reason: 'Only the first 3 pages of results were searched.' }]
+    });
+
+    await download(page);
+
+    assert.deepEqual(lastMessage(page), {
+        text: 'Nothing was queued on Suwayomi. 1 issue has no matching chapter. 1 search was cut short, so a series further down the results may have been missed.',
+        type: 'info'
+    });
+});
+
+test('source failures with nothing queued are an error, and several are counted', async () => {
+    const page = await bootMissing();
+    page.route(DOWNLOAD, {
+        series: { id: 7, title: 'SAGA' },
+        queuedChapters: [],
+        // The first failure has no reason, so there is no "First failure" detail to show.
+        discoveryFailures: [{ target: 'Broken (EN)' }, { target: 'Other (EN)', error: 'site unavailable' }],
+        cutShortSearches: [{ target: 'Fuzzy (EN)' }, { target: 'Other (EN)' }]
+    });
+
+    await download(page);
+
+    assert.deepEqual(lastMessage(page), {
+        text: 'Nothing was queued on Suwayomi. 2 source checks failed. 2 searches were cut short, so a series further down the results may have been missed.',
+        type: 'error'
+    });
+});
+
+test('a source failure the server could not describe is still counted', async () => {
+    const page = await bootMissing();
+    page.route(DOWNLOAD, { series: { id: 7, title: 'SAGA' }, queuedChapters: [], discoveryFailures: [null] });
+
+    await download(page);
+
+    assert.deepEqual(lastMessage(page), { text: 'Nothing was queued on Suwayomi. 1 source check failed.', type: 'error' });
 });
 
 test('a series that has no missing issues any more asks for nothing', async () => {

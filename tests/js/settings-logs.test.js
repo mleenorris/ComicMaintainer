@@ -166,3 +166,16 @@ test('an expired session while viewing logs redirects to login', async () => {
     assert.equal(viewer(page).content, '');
     assert.equal(viewer(page).loading, 'none');
 });
+
+test('the logs are administrator-only: other users get no entry point and no log requests', async () => {
+    const page = await bootSettings({ user: { canModifyLibrary: true, canAdminister: false } });
+
+    assert.equal(page.$('#logsMenuItem').hidden, true);
+    assert.equal(page.$('#sidebarLogsItem').hidden, true);
+
+    const since = page.fetchCalls.length;
+    await page.run('openLogsModal()');
+    await page.settle();
+    assert.equal(page.$('#logsModal').classList.contains('active'), false);
+    assert.deepEqual(requestLog(page, since).filter(request => request.includes('/api/logs')), []);
+});

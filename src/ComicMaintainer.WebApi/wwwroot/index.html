@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-base-path="__BASE_PATH__">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -19,60 +19,27 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     
-    <!-- PWA Manifest -->
-    <link rel="manifest" id="manifestLink">
+    <!-- PWA Manifest. A real same-origin file: the CSP's manifest-src 'self'
+         does not match blob: URLs, and the manifest's root-relative start_url,
+         scope and icon paths only resolve against an http(s) manifest URL.
+         use-credentials lets the request carry the session cookie of an
+         authenticating reverse proxy (manifests are fetched without
+         credentials otherwise). -->
+    <link rel="manifest" href="__BASE_PATH__/manifest.json" crossorigin="use-credentials">
     
     <!-- Favicons and Icons -->
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="__BASE_PATH__/icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="__BASE_PATH__/icons/favicon-16x16.png">
+    <link rel="apple-touch-icon" href="__BASE_PATH__/icons/apple-touch-icon.png">
     
     <!-- External CSS -->
     <!-- The __APP_VERSION__ placeholder is replaced server-side by
          HtmlVersionInjectionMiddleware so the very first request already
          contains the correct versioned URL. This prevents the browser (and the
          service worker) from ever fetching/caching the unversioned URL. -->
-    <link rel="stylesheet" href="/css/main.css?v=__APP_VERSION__" id="mainCss">
+    <link rel="stylesheet" href="__BASE_PATH__/css/main.css?v=__APP_VERSION__" id="mainCss">
 
-    <!-- PWA manifest blob (kept inline so installation works without an extra request) -->
     <script>
-        const manifestLink = document.getElementById('manifestLink');
-        const manifestData = {
-            name: 'Comic Maintainer',
-            short_name: 'ComicMaintainer',
-            id: '/',
-            lang: 'en',
-            description: 'Manage and process your comic archive files with ComicTagger',
-            start_url: '/',
-            scope: '/',
-            display: 'standalone',
-            background_color: '#241c17',
-            theme_color: '#241c17',
-            orientation: 'any',
-            prefer_related_applications: false,
-            icons: [
-                {
-                    src: '/icons/icon-192x192-maskable.png',
-                    sizes: '192x192',
-                    type: 'image/png',
-                    purpose: 'any maskable'
-                },
-                {
-                    src: '/icons/icon-512x512-maskable.png',
-                    sizes: '512x512',
-                    type: 'image/png',
-                    purpose: 'any maskable'
-                }
-            ],
-            categories: ['utilities', 'productivity'],
-            screenshots: []
-        };
-
-        if (manifestLink && window.URL && typeof window.URL.createObjectURL === 'function') {
-            const manifestBlob = new Blob([JSON.stringify(manifestData)], { type: 'application/manifest+json' });
-            manifestLink.href = window.URL.createObjectURL(manifestBlob);
-        }
-
         // Expose the server-injected version to the rest of the app.
         window.APP_VERSION = '__APP_VERSION__';
     </script>
@@ -125,6 +92,7 @@
         <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></symbol>
         <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.5v5h5"/></symbol>
         <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5l9.5 16.5h-19z"/><path d="M12 10v4.5M12 17.5h.01"/></symbol>
+        <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 7 2 7H4s2-2 2-7z"/><path d="M10 20a2 2 0 0 0 4 0"/></symbol>
         <symbol id="i-puzzle" viewBox="0 0 24 24"><path d="M4 7h4a2 2 0 1 1 4 0h4v4a2 2 0 1 1 0 4v4h-4a2 2 0 1 0-4 0H4v-4a2 2 0 1 0 0-4z"/></symbol>
         <symbol id="i-text" viewBox="0 0 24 24"><path d="M4 7V5h16v2"/><path d="M12 5v14"/><path d="M9 19h6"/></symbol>
         <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
@@ -161,6 +129,7 @@
             <button type="button" class="sidebar-link" id="sidebarLibraryBtn" onclick="navigate('#/library')"><svg class="icon" aria-hidden="true"><use href="#i-library"/></svg><span>Library</span></button>
             <button type="button" class="sidebar-link" id="sidebarSettingsBtn" onclick="openSettings()"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></button>
             <button type="button" class="sidebar-link" id="sidebarJobsBtn" onclick="openScheduledJobs()"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><span>Scheduled Jobs</span></button>
+            <button type="button" class="sidebar-link" id="sidebarUsersBtn" onclick="openUsers()"><svg class="icon" aria-hidden="true"><use href="#i-user"/></svg><span>Users</span></button>
 
             <div class="sidebar-section-label">Library tools</div>
             <button type="button" class="sidebar-link" onclick="scanUnmarkedFiles()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><span>Scan Unmarked</span></button>
@@ -175,7 +144,7 @@
             <button type="button" class="sidebar-link" onclick="openEmailDeliveryHistoryModal()"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg><span>Delivery History</span></button>
 
             <div class="sidebar-section-label">System</div>
-            <button type="button" class="sidebar-link" onclick="openLogsModal()"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg><span>Logs</span></button>
+            <button type="button" class="sidebar-link" id="sidebarLogsItem" onclick="openLogsModal()"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg><span>Logs</span></button>
             <button type="button" class="sidebar-link" onclick="openExternalProvidersModal()"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>External Providers</span></button>
             <button type="button" class="sidebar-link" id="sidebarDiagnosticsItem" onclick="openDiagnosticsModal()"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg><span>Diagnostics</span></button>
             <button type="button" class="sidebar-link" id="installAppSidebarButton" onclick="installApp()" style="display: none;">
@@ -244,7 +213,7 @@
                         <button class="settings-dropdown-item" onclick="openProcessingHistoryModal(); closeSettingsMenu();">
                             <svg class="icon" aria-hidden="true"><use href="#i-history"/></svg> Processing History
                         </button>
-                        <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
+                        <button class="settings-dropdown-item" id="logsMenuItem" onclick="openLogsModal(); closeSettingsMenu();">
                             <svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg> View Logs
                         </button>
                         <button class="settings-dropdown-item" onclick="openExternalProvidersModal(); closeSettingsMenu();">
@@ -261,6 +230,9 @@
                         </button>
                         <button class="settings-dropdown-item" id="scheduledJobsMenuItem" onclick="openScheduledJobs(); closeSettingsMenu();">
                             <svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg> Scheduled Jobs
+                        </button>
+                        <button class="settings-dropdown-item" id="usersMenuItem" onclick="openUsers(); closeSettingsMenu();">
+                            <svg class="icon" aria-hidden="true"><use href="#i-user"/></svg> Users
                         </button>
                         <div class="settings-dropdown-section-label">View</div>
                         <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
@@ -571,6 +543,17 @@
                         <svg class="icon" aria-hidden="true"><use href="#i-compact"/></svg> Compact
                     </button>
                 </div>
+                <div class="library-facets" id="libraryFacets" role="group" aria-label="Filter series by genre and status" hidden>
+                    <label class="library-facet" for="libraryGenreFilter">
+                        <span>Genre</span>
+                        <select id="libraryGenreFilter" name="libraryGenreFilter" onchange="setSeriesFacetFilter()"></select>
+                    </label>
+                    <label class="library-facet" for="libraryStatusFilter">
+                        <span>Status</span>
+                        <select id="libraryStatusFilter" name="libraryStatusFilter" onchange="setSeriesFacetFilter()"></select>
+                    </label>
+                    <span class="library-facets-hint" id="libraryFacetsHint" hidden>Genres and status appear here as series metadata is refreshed.</span>
+                </div>
                 <div class="file-list" id="fileList">
                     <div class="loading">
                         <div class="spinner"></div>
@@ -593,9 +576,10 @@
             <div class="settings-layout">
                 <nav class="settings-nav" aria-label="Settings sections">
                     <button type="button" class="settings-nav-link" data-settings-target="settings-appearance" onclick="scrollToSettingsSection('settings-appearance')"><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg><span>Appearance</span></button>
-                    <button type="button" class="settings-nav-link" data-settings-target="settings-access" onclick="scrollToSettingsSection('settings-access')"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg><span>Access</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-language" onclick="scrollToSettingsSection('settings-language')"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>Series Language</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-watcher" onclick="scrollToSettingsSection('settings-watcher')"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg><span>Watcher</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-ereader" onclick="scrollToSettingsSection('settings-ereader')"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg><span>Send to Ereader</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-notifications" onclick="scrollToSettingsSection('settings-notifications')"><svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg><span>Notifications</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-error-reporting" onclick="scrollToSettingsSection('settings-error-reporting')"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><span>Automated Error Reporting</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-logs" onclick="scrollToSettingsSection('settings-logs')"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg><span>Log Rotation</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-database" onclick="scrollToSettingsSection('settings-database')"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg><span>Database Cleanup</span></button>
@@ -605,6 +589,7 @@
                     <button type="button" class="settings-nav-link" data-settings-target="settings-covers" onclick="scrollToSettingsSection('settings-covers')"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg><span>Series Covers</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-metadata" onclick="scrollToSettingsSection('settings-metadata')"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>External Series Metadata</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-suwayomi" onclick="scrollToSettingsSection('settings-suwayomi')"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>Suwayomi Downloads</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-opds" onclick="scrollToSettingsSection('settings-opds')"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>OPDS Catalog</span></button>
                     <button type="button" class="settings-nav-link settings-nav-link--danger" data-settings-target="settings-danger" onclick="scrollToSettingsSection('settings-danger')"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><span>Danger Zone</span></button>
                 </nav>
                 <div class="settings-page-body" id="settingsPageBody">
@@ -627,36 +612,16 @@
                                 <option value="dark">Dark Mode</option>
                             </select>
                         </div>
-                        <div class="form-group" style="margin-top: 15px;">
-                            <label for="defaultLibraryViewSelect">Default library view</label>
-                            <select id="defaultLibraryViewSelect" name="defaultLibraryView" onchange="updateDefaultLibraryViewFromSettings()">
-                                <option value="files">📄 Files (folder view)</option>
-                                <option value="series">🖼️ Series</option>
-                            </select>
-                            <small class="form-hint">
-                                Controls which view the library loads into when you first open the site.
-                            </small>
-                        </div>
                     </section>
-                    <section class="settings-card" id="settings-access" aria-labelledby="settings-access-title">
+                    <section class="settings-card" id="settings-language" aria-labelledby="settings-language-title">
                         <header class="settings-card-header">
-                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-lock"/></svg></span>
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-globe"/></svg></span>
                             <div>
-                                <h3 class="settings-card-title" id="settings-access-title">Access</h3>
-                                <p class="settings-card-desc">Sign-in and guest access.</p>
+                                <h3 class="settings-card-title" id="settings-language-title">Series Language</h3>
+                                <p class="settings-card-desc">The language series names are shown in.</p>
                             </div>
                         </header>
                         <div class="form-group">
-                            <label for="allowRegistrationCheckbox" class="checkbox-label">
-                                <input type="checkbox" id="allowRegistrationCheckbox" name="allowRegistration" onchange="updateAllowRegistration()">
-                                <span>Allow visitors to register their own account</span>
-                            </label>
-                            <small class="form-hint form-hint--indent">
-                                Disabled by default. When disabled, only an administrator can create accounts, so anyone who can reach this server cannot sign themselves up. Leave this off unless you intentionally want open sign-ups.
-                            </small>
-                        </div>
-
-                        <div class="form-group" style="margin-top: 15px;">
                             <label for="defaultPreferredLanguageSelect">Default preferred series-name language</label>
                             <select id="defaultPreferredLanguageSelect" name="defaultPreferredLanguage" onchange="updateDefaultPreferredLanguageFromSettings()">
                                 <option value="">None (use canonical title)</option>
@@ -701,6 +666,16 @@
                             </label>
                             <small class="form-hint form-hint--indent">
                                 When enabled, metadata will be normalized during processing.
+                            </small>
+                        </div>
+
+                        <div class="form-group" style="margin-top: 15px;">
+                            <label for="convertRarToCbzOnWriteCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="convertRarToCbzOnWriteCheckbox" name="convertRarToCbzOnWrite" onchange="updateConvertRarToCbzOnWrite()">
+                                <span>Convert CBR/RAR to CBZ when writing tags</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                Only CBZ files can be rewritten in place. When enabled, writing tags (normalize, tag edits, batch updates) to a CBR, RAR or ZIP file saves it as a CBZ with the same name and removes the original; its read status and reading progress move with it. When disabled, those files are never modified: tag edits are kept in the database only, and files that normalize would change stay unprocessed; process them again after turning this on to normalize and convert them.
                             </small>
                         </div>
                     </section>
@@ -769,8 +744,11 @@
                            <input type="text" id="emailFromName" name="emailFromName" autocomplete="off" placeholder="ComicMaintainer">
                         </div>
                         <div class="form-group">
-                           <label for="emailMaxAttachmentMb">Max Attachment Size (MB)</label>
+                           <label for="emailMaxAttachmentMb">Max Email Size (MB)</label>
                            <input type="number" id="emailMaxAttachmentMb" name="emailMaxAttachmentMb" min="1" max="200" step="1" autocomplete="off" placeholder="25">
+                           <small class="form-hint">
+                              The largest message your mail server accepts. Attachments grow by about a third when encoded for email, so at 25 MB a book can be about 18 MB; larger books are compressed to fit.
+                           </small>
                         </div>
                         <h4 class="settings-subheading">Rate Limit</h4>
                         <p class="form-hint">
@@ -787,6 +765,212 @@
                         <div class="form-group">
                            <label for="emailMinSecondsBetweenSends">Minimum Seconds Between Emails</label>
                            <input type="number" id="emailMinSecondsBetweenSends" name="emailMinSecondsBetweenSends" min="0" max="86400" step="1" autocomplete="off" placeholder="0">
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-notifications" aria-labelledby="settings-notifications-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-bell"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-notifications-title">Notifications</h3>
+                                <p class="settings-card-desc">Push notifications, webhooks and Komga or Kavita library scans.</p>
+                            </div>
+                        </header>
+                        <p class="form-hint form-hint--lead">
+                            Each target has its own switch and its own events. New chapters are collected per series, so a batch of files is one message. A job that keeps failing is reported at most once every six hours. Komga and Kavita are asked to scan once the library has gone quiet, never during a rewrite. Addresses on your own network are allowed. Save your settings before using Send Test.
+                        </p>
+
+                        <h4 class="settings-subheading">ntfy</h4>
+                        <div class="form-group">
+                            <label for="notifyNtfyEnabledCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="notifyNtfyEnabledCheckbox" name="notifyNtfyEnabled">
+                                <span>Send notifications to ntfy</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyNtfyUrl">Server URL</label>
+                            <input type="url" id="notifyNtfyUrl" name="notifyNtfyUrl" autocomplete="off" spellcheck="false" placeholder="https://ntfy.sh">
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyNtfyTopic">Topic</label>
+                            <input type="text" id="notifyNtfyTopic" name="notifyNtfyTopic" autocomplete="off" spellcheck="false" placeholder="my-comics">
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyNtfyToken">Access Token</label>
+                            <input type="password" id="notifyNtfyToken" name="notifyNtfyToken" autocomplete="new-password">
+                            <small id="notifyNtfyTokenHint" class="form-hint"></small>
+                            <label for="notifyNtfyClearTokenCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="notifyNtfyClearTokenCheckbox" name="notifyNtfyClearToken">
+                                <span>Clear stored token on save</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <span>Send a message for</span>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyNtfyEventNewChapters"><span>New chapters</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyNtfyEventSuwayomi"><span>Failed Suwayomi imports</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyNtfyEventJobFailed"><span>Failed scheduled jobs</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyNtfyEventJobFindings"><span>Scheduled jobs that report findings</span></label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-small" type="button" data-requires-write onclick="sendNotificationTest('ntfy')">Send Test</button>
+                            <small id="notifyNtfyTestResult" class="form-hint"></small>
+                        </div>
+
+                        <h4 class="settings-subheading">Gotify</h4>
+                        <div class="form-group">
+                            <label for="notifyGotifyEnabledCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="notifyGotifyEnabledCheckbox" name="notifyGotifyEnabled">
+                                <span>Send notifications to Gotify</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyGotifyUrl">Server URL</label>
+                            <input type="url" id="notifyGotifyUrl" name="notifyGotifyUrl" autocomplete="off" spellcheck="false" placeholder="https://gotify.example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyGotifyToken">Application Token</label>
+                            <input type="password" id="notifyGotifyToken" name="notifyGotifyToken" autocomplete="new-password">
+                            <small id="notifyGotifyTokenHint" class="form-hint"></small>
+                            <label for="notifyGotifyClearTokenCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="notifyGotifyClearTokenCheckbox" name="notifyGotifyClearToken">
+                                <span>Clear stored token on save</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <span>Send a message for</span>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyGotifyEventNewChapters"><span>New chapters</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyGotifyEventSuwayomi"><span>Failed Suwayomi imports</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyGotifyEventJobFailed"><span>Failed scheduled jobs</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyGotifyEventJobFindings"><span>Scheduled jobs that report findings</span></label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-small" type="button" data-requires-write onclick="sendNotificationTest('gotify')">Send Test</button>
+                            <small id="notifyGotifyTestResult" class="form-hint"></small>
+                        </div>
+
+                        <h4 class="settings-subheading">Discord</h4>
+                        <div class="form-group">
+                            <label for="notifyDiscordEnabledCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="notifyDiscordEnabledCheckbox" name="notifyDiscordEnabled">
+                                <span>Send notifications to a Discord webhook</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyDiscordUrl">Webhook URL</label>
+                            <input type="password" id="notifyDiscordUrl" name="notifyDiscordUrl" autocomplete="new-password" spellcheck="false" placeholder="https://discord.com/api/webhooks/...">
+                            <small id="notifyDiscordUrlHint" class="form-hint"></small>
+                            <label for="notifyDiscordClearUrlCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="notifyDiscordClearUrlCheckbox" name="notifyDiscordClearUrl">
+                                <span>Clear stored URL on save</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <span>Send a message for</span>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyDiscordEventNewChapters"><span>New chapters</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyDiscordEventSuwayomi"><span>Failed Suwayomi imports</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyDiscordEventJobFailed"><span>Failed scheduled jobs</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyDiscordEventJobFindings"><span>Scheduled jobs that report findings</span></label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-small" type="button" data-requires-write onclick="sendNotificationTest('discord')">Send Test</button>
+                            <small id="notifyDiscordTestResult" class="form-hint"></small>
+                        </div>
+
+                        <h4 class="settings-subheading">JSON Webhook</h4>
+                        <div class="form-group">
+                            <label for="notifyWebhookEnabledCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="notifyWebhookEnabledCheckbox" name="notifyWebhookEnabled">
+                                <span>POST notifications as JSON to a webhook</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyWebhookUrl">Webhook URL</label>
+                            <input type="password" id="notifyWebhookUrl" name="notifyWebhookUrl" autocomplete="new-password" spellcheck="false" placeholder="https://example.com/hooks/...">
+                            <small id="notifyWebhookUrlHint" class="form-hint"></small>
+                            <label for="notifyWebhookClearUrlCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="notifyWebhookClearUrlCheckbox" name="notifyWebhookClearUrl">
+                                <span>Clear stored URL on save</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <span>Send a message for</span>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyWebhookEventNewChapters"><span>New chapters</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyWebhookEventSuwayomi"><span>Failed Suwayomi imports</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyWebhookEventJobFailed"><span>Failed scheduled jobs</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyWebhookEventJobFindings"><span>Scheduled jobs that report findings</span></label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-small" type="button" data-requires-write onclick="sendNotificationTest('webhook')">Send Test</button>
+                            <small id="notifyWebhookTestResult" class="form-hint"></small>
+                        </div>
+
+                        <h4 class="settings-subheading">Komga Library Scan</h4>
+                        <div class="form-group">
+                            <label for="notifyKomgaEnabledCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="notifyKomgaEnabledCheckbox" name="notifyKomgaEnabled">
+                                <span>Ask Komga to scan when the library changes</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyKomgaUrl">Server URL</label>
+                            <input type="url" id="notifyKomgaUrl" name="notifyKomgaUrl" autocomplete="off" spellcheck="false" placeholder="http://komga.local:25600">
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyKomgaToken">API Key</label>
+                            <input type="password" id="notifyKomgaToken" name="notifyKomgaToken" autocomplete="new-password">
+                            <small id="notifyKomgaTokenHint" class="form-hint"></small>
+                            <label for="notifyKomgaClearTokenCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="notifyKomgaClearTokenCheckbox" name="notifyKomgaClearToken">
+                                <span>Clear stored API key on save</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyKomgaLibraryId">Library ID (optional)</label>
+                            <input type="text" id="notifyKomgaLibraryId" name="notifyKomgaLibraryId" autocomplete="off" spellcheck="false">
+                            <small class="form-hint">Leave blank to scan every library.</small>
+                        </div>
+                        <div class="form-group">
+                            <span>Scan when</span>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyKomgaEventNewChapters"><span>New chapters arrive</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyKomgaEventLibraryChanged"><span>Existing files change (renames, new tags, deletions)</span></label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-small" type="button" data-requires-write onclick="sendNotificationTest('komga')">Send Test</button>
+                            <small id="notifyKomgaTestResult" class="form-hint"></small>
+                        </div>
+
+                        <h4 class="settings-subheading">Kavita Library Scan</h4>
+                        <div class="form-group">
+                            <label for="notifyKavitaEnabledCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="notifyKavitaEnabledCheckbox" name="notifyKavitaEnabled">
+                                <span>Ask Kavita to scan when the library changes</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyKavitaUrl">Server URL</label>
+                            <input type="url" id="notifyKavitaUrl" name="notifyKavitaUrl" autocomplete="off" spellcheck="false" placeholder="http://kavita.local:5000">
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyKavitaToken">Auth Key</label>
+                            <input type="password" id="notifyKavitaToken" name="notifyKavitaToken" autocomplete="new-password">
+                            <small id="notifyKavitaTokenHint" class="form-hint"></small>
+                            <label for="notifyKavitaClearTokenCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="notifyKavitaClearTokenCheckbox" name="notifyKavitaClearToken">
+                                <span>Clear stored Auth Key on save</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notifyKavitaLibraryId">Library ID (optional)</label>
+                            <input type="text" id="notifyKavitaLibraryId" name="notifyKavitaLibraryId" autocomplete="off" spellcheck="false">
+                            <small class="form-hint">Leave blank to scan every library.</small>
+                        </div>
+                        <div class="form-group">
+                            <span>Scan when</span>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyKavitaEventNewChapters"><span>New chapters arrive</span></label>
+                            <label class="checkbox-label"><input type="checkbox" id="notifyKavitaEventLibraryChanged"><span>Existing files change (renames, new tags, deletions)</span></label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-small" type="button" data-requires-write onclick="sendNotificationTest('kavita')">Send Test</button>
+                            <small id="notifyKavitaTestResult" class="form-hint"></small>
                         </div>
                     </section>
                     <section class="settings-card" id="settings-error-reporting" aria-labelledby="settings-error-reporting-title">
@@ -870,10 +1054,10 @@
                             </label>
                             <input type="number" id="logMaxSize" name="logMaxSize" min="1" max="2047" step="1" placeholder="5" autocomplete="off">
                             <small class="form-hint">
-                                When the log file reaches this size, it will be rotated. Up to 3 backup files will be kept. The new size only takes effect after the service restarts — use <strong>Restart Service</strong> below to apply it immediately.
+                                A log file stops growing at this size until the next day's file starts. Each log starts a new file daily and is kept for 3 to 7 days, depending on the log. The new size only takes effect after the service restarts.
                             </small>
                             <small class="form-hint">
-                                <strong>Note:</strong> Can also be configured via the <code>LOG_MAX_BYTES</code> environment variable (in bytes).
+                                <strong>Note:</strong> Can also be configured via the <code>AppSettings__LogMaxBytes</code> environment variable (in bytes).
                             </small>
                         </div>
                     </section>
@@ -889,10 +1073,53 @@
                             <label for="dbCleanupInterval">Cleanup Interval (Hours)</label>
                             <input type="number" id="dbCleanupInterval" name="dbCleanupInterval" min="0" step="1" placeholder="12" autocomplete="off">
                             <small class="form-hint">
-                                How often the database should be cleaned of stale entries for files that no longer exist. Set to 0 to only run on startup. Changes take effect on restart.
+                                How often the database should be cleaned of stale entries for files that no longer exist. Set to 0 to run it only once, a few minutes after startup.
                             </small>
                             <small class="form-hint">
                                 <strong>Recommended:</strong> 12 hours (default) or 24 hours for less frequent cleanup.
+                            </small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="staleCleanupMaxRemovalPercent">Largest Share Removed Without Confirmation (%)</label>
+                            <input type="number" id="staleCleanupMaxRemovalPercent" name="staleCleanupMaxRemovalPercent" min="0" max="100" step="1" placeholder="10" autocomplete="off">
+                            <small class="form-hint">
+                                A cleanup that would remove more of the library than this is skipped (and logged) instead, so a library share that is unmounted or only partly available cannot empty the database. <strong>Clean Database Now</strong> asks before going over it. 100 turns the guard off.
+                            </small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="staleCleanupMissingGraceHours">Remove Missing Files After (Hours)</label>
+                            <input type="number" id="staleCleanupMissingGraceHours" name="staleCleanupMissingGraceHours" min="0" max="720" step="1" placeholder="6" autocomplete="off">
+                            <small class="form-hint">
+                                A cleanup only removes a file that an earlier cleanup, at least this long before, also could not find (so even 0 takes two cleanups); Clean Database Now asks before removing anything newer. A file that comes back in the meantime keeps its processing state and metadata edits.
+                            </small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="staleCleanupSentinelFile">Library Sentinel File</label>
+                            <input type="text" id="staleCleanupSentinelFile" name="staleCleanupSentinelFile" placeholder=".comicmaintainer-library" autocomplete="off" spellcheck="false">
+                            <small class="form-hint">
+                                Optional. A file on the library share (relative to the watched directory) that must exist before any cleanup runs, so an empty mount point is never mistaken for an empty library. Leave blank to disable.
+                            </small>
+                            <small class="form-hint">
+                                <strong>Note:</strong> Can also be configured via the <code>STALE_CLEANUP_SENTINEL_FILE</code> environment variable.
+                            </small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="processingHistoryRetentionDays">Keep Processing History (Days)</label>
+                            <input type="number" id="processingHistoryRetentionDays" name="processingHistoryRetentionDays" min="0" max="3650" step="1" placeholder="90" autocomplete="off">
+                            <small class="form-hint">
+                                Processing history older than this is removed by the scheduled cleanup. Set to 0 to keep it regardless of age.
+                            </small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="processingHistoryMaxEntries">Maximum Processing History Entries</label>
+                            <input type="number" id="processingHistoryMaxEntries" name="processingHistoryMaxEntries" min="0" max="10000000" step="1" placeholder="50000" autocomplete="off">
+                            <small class="form-hint">
+                                Only the newest entries up to this number are kept. Set to 0 for no limit.
                             </small>
                         </div>
 
@@ -1116,6 +1343,15 @@
                             <label for="aniListBaseUrl">AniList GraphQL Endpoint</label>
                             <input type="text" id="aniListBaseUrl" name="aniListBaseUrl" placeholder="https://graphql.anilist.co" autocomplete="off">
                         </div>
+                        <div class="form-group">
+                            <label for="fillComicInfoFromProvidersCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="fillComicInfoFromProvidersCheckbox" name="fillComicInfoFromProviders">
+                                <span>Fill empty ComicInfo fields from the matched provider</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                When a file is processed, adds the series' summary, genres, web link, total count (finished series only) and right-to-left reading (Japanese origin only) where the file has none. Values already in a file are never changed, and existing files are only updated when they are next processed.
+                            </small>
+                        </div>
                     </section>
                     <section class="settings-card" id="settings-suwayomi" aria-labelledby="settings-suwayomi-title">
                         <header class="settings-card-header">
@@ -1169,6 +1405,52 @@
                             <input type="text" id="suwayomiImportDirectory" name="suwayomiImportDirectory" placeholder="Library root" autocomplete="off" spellcheck="false">
                             <small class="form-hint">
                                 Where new series folders are created, relative to the watched directory (e.g. <code>Manga</code>). Leave blank for the watched directory itself. Chapters of a series the library already has go into its existing folder.
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-opds" aria-labelledby="settings-opds-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-globe"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-opds-title">OPDS Catalog</h3>
+                                <p class="settings-card-desc">Browse and read the library from comic apps such as Panels, Chunky and KOReader.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="opdsEnabledCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="opdsEnabledCheckbox" name="opdsEnabledCheckbox">
+                                <span>Enable the OPDS catalog</span>
+                            </label>
+                            <small class="form-hint">
+                                Off by default, because it adds a way to sign in. While it is off, every catalog address answers as if it did not exist.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="opdsFeedUrl">Feed URL</label>
+                            <input type="text" id="opdsFeedUrl" name="opdsFeedUrl" readonly spellcheck="false" autocomplete="off">
+                            <small class="form-hint">
+                                Add this address to your comic app and sign in with your username and password, or with your API key (below) as the password. When you sign in through Authelia, only the API key works here.
+                            </small>
+                        </div>
+                        <div class="form-group" data-user-setting>
+                            <label for="opdsApiKeyStatus">Your API key</label>
+                            <output class="form-hint" id="opdsApiKeyStatus" for="opdsApiKeyButton"></output>
+                        </div>
+                        <div class="form-group" id="opdsApiKeyPasswordGroup" data-user-setting>
+                            <label for="opdsApiKeyPassword">Current password</label>
+                            <input type="password" id="opdsApiKeyPassword" name="opdsApiKeyPassword" autocomplete="current-password" spellcheck="false">
+                            <small class="form-hint">
+                                An API key keeps working after you sign out, so creating one asks for your password.
+                            </small>
+                        </div>
+                        <div class="form-group" data-user-setting>
+                            <button type="button" class="btn btn-secondary" id="opdsApiKeyButton" onclick="createOpdsApiKey()">Create API key</button>
+                        </div>
+                        <div class="form-group" id="opdsApiKeyResult" data-user-setting hidden>
+                            <label for="opdsApiKeyValue">New API key</label>
+                            <input type="text" id="opdsApiKeyValue" name="opdsApiKeyValue" readonly spellcheck="false" autocomplete="off">
+                            <small class="form-hint">
+                                Copy it now: it is not shown again. Enter it in your comic app as the password, with your username.
                             </small>
                         </div>
                     </section>
@@ -1227,6 +1509,30 @@
                 </div>
             </div>
         </section>
+
+        <!-- Users page (#/users). Accounts are rendered by js/app/users.js. -->
+        <section id="usersView" class="jobs-page users-page" aria-labelledby="usersPageTitle" hidden>
+            <div class="page-header">
+                <div>
+                    <h2 class="page-title" id="usersPageTitle" tabindex="-1">Users</h2>
+                    <p class="page-subtitle">The accounts that can sign in to ComicMaintainer. Add accounts, change their roles, reset their passwords, and disable or delete them.</p>
+                </div>
+            </div>
+            <div class="jobs-page-body">
+                <div class="settings-readonly-notice" id="usersAdminNotice" hidden>
+                    <svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg> Accounts are managed by administrators.
+                </div>
+                <div class="users-toolbar" id="usersToolbar" hidden>
+                    <button type="button" class="btn btn-primary" id="addUserButton" onclick="openAddUserModal()"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Add user</button>
+                    <p class="form-hint users-notice" id="usersAutheliaNotice" hidden>
+                        Authelia is enabled. Accounts are created when someone first signs in through Authelia, their roles come from their Authelia groups, and their passwords are changed in Authelia. Here you can disable or delete accounts.
+                    </p>
+                </div>
+                <div id="usersList" class="users-list" aria-busy="true">
+                    <div class="loading"><div class="spinner"></div><p>Loading users...</p></div>
+                </div>
+            </div>
+        </section>
     </main>
     
     <!-- Tag Editor Modal -->
@@ -1263,20 +1569,12 @@
                         <input type="text" id="year" name="year" autocomplete="off">
                     </div>
                     <div class="form-group">
-                        <label for="month">Month</label>
-                        <input type="text" id="month" name="month" autocomplete="off">
-                    </div>
-                    <div class="form-group">
                         <label for="writer">Writer</label>
-                        <input type="text" id="writer" name="writer" autocomplete="off">
+                        <input type="text" id="writer" name="writer" autocomplete="off" placeholder="Comma-separated">
                     </div>
                     <div class="form-group">
                         <label for="summary">Summary</label>
                         <textarea id="summary" name="summary" autocomplete="off"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label for="notes">Notes</label>
-                        <textarea id="notes" name="notes" autocomplete="off"></textarea>
                     </div>
                 </form>
             </div>
@@ -1314,7 +1612,7 @@
                     </div>
                     <div class="form-group">
                         <label for="batch_writer">Writer</label>
-                        <input type="text" id="batch_writer" name="writer" autocomplete="off">
+                        <input type="text" id="batch_writer" name="writer" autocomplete="off" placeholder="Comma-separated">
                     </div>
                 </form>
             </div>
@@ -1614,6 +1912,7 @@
                     <li><kbd>g</kbd> <kbd>l</kbd><span>Go to Library</span></li>
                     <li><kbd>g</kbd> <kbd>s</kbd><span>Go to Settings</span></li>
                     <li id="scheduledJobsShortcutItem"><kbd>g</kbd> <kbd>j</kbd><span>Go to Scheduled Jobs</span></li>
+                    <li id="usersShortcutItem"><kbd>g</kbd> <kbd>u</kbd><span>Go to Users</span></li>
                     <li><kbd>r</kbd><span>Refresh the file list <em>(Library)</em></span></li>
                     <li><kbd>f</kbd><span>Open the filter menu <em>(Library)</em></span></li>
                     <li><kbd>?</kbd><span>Show this help</span></li>
@@ -1680,6 +1979,12 @@
                     Comics queued for delivery, newest first, including failures and their error text. A pending delivery can be cancelled until it is handed to the mail server.
                 </p>
                 <p id="emailDeliveryHistoryRateLimit" role="status" style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;" hidden></p>
+                <p id="emailDeliveryHistoryAllUsersRow" style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;" hidden>
+                    <label>
+                        <input type="checkbox" id="emailDeliveryHistoryAllUsers" onchange="toggleEmailDeliveryHistoryAllUsers(this.checked)">
+                        Show the deliveries of all users
+                    </label>
+                </p>
                 <div id="emailDeliveryHistoryList">
                     <div class="loading"><div class="spinner"></div><p>Loading deliveries...</p></div>
                 </div>
@@ -2054,6 +2359,144 @@
         </div>
     </div>
 
+    <!-- Users page dialogs (js/app/users.js). Each form is submitted by the
+         button in its footer, which names it with the form attribute. -->
+    <div class="modal" id="addUserModal" role="dialog" aria-modal="true" aria-labelledby="addUserModalTitle" aria-hidden="true">
+        <div class="modal-content" style="max-width: 560px;">
+            <div class="modal-header">
+                <h2 id="addUserModalTitle">Add User</h2>
+                <button class="close-btn" onclick="closeAddUserModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="addUserError" class="error-message" role="alert"></div>
+                <form id="addUserForm" novalidate onsubmit="submitAddUser(); return false;">
+                    <div class="form-group">
+                        <label for="addUserUsername">Username</label>
+                        <input type="text" id="addUserUsername" name="addUserUsername" required minlength="3" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="addUserUsernameHint">
+                        <small class="form-hint" id="addUserUsernameHint">At least 3 characters. Letters, digits and - . _ @ + only.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="addUserFullName">Full name <span class="users-optional">(optional)</span></label>
+                        <input type="text" id="addUserFullName" name="addUserFullName" maxlength="256" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label for="addUserEmail">Email <span class="users-optional">(optional)</span></label>
+                        <input type="email" id="addUserEmail" name="addUserEmail" maxlength="256" autocomplete="off" spellcheck="false" aria-describedby="addUserEmailHint">
+                        <small class="form-hint" id="addUserEmailHint">Without one, the account gets <code>username@comicmaintainer.local</code>. No two accounts can share an email address.</small>
+                    </div>
+                    <fieldset class="form-group users-role-options">
+                        <legend>Role</legend>
+                        <div id="addUserRoleOptions"></div>
+                    </fieldset>
+                    <div class="form-group">
+                        <label for="addUserPassword">Password</label>
+                        <input type="password" id="addUserPassword" name="addUserPassword" required minlength="8" autocomplete="new-password" aria-describedby="addUserPasswordHint">
+                        <small class="form-hint" id="addUserPasswordHint">At least 8 characters, with an upper-case letter, a lower-case letter and a digit.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="addUserConfirmPassword">Confirm password</label>
+                        <input type="password" id="addUserConfirmPassword" name="addUserConfirmPassword" required autocomplete="new-password">
+                    </div>
+                    <div class="form-group" id="addUserCurrentPasswordGroup">
+                        <label for="addUserCurrentPassword">Your password</label>
+                        <input type="password" id="addUserCurrentPassword" name="addUserCurrentPassword" required autocomplete="current-password" aria-describedby="addUserCurrentPasswordHint">
+                        <small class="form-hint" id="addUserCurrentPasswordHint">A new account is lasting access, so adding one asks for your own password.</small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn" onclick="closeAddUserModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="addUserSubmit" form="addUserForm">Add User</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="userRoleModal" role="dialog" aria-modal="true" aria-labelledby="userRoleModalTitle" aria-describedby="userRoleIntro" aria-hidden="true">
+        <div class="modal-content" style="max-width: 560px;">
+            <div class="modal-header">
+                <h2 id="userRoleModalTitle">Change Role</h2>
+                <button class="close-btn" onclick="closeUserRoleModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="form-hint form-hint--lead" id="userRoleIntro"></p>
+                <div id="userRoleError" class="error-message" role="alert"></div>
+                <form id="userRoleForm" novalidate onsubmit="submitUserRole(); return false;">
+                    <fieldset class="form-group users-role-options">
+                        <legend>Role</legend>
+                        <div id="userRoleOptions"></div>
+                    </fieldset>
+                    <div class="form-group" id="userRoleCurrentPasswordGroup">
+                        <label for="userRoleCurrentPassword">Your password</label>
+                        <input type="password" id="userRoleCurrentPassword" name="userRoleCurrentPassword" required autocomplete="current-password" aria-describedby="userRoleCurrentPasswordHint">
+                        <small class="form-hint" id="userRoleCurrentPasswordHint">A role decides what the account can do from now on, so changing it asks for your own password.</small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn" onclick="closeUserRoleModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="userRoleSubmit" form="userRoleForm">Change Role</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="userPasswordModal" role="dialog" aria-modal="true" aria-labelledby="userPasswordModalTitle" aria-describedby="userPasswordIntro" aria-hidden="true">
+        <div class="modal-content" style="max-width: 560px;">
+            <div class="modal-header">
+                <h2 id="userPasswordModalTitle">Reset Password</h2>
+                <button class="close-btn" onclick="closeUserPasswordModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="form-hint form-hint--lead" id="userPasswordIntro"></p>
+                <div id="userPasswordError" class="error-message" role="alert"></div>
+                <form id="userPasswordForm" novalidate onsubmit="submitUserPassword(); return false;">
+                    <div class="form-group">
+                        <label for="userPasswordNew">New password</label>
+                        <input type="password" id="userPasswordNew" name="userPasswordNew" required minlength="8" autocomplete="new-password" aria-describedby="userPasswordNewHint">
+                        <small class="form-hint" id="userPasswordNewHint">At least 8 characters, with an upper-case letter, a lower-case letter and a digit.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="userPasswordConfirm">Confirm new password</label>
+                        <input type="password" id="userPasswordConfirm" name="userPasswordConfirm" required autocomplete="new-password">
+                    </div>
+                    <div class="form-group" id="userPasswordCurrentPasswordGroup">
+                        <label for="userPasswordCurrentPassword">Your password</label>
+                        <input type="password" id="userPasswordCurrentPassword" name="userPasswordCurrentPassword" required autocomplete="current-password" aria-describedby="userPasswordCurrentPasswordHint">
+                        <small class="form-hint" id="userPasswordCurrentPasswordHint">Whoever knows the new password can sign in as this account, so setting it asks for your own password.</small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn" onclick="closeUserPasswordModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="userPasswordSubmit" form="userPasswordForm">Reset Password</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Disable, enable and delete: the message and button are set per action. -->
+    <div class="modal" id="userConfirmModal" role="dialog" aria-modal="true" aria-labelledby="userConfirmModalTitle" aria-describedby="userConfirmMessage" aria-hidden="true">
+        <div class="modal-content" style="max-width: 560px;">
+            <div class="modal-header">
+                <h2 id="userConfirmModalTitle">Disable Account</h2>
+                <button class="close-btn" onclick="closeUserConfirmModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="userConfirmMessage" class="users-confirm-message"></div>
+                <div id="userConfirmError" class="error-message" role="alert"></div>
+                <form id="userConfirmForm" novalidate onsubmit="submitUserConfirm(); return false;">
+                    <div class="form-group" id="userConfirmCurrentPasswordGroup" hidden>
+                        <label for="userConfirmCurrentPassword">Your password</label>
+                        <input type="password" id="userConfirmCurrentPassword" name="userConfirmCurrentPassword" autocomplete="current-password" aria-describedby="userConfirmCurrentPasswordHint">
+                        <small class="form-hint" id="userConfirmCurrentPasswordHint">Enabling an account lets it sign in again, so it asks for your own password.</small>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn" id="userConfirmCancel" onclick="closeUserConfirmModal()">Cancel</button>
+                <button type="submit" class="btn btn-danger" id="userConfirmSubmit" form="userConfirmForm">Disable</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Find on Suwayomi Modal -->
     <div class="modal" id="suwayomiSearchModal" role="dialog" aria-modal="true" aria-labelledby="suwayomiSearchModalTitle" aria-hidden="true">
         <div class="modal-content suwayomi-search-modal-content">
@@ -2083,25 +2526,6 @@
     </div>
     
     
-    <!-- External JavaScript -->
-    <script>
-        // Base path for reverse proxy support
-        // In .NET, this can be configured via environment variable BASE_PATH if needed
-        const BASE_PATH = '';
-        
-        // Helper function to build URLs with base path
-        function apiUrl(path) {
-            // Ensure path starts with /
-            if (!path.startsWith('/')) {
-                path = '/' + path;
-            }
-            const fullUrl = BASE_PATH + path;
-            console.log('[API_URL] Building URL - BASE_PATH:', BASE_PATH, 'path:', path, 'result:', fullUrl);
-            return fullUrl;
-        }
-        
-    </script>
-
     <!-- App scripts, loaded with a server-injected version for cache busting.
          The __APP_VERSION__ placeholder is replaced by
          HtmlVersionInjectionMiddleware so the URLs are always versioned
@@ -2111,27 +2535,28 @@
          inline onclick handlers can call their functions. ORDER MATTERS:
          shared.js and templating.js first, main.js (bootstrap) last. Keep this
          list in sync with APP_SCRIPTS in /sw.js. -->
-    <script src="/js/shared.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/templating.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/api.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/state.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/events.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/shell.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/service-worker.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/router.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/library.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/series.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/suwayomi-search.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/file-list.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/file-actions.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/jobs.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/settings.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/scheduled-jobs.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/email.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/menus.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/series-metadata.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/modals.js?v=__APP_VERSION__"></script>
-    <script src="/js/app/error-reporting.js?v=__APP_VERSION__"></script>
-    <script src="/js/main.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/shared.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/templating.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/api.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/state.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/events.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/shell.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/service-worker.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/router.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/library.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/series.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/suwayomi-search.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/selection.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/file-actions.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/jobs.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/settings.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/scheduled-jobs.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/users.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/email.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/menus.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/series-metadata.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/modals.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/error-reporting.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/main.js?v=__APP_VERSION__"></script>
 </body>
 </html>

@@ -22,9 +22,6 @@ public class UserPreferences
     /// <summary>Default reading mode, either <c>manga</c> or <c>webcomic</c>.</summary>
     public string? ReadingMode { get; set; }
 
-    /// <summary>Library layout, either <c>files</c> (folder view) or <c>series</c>.</summary>
-    public string? LibraryViewMode { get; set; }
-
     /// <summary>Active library filter (e.g. <c>all</c>, <c>unmarked</c>, <c>duplicates</c>).</summary>
     public string? FilterMode { get; set; }
 

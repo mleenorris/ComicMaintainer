@@ -8,7 +8,9 @@ using Microsoft.Extensions.Logging;
 namespace ComicMaintainer.Core.Services;
 
 /// <summary>
-/// Manages saved ereader devices and per-series automatic-delivery subscriptions.
+/// Manages saved ereader devices and per-series automatic-delivery
+/// subscriptions, each visible only within the caller's
+/// <see cref="EmailAccessScope"/>.
 /// </summary>
 public class EreaderDeviceService : IEreaderDeviceService
 {
@@ -26,38 +28,52 @@ public class EreaderDeviceService : IEreaderDeviceService
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<EreaderDeviceDto>> GetDevicesAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<EreaderDeviceDto>> GetDevicesAsync(EmailAccessScope scope, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         var devices = await db.EreaderDevices
             .AsNoTracking()
+            .ListedFor(scope)
             .OrderBy(d => d.Name)
             .ToListAsync(cancellationToken);
 
         return devices.Select(ToDto).ToList();
     }
 
-    public async Task<EreaderDeviceDto?> GetDeviceAsync(int deviceId, CancellationToken cancellationToken = default)
+    public async Task<EreaderDeviceDto?> GetDeviceAsync(EmailAccessScope scope, int deviceId, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var device = await db.EreaderDevices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken);
+        var device = await db.EreaderDevices
+            .AsNoTracking()
+            .AccessibleTo(scope)
+            .FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken);
         return device is null ? null : ToDto(device);
     }
 
     public async Task<EreaderDeviceDto> CreateDeviceAsync(
+        EmailAccessScope scope,
         string name,
         string emailAddress,
         string? deliveryFormat,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+        var ownerUserId = scope.UserId
+            ?? throw new ArgumentException("A device can only be saved by a signed-in user.", nameof(scope));
+
         var normalizedName = NormalizeName(name);
         var normalizedEmail = EmailAddressUtils.ValidateOrThrow(emailAddress, nameof(emailAddress));
         var format = EmailDeliveryFormat.NormalizeOrThrow(deliveryFormat, EmailDeliveryFormat.Original, nameof(deliveryFormat));
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
 
+        // Only the user's own devices: another user's addresses are not theirs to know.
         var exists = await db.EreaderDevices
-            .AnyAsync(d => d.EmailAddress == normalizedEmail, cancellationToken);
+            .AnyAsync(d => d.OwnerUserId == ownerUserId && d.EmailAddress == normalizedEmail, cancellationToken);
         if (exists)
         {
             throw new InvalidOperationException($"A device with address '{normalizedEmail}' already exists.");
@@ -65,6 +81,7 @@ public class EreaderDeviceService : IEreaderDeviceService
 
         var entity = new EreaderDeviceEntity
         {
+            OwnerUserId = ownerUserId,
             Name = normalizedName,
             EmailAddress = normalizedEmail,
             DeliveryFormat = format,
@@ -80,14 +97,19 @@ public class EreaderDeviceService : IEreaderDeviceService
     }
 
     public async Task<EreaderDeviceDto?> UpdateDeviceAsync(
+        EmailAccessScope scope,
         int deviceId,
         string? name,
         string? emailAddress,
         string? deliveryFormat,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var entity = await db.EreaderDevices.FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken);
+        var entity = await db.EreaderDevices
+            .AccessibleTo(scope)
+            .FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken);
         if (entity is null)
         {
             return null;
@@ -101,8 +123,11 @@ public class EreaderDeviceService : IEreaderDeviceService
         if (emailAddress is not null)
         {
             var normalizedEmail = EmailAddressUtils.ValidateOrThrow(emailAddress, nameof(emailAddress));
+            var ownerUserId = entity.OwnerUserId;
             var conflict = await db.EreaderDevices
-                .AnyAsync(d => d.Id != deviceId && d.EmailAddress == normalizedEmail, cancellationToken);
+                .AnyAsync(
+                    d => d.Id != deviceId && d.OwnerUserId == ownerUserId && d.EmailAddress == normalizedEmail,
+                    cancellationToken);
             if (conflict)
             {
                 throw new InvalidOperationException($"A device with address '{normalizedEmail}' already exists.");
@@ -122,30 +147,39 @@ public class EreaderDeviceService : IEreaderDeviceService
         return ToDto(entity);
     }
 
-    public async Task<bool> DeleteDeviceAsync(int deviceId, CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteDeviceAsync(EmailAccessScope scope, int deviceId, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var entity = await db.EreaderDevices.FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken);
+        var entity = await db.EreaderDevices
+            .AccessibleTo(scope)
+            .FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken);
         if (entity is null)
         {
             return false;
         }
 
         // Subscriptions cascade with the device; delivery history is retained on
-        // purpose so the user can still see what was sent where.
+        // purpose so the user can still see what was sent where. A delivery
+        // still pending is cancelled when its turn comes instead of being sent.
         db.EreaderDevices.Remove(entity);
         await db.SaveChangesAsync(cancellationToken);
         return true;
     }
 
     public async Task<IReadOnlyList<SeriesEmailSubscriptionDto>> GetSubscriptionsAsync(
+        EmailAccessScope scope,
         string? seriesTitle = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
 
+        // A subscription belongs to the owner of its device.
         var query = from subscription in db.SeriesEmailSubscriptions.AsNoTracking()
-                    join device in db.EreaderDevices.AsNoTracking() on subscription.DeviceId equals device.Id
+                    join device in db.EreaderDevices.AsNoTracking().ListedFor(scope) on subscription.DeviceId equals device.Id
                     select new { subscription, device };
 
         if (!string.IsNullOrWhiteSpace(seriesTitle))
@@ -164,12 +198,15 @@ public class EreaderDeviceService : IEreaderDeviceService
     }
 
     public async Task<SeriesEmailSubscriptionDto?> UpsertSubscriptionAsync(
+        EmailAccessScope scope,
         string seriesTitle,
         int deviceId,
         string? deliveryFormat,
         bool enabled,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         if (string.IsNullOrWhiteSpace(seriesTitle))
         {
             throw new ArgumentException("Series title is required", nameof(seriesTitle));
@@ -180,7 +217,10 @@ public class EreaderDeviceService : IEreaderDeviceService
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
 
-        var device = await db.EreaderDevices.AsNoTracking().FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken);
+        var device = await db.EreaderDevices
+            .AsNoTracking()
+            .AccessibleTo(scope)
+            .FirstOrDefaultAsync(d => d.Id == deviceId, cancellationToken);
         if (device is null)
         {
             return null;
@@ -222,10 +262,17 @@ public class EreaderDeviceService : IEreaderDeviceService
         return ToDto(entity, device);
     }
 
-    public async Task<bool> DeleteSubscriptionAsync(int subscriptionId, CancellationToken cancellationToken = default)
+    public async Task<bool> DeleteSubscriptionAsync(EmailAccessScope scope, int subscriptionId, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var entity = await db.SeriesEmailSubscriptions.FirstOrDefaultAsync(s => s.Id == subscriptionId, cancellationToken);
+        var entity = await (
+                from subscription in db.SeriesEmailSubscriptions
+                join device in db.EreaderDevices.AccessibleTo(scope) on subscription.DeviceId equals device.Id
+                where subscription.Id == subscriptionId
+                select subscription)
+            .FirstOrDefaultAsync(cancellationToken);
         if (entity is null)
         {
             return false;
@@ -253,7 +300,8 @@ public class EreaderDeviceService : IEreaderDeviceService
         entity.EmailAddress,
         entity.DeliveryFormat,
         entity.CreatedAt,
-        entity.UpdatedAt);
+        entity.UpdatedAt,
+        entity.OwnerUserId);
 
     private static SeriesEmailSubscriptionDto ToDto(SeriesEmailSubscriptionEntity subscription, EreaderDeviceEntity device) => new(
         subscription.Id,
@@ -264,5 +312,6 @@ public class EreaderDeviceService : IEreaderDeviceService
         device.EmailAddress,
         subscription.DeliveryFormat,
         subscription.Enabled,
-        subscription.LastSentAt);
+        subscription.LastSentAt,
+        device.OwnerUserId);
 }

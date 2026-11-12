@@ -54,6 +54,7 @@ function reply(status, body, { headers = {}, type } = {}) {
 const html = body => reply(200, body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 const image = body => reply(200, body, { headers: { 'Content-Type': 'image/jpeg' } });
 const script = body => reply(200, body, { headers: { 'Content-Type': 'application/javascript' } });
+const stylesheet = body => reply(200, body, { headers: { 'Content-Type': 'text/css' } });
 
 function toResponse(result, url) {
     let response;
@@ -164,9 +165,14 @@ class FakeCache {
 
     async put(request, response) {
         const url = absolute(request);
+        // Like the real put(): the body is read to its end before anything is
+        // stored, which uses the response up and rejects if the body fails.
+        const stored = response.body === null
+            ? response
+            : new Response(await response.arrayBuffer(), { status: response.status, statusText: response.statusText, headers: response.headers });
         // Like the real batch "put": the old entry goes and the new one is appended.
         this.entries.delete(url);
-        this.entries.set(url, { request: typeof request === 'object' ? request : new Request(url), response });
+        this.entries.set(url, { request: typeof request === 'object' ? request : new Request(url), response: stored });
     }
 
     async keys() {
@@ -338,8 +344,8 @@ class FakeMessageChannel {
 }
 
 /** Network routes for one comic's info, pages and cover, as the reader API serves them. */
-function routeComic(network, filePath, { pages = 3, fileName = filePath.split(/[\\/]/).pop() } = {}) {
-    const isFor = path => call => call.path === path && call.query.filePath === filePath;
+function routeComic(network, filePath, { pages = 3, fileName = filePath.split(/[\\/]/).pop(), basePath = '' } = {}) {
+    const isFor = path => call => call.path === basePath + path && call.query.filePath === filePath;
     network.route(isFor('/api/ComicReader/info'), { filePath, fileName, pageCount: pages });
     network.route(isFor('/api/ComicReader/page'), call => image(`${fileName} page ${call.query.page}`));
     network.route(isFor('/api/ComicReader/cover'), image(`${fileName} cover`));
@@ -367,7 +373,21 @@ async function extend(lifetime) {
     }
 }
 
-function loadServiceWorker({ routes, network = createNetwork(routes), caches, clients = [] } = {}) {
+// What the server does to sw.js, padded so that nothing after the placeholder
+// moves: coverage is merged across runs by offset, and a shifted copy of the
+// script would be counted as a second, mostly unexercised one.
+const BASE_PATH_LITERAL = "'__BASE_PATH__'";
+const fillBasePath = basePath => source =>
+    source.replace(BASE_PATH_LITERAL, `'${basePath}'`.padEnd(BASE_PATH_LITERAL.length));
+
+function loadServiceWorker({
+    basePath,
+    routes,
+    network = createNetwork(routes),
+    caches,
+    clients = [],
+    registration = { scope: `${ORIGIN}/`, installing: null, waiting: null, active: null }
+} = {}) {
     const cacheStorage = caches || new FakeCacheStorage(network);
     const listeners = new Map();
     const worker = {
@@ -393,8 +413,8 @@ function loadServiceWorker({ routes, network = createNetwork(routes), caches, cl
             matchAll: async () => [...clients],
             get: async id => clients.find(client => client.id === id)
         },
-        registration: { scope: `${ORIGIN}/`, installing: null, waiting: null, active: null },
-        location: new URL(`${ORIGIN}/sw.js`),
+        registration,
+        location: new URL(`${ORIGIN}${basePath ?? ''}/sw.js`),
         skipWaiting: async () => {
             worker.skipWaitingCalls++;
         },
@@ -421,7 +441,7 @@ function loadServiceWorker({ routes, network = createNetwork(routes), caches, cl
         clearTimeout
     });
     context.self = context;
-    runWwwrootScript('sw.js', context);
+    runWwwrootScript('sw.js', context, basePath ? fillBasePath(basePath) : undefined);
 
     function dispatch(type, init = {}) {
         const lifetime = [];
@@ -449,9 +469,10 @@ function loadServiceWorker({ routes, network = createNetwork(routes), caches, cl
         async install() {
             await extend(dispatch('install').lifetime);
         },
-        /** Fire `activate` and wait for its cleanup. */
+        /** Fire `activate` and wait for its cleanup; the registration then has an active worker. */
         async activate() {
             await extend(dispatch('activate').lifetime);
+            registration.active = { scriptURL: `${ORIGIN}/sw.js`, state: 'activated' };
         },
         /**
          * Fire `fetch` for a Request (or a URL plus makeRequest() options).
@@ -506,25 +527,30 @@ function loadServiceWorker({ routes, network = createNetwork(routes), caches, cl
         idle,
         /** A fresh evaluation of sw.js over the same caches and network (a woken-up worker). */
         restart() {
-            return loadServiceWorker({ network, caches: cacheStorage, clients });
+            return loadServiceWorker({ network, caches: cacheStorage, clients, registration });
         }
     });
     return worker;
 }
 
 const OFFLINE_PAGE = '<!DOCTYPE html><title>Offline</title><h1>You\'re offline</h1>';
+// The reader document install precaches (the server's copy at install time).
+const PRECACHED_READER_PAGE = '<!DOCTYPE html><title>Reader (precached)</title>';
 
 /**
  * Route everything install() fetches on `network`: /api/version (answering
- * `version`), the essential files and every /js/ script. Routes added later
- * take priority, so a test can still make any of them fail.
+ * `version`), the essential files (the reader document answering `reader`),
+ * every /js/ script and every /css/ stylesheet. Routes added later take
+ * priority, so a test can still make any of them fail.
  */
-function installRoutes(network, version = { version: APP_VERSION, platform: '.NET' }) {
+function installRoutes(network, version = { version: APP_VERSION, platform: '.NET' }, { reader = PRECACHED_READER_PAGE } = {}) {
     network.route('GET /api/version', version);
     network.route('GET /manifest.json', { name: 'Comic Maintainer', start_url: '/' });
     network.route('GET /offline.html', html(OFFLINE_PAGE));
+    network.route('GET /reader.html', html(reader));
     network.route(call => call.sameOrigin && call.path.startsWith('/icons/'), reply(200, 'png', { headers: { 'Content-Type': 'image/png' } }));
     network.route(call => call.sameOrigin && call.path.startsWith('/js/'), call => script(`// ${call.path}${call.search}`));
+    network.route(call => call.sameOrigin && call.path.startsWith('/css/'), call => stylesheet(`/* ${call.path}${call.search} */`));
     return network;
 }
 
@@ -546,12 +572,14 @@ module.exports = {
     DEFAULT_CACHE,
     IMAGE_CACHE,
     OFFLINE_CACHE,
+    PRECACHED_READER_PAGE,
     NAVIGATION_ACCEPT,
     absolute,
     reply,
     html,
     image,
     script,
+    stylesheet,
     toResponse,
     createNetwork,
     FakeCacheStorage,

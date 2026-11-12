@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.Tests.Helpers;
 
 namespace ComicMaintainer.Tests.Utilities;
 
@@ -155,7 +156,7 @@ public sealed class LibraryPathValidatorTests : IDisposable
             LibraryPathValidator.IsSameOrUnder(Native("/COMICS/Saga 001.cbz"), Native("/comics")));
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void IsLexicallyWithin_NormalizesThePathButNotTheRootsLinks()
     {
         // Unlike TryResolveWithin, a link is judged by where it is, not where it leads.
@@ -198,7 +199,7 @@ public sealed class LibraryPathValidatorTests : IDisposable
         Assert.Throws<ArgumentException>(() => LibraryPathValidator.IsLexicallyWithin(Path.Join(_library, "bad\0name.cbz"), _library));
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void TryResolveWithin_RejectsADirectoryLinkThatPointsOutsideTheRoot()
     {
         File.WriteAllText(Path.Join(_outside, "secret.cbz"), "x");
@@ -210,7 +211,7 @@ public sealed class LibraryPathValidatorTests : IDisposable
         Assert.False(LibraryPathValidator.TryResolveWithin(Path.Join(link, "not-yet-created.cbz"), out _, _library));
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void TryResolveWithin_RejectsAFileLinkThatPointsOutsideTheRoot()
     {
         var target = Path.Join(_outside, "secret.cbz");
@@ -223,7 +224,7 @@ public sealed class LibraryPathValidatorTests : IDisposable
         Assert.Equal(Path.Join(_realOutside, "secret.cbz"), LibraryPathValidator.ResolveRealPath(link));
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void TryResolveWithin_RejectsADanglingLinkThatPointsOutsideTheRoot()
     {
         // Writing through the link would create the file outside the library,
@@ -234,7 +235,7 @@ public sealed class LibraryPathValidatorTests : IDisposable
         Assert.False(LibraryPathValidator.TryResolveWithin(link, out _, _library));
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void TryResolveWithin_ReturnsThePhysicalPathOfALinkIntoTheRoot()
     {
         var target = Path.Join(_library, "Series", "Issue 001.cbz");
@@ -247,7 +248,7 @@ public sealed class LibraryPathValidatorTests : IDisposable
         Assert.Equal(Path.Join(_realLibrary, "Series", "Issue 001.cbz"), resolved);
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void TryResolveWithin_ResolvesALinkedAllowedDirectory()
     {
         var linkedRoot = Path.Join(_outside, "library-link");
@@ -260,7 +261,7 @@ public sealed class LibraryPathValidatorTests : IDisposable
         Assert.Equal(Path.Join(_realLibrary, "Issue 001.cbz"), viaLink);
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void TryResolveWithin_RejectsAFileLinkWhoseTargetGoesThroughADirectoryLinkOutsideTheRoot()
     {
         // library/a.cbz -> library/esc/secret.cbz looks contained, but
@@ -275,7 +276,7 @@ public sealed class LibraryPathValidatorTests : IDisposable
         Assert.Equal(Path.Join(_realOutside, "secret.cbz"), LibraryPathValidator.ResolveRealPath(link));
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void TryResolveWithin_RejectsChainedRelativeLinksThatEndOutsideTheRoot()
     {
         File.WriteAllText(Path.Join(_outside, "secret.cbz"), "x");
@@ -292,7 +293,7 @@ public sealed class LibraryPathValidatorTests : IDisposable
         Assert.Equal(Path.Join(_realOutside, "created-later.cbz"), LibraryPathValidator.ResolveRealPath(pending));
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void TryResolveWithin_ResolvesDotDotInALinkTargetFromWhereTheLinkReallyLeads()
     {
         // The OS applies ".." after following library/deep -> outside/deep, so
@@ -308,7 +309,7 @@ public sealed class LibraryPathValidatorTests : IDisposable
         Assert.Equal(Path.Join(_realOutside, "secret.cbz"), LibraryPathValidator.ResolveRealPath(link));
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void TryResolveWithin_ReturnsThePhysicalPathOfLinksThatStayInsideTheRoot()
     {
         var series = Path.Join(_library, "Series");
@@ -338,7 +339,7 @@ public sealed class LibraryPathValidatorTests : IDisposable
         }
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void TryResolveWithin_FollowsUpToFortyLinksLikeTheOperatingSystem()
     {
         var issue = Path.Join(_library, "Issue 001.cbz");
@@ -355,7 +356,7 @@ public sealed class LibraryPathValidatorTests : IDisposable
         Assert.Equal(string.Empty, resolved);
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void TryResolveWithin_RejectsLinkLoopsInsteadOfHanging()
     {
         // A loop never reaches a target, so the OS cannot open it either; it is
@@ -378,7 +379,7 @@ public sealed class LibraryPathValidatorTests : IDisposable
         Assert.False(LibraryPathValidator.TryResolveWithin(Path.Join(_library, "Issue 001.cbz"), out _, first));
     }
 
-    [Fact]
+    [SymbolicLinkFact]
     public void ResolveRealPath_LimitsTheTotalNumberOfLinksNotJustTheChainLength()
     {
         // Each fan-N link expands to fan-(N+1) twice: no chain is longer than 31

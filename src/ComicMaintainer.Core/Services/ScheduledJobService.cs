@@ -40,12 +40,7 @@ public class ScheduledJobService : IScheduledJobService
         _handlers = dict;
     }
 
-    /// <summary>
-    /// Handlers exposed to the hosted service so it can iterate and dispatch
-    /// runs. Returned as an unsorted snapshot.
-    /// </summary>
-    public IEnumerable<IScheduledJobHandler> Handlers => _handlers.Values;
-
+    /// <inheritdoc />
     public IScheduledJobHandler? GetHandler(string jobKey) =>
         _handlers.TryGetValue(jobKey, out var h) ? h : null;
 

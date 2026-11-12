@@ -3,12 +3,13 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Reader.Interfaces;
 using ComicMaintainer.Core.Reader.Models;
 using ComicMaintainer.Core.Reader.Services;
+using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 using System.Security.Claims;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -21,6 +22,15 @@ namespace ComicMaintainer.WebApi.Controllers;
 [Authorize]
 public class ComicReaderController : ControllerBase
 {
+    /// <summary>
+    /// Cache policy for pages and covers. They are only served to authenticated
+    /// callers, so a shared cache (a reverse proxy's cache, a CDN, a corporate
+    /// proxy) must never store them and hand them to someone else: <c>private</c>
+    /// limits storage to the requesting browser and the PWA's service worker,
+    /// which is all the reader and the library grid rely on.
+    /// </summary>
+    internal const string PrivateCacheControl = "private, max-age=3600";
+
     private readonly IComicReaderService _readerService;
     private readonly IFileStoreService _fileStore;
     private readonly IFileCoverCacheService _coverCache;
@@ -68,10 +78,20 @@ public class ComicReaderController : ControllerBase
             _settings.CurrentValue.WatchedDirectory);
 
     /// <summary>
+    /// The answer for an archive the read limits refused (too many entries, or
+    /// a page that is, or expands to, more than the per-entry cap): 422 with the
+    /// reason, which names the entry and the limit. The reader service has
+    /// already logged it.
+    /// </summary>
+    private UnprocessableEntityObjectResult ArchiveRefused(ArchiveLimitExceededException ex) =>
+        UnprocessableEntity(new { error = ex.Message });
+
+    /// <summary>
     /// Get comic information including page count
     /// </summary>
     /// <param name="filePath">Path to the comic file</param>
     [HttpGet("info")]
+    [FailureMessage("Error reading comic file")]
     public async Task<ActionResult<object>> GetComicInfo([FromQuery] string filePath)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -102,20 +122,27 @@ public class ComicReaderController : ControllerBase
                 pageCount
             });
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        catch (ArchiveLimitExceededException ex)
         {
-            _logger.LogError(ex, "Error getting comic info for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error reading comic file" });
+            return ArchiveRefused(ex);
         }
     }
 
     /// <summary>
-    /// Get a specific page from a comic as an image
+    /// Get a specific page from a comic as an image.
     /// </summary>
+    /// <remarks>
+    /// Pages are not cached on the server as responses: they are served only to
+    /// authenticated callers, the browser and the PWA's service worker already
+    /// keep the pages a reader has seen, and an archive's sorted page list is
+    /// cached by <see cref="IComicReaderService"/>, so a page costs one entry
+    /// read. Revalidation is answered with 304 from the file's length and
+    /// last-write time, without opening the archive.
+    /// </remarks>
     /// <param name="filePath">Path to the comic file</param>
     /// <param name="page">Page number (1-based index)</param>
     [HttpGet("page")]
-    [OutputCache(PolicyName = "ComicPages")]
+    [FailureMessage("Error reading page")]
     public async Task<IActionResult> GetPage([FromQuery] string filePath, [FromQuery] int page = 1)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -129,7 +156,8 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
-        if (!System.IO.File.Exists(resolvedPath))
+        var info = new FileInfo(resolvedPath);
+        if (!info.Exists)
         {
             return NotFound(new { error = "File not found" });
         }
@@ -141,36 +169,62 @@ public class ComicReaderController : ControllerBase
 
         try
         {
+            // A page is a function of the archive's content, so the file's length
+            // and last-write time (read before the page, so a concurrent rewrite
+            // can only make the tag older than the bytes, never newer) validate it.
+            var etag = BuildPageETag(info.Length, info.LastWriteTimeUtc, page);
+            if (ConditionalRequests.IfNoneMatchSatisfied(Request.Headers.IfNoneMatch, etag))
+            {
+                Response.Headers.ETag = etag;
+                Response.Headers.CacheControl = PrivateCacheControl;
+                return StatusCode(StatusCodes.Status304NotModified);
+            }
+
             var result = await _readerService.GetPageAsync(resolvedPath, page);
-            
+
             if (result == null)
             {
                 return NotFound(new { error = "Page not found" });
             }
 
             var (data, contentType) = result.Value;
-            
-            // Set cache headers for better performance
-            Response.Headers["Cache-Control"] = "public, max-age=3600";
-            
+
+            Response.Headers.ETag = etag;
+            Response.Headers.CacheControl = PrivateCacheControl;
+            Response.Headers.LastModified = new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero).ToString("R");
+
             return File(data, contentType);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        catch (ArchiveLimitExceededException ex)
         {
-            _logger.LogError(ex, "Error getting page {Page} from {FilePath}", page, LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error reading page" });
+            return ArchiveRefused(ex);
         }
     }
+
+    /// <summary>
+    /// Builds the strong ETag for one page of one version of an archive: the
+    /// version of the page-list rules (<see cref="ComicReaderService.PageListVersion"/>,
+    /// because which image is page N depends on them as well as on the file),
+    /// the page number and the file's last-write time and length.
+    /// </summary>
+    [NonAction]
+    public static string BuildPageETag(long fileLength, DateTime lastWriteTimeUtc, int page) =>
+        "\"v" + ComicReaderService.PageListVersion.ToString(CultureInfo.InvariantCulture)
+            + "-p" + page.ToString(CultureInfo.InvariantCulture)
+            + "-" + lastWriteTimeUtc.Ticks.ToString("x", CultureInfo.InvariantCulture)
+            + "-" + fileLength.ToString("x", CultureInfo.InvariantCulture) + "\"";
 
     /// <summary>
     /// Get the cached cover (page 1) of a comic file as an image. Backed by
     /// the persistent on-disk file-cover cache so the archive is only opened
     /// the first time a file is requested (and again whenever its
     /// last-write-time or length changes). Supports <c>If-None-Match</c> for
-    /// conditional revalidation.
+    /// conditional revalidation, answered from the file's metadata alone: a
+    /// 304 reads neither the archive nor the cached thumbnail.
     /// </summary>
     /// <param name="filePath">Path to the comic file</param>
     [HttpGet("cover")]
+    [FailureMessage("Error reading cover")]
     public async Task<IActionResult> GetCover([FromQuery] string filePath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -184,50 +238,54 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
-        if (!System.IO.File.Exists(resolvedPath))
-        {
-            return NotFound(new { error = "File not found" });
-        }
-
         try
         {
+            var validator = _coverCache.GetValidator(resolvedPath);
+            if (validator is null)
+            {
+                return NotFound(new { error = "File not found" });
+            }
+
+            var etag = BuildCoverETag(validator.Value);
+            if (ConditionalRequests.IfNoneMatchSatisfied(Request.Headers.IfNoneMatch, etag))
+            {
+                Response.Headers.ETag = etag;
+                Response.Headers.CacheControl = PrivateCacheControl;
+                return StatusCode(StatusCodes.Status304NotModified);
+            }
+
             var entry = await _coverCache.GetOrCreateAsync(resolvedPath, cancellationToken);
             if (entry is null)
             {
                 return NotFound(new { error = "Cover not available" });
             }
 
-            var etag = BuildCoverETag(entry.Value);
-            if (ConditionalRequests.IfNoneMatchSatisfied(Request.Headers.IfNoneMatch, etag))
-            {
-                Response.Headers.ETag = etag;
-                Response.Headers.CacheControl = "public, max-age=3600";
-                return StatusCode(StatusCodes.Status304NotModified);
-            }
-
-            Response.Headers.ETag = etag;
-            Response.Headers.CacheControl = "public, max-age=3600";
-            Response.Headers.LastModified = entry.Value.LastModified.ToString("R");
+            // Label the bytes with the version they were generated from, which is
+            // newer than the validator above if the file changed in between.
+            var served = entry.Value.Validator;
+            Response.Headers.ETag = BuildCoverETag(served);
+            Response.Headers.CacheControl = PrivateCacheControl;
+            Response.Headers.LastModified = served.SourceLastModified.ToString("R");
             return File(entry.Value.Data, entry.Value.ContentType);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        catch (ArchiveLimitExceededException ex)
         {
-            _logger.LogError(ex, "Error getting cover for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error reading cover" });
+            return ArchiveRefused(ex);
         }
     }
 
     /// <summary>
-    /// Builds the strong ETag for a cover entry. Includes the thumbnail
-    /// variant so browsers revalidate after the thumbnail settings change.
+    /// Builds the strong ETag for a cover from its validator: the source file's
+    /// last-write time and length, and the thumbnail variant so browsers
+    /// revalidate after the thumbnail settings change.
     /// </summary>
     [NonAction]
-    public static string BuildCoverETag(FileCoverCacheEntry entry)
+    public static string BuildCoverETag(FileCoverValidator validator)
     {
-        var variant = string.IsNullOrEmpty(entry.Variant) ? "orig" : entry.Variant;
+        var variant = string.IsNullOrEmpty(validator.Variant) ? "orig" : validator.Variant;
         // Keep the opaque-tag to safe token characters.
         var safeVariant = new string(variant.Where(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.').ToArray());
-        return "\"" + entry.LastModified.UtcTicks.ToString("x") + "-" + entry.Data.Length.ToString("x") + "-" + safeVariant + "\"";
+        return "\"" + validator.SourceLastModified.UtcTicks.ToString("x") + "-" + validator.SourceLength.ToString("x") + "-" + safeVariant + "\"";
     }
 
     /// <summary>
@@ -235,6 +293,7 @@ public class ComicReaderController : ControllerBase
     /// </summary>
     /// <param name="filePath">Path to the comic file</param>
     [HttpGet("pages")]
+    [FailureMessage("Error reading comic file")]
     public async Task<ActionResult<object>> GetPages([FromQuery] string filePath)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -258,10 +317,9 @@ public class ComicReaderController : ControllerBase
             var pages = await _readerService.GetPageNamesAsync(resolvedPath);
             return Ok(new { pages, count = pages.Count });
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        catch (ArchiveLimitExceededException ex)
         {
-            _logger.LogError(ex, "Error getting pages from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error reading comic file" });
+            return ArchiveRefused(ex);
         }
     }
 
@@ -271,6 +329,7 @@ public class ComicReaderController : ControllerBase
     /// <param name="filePath">Current file path</param>
     /// <param name="direction">"next" or "prev"</param>
     [HttpGet("adjacent")]
+    [FailureMessage("Error finding adjacent file")]
     public async Task<ActionResult<object>> GetAdjacentFile([FromQuery] string filePath, [FromQuery] string direction = "next")
     {
         if (string.IsNullOrEmpty(filePath))
@@ -284,32 +343,24 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
-        try
+        var adjacent = await _seriesLibrary.GetAdjacentIssueAsync(filePath, direction);
+
+        if (!adjacent.Found)
         {
-            var adjacent = await _seriesLibrary.GetAdjacentIssueAsync(filePath, direction);
-
-            if (!adjacent.Found)
-            {
-                return NotFound(new { error = "Current file not found in library" });
-            }
-
-            if (!adjacent.HasAdjacent)
-            {
-                return Ok(new { hasAdjacent = false, filePath = default(string?), fileName = default(string?) });
-            }
-
-            return Ok(new
-            {
-                hasAdjacent = true,
-                filePath = adjacent.FilePath,
-                fileName = adjacent.FileName
-            });
+            return NotFound(new { error = "Current file not found in library" });
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+
+        if (!adjacent.HasAdjacent)
         {
-            _logger.LogError(ex, "Error getting adjacent file for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error finding adjacent file" });
+            return Ok(new { hasAdjacent = false, filePath = default(string?), fileName = default(string?) });
         }
+
+        return Ok(new
+        {
+            hasAdjacent = true,
+            filePath = adjacent.FilePath,
+            fileName = adjacent.FileName
+        });
     }
 
     /// <summary>
@@ -317,6 +368,7 @@ public class ComicReaderController : ControllerBase
     /// </summary>
     /// <param name="filePath">Path to the comic file</param>
     [HttpPost("mark-read")]
+    [FailureMessage("Error marking file as read")]
     public async Task<ActionResult> MarkAsRead([FromQuery] string filePath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -330,26 +382,27 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
-        try
-        {
-            await _fileStore.MarkFileReadAsync(filePath, true, cancellationToken);
-            await RecordUserProgressAsync(filePath, resolvedPath, markComplete: true, page: null, cancellationToken);
-            _logger.LogDebug("Marked file as read: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return Ok();
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error marking file as read: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error marking file as read" });
-        }
+        await _fileStore.MarkFileReadAsync(filePath, true, cancellationToken);
+        await RecordCompletedAsync(filePath, resolvedPath, cancellationToken);
+        _logger.LogDebug("Marked file as read: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+        return Ok();
     }
 
     /// <summary>
-    /// Save reading progress for a comic file
+    /// Save reading progress for a comic file: the page the reader resumes at
+    /// and the per-user "Continue Reading" progress, in one transaction.
     /// </summary>
+    /// <remarks>
+    /// The reader posts this on every page turn. The page count comes from the
+    /// reader service's cached page list (a <c>stat</c>, not an archive listing);
+    /// when it is unknown (an unreadable or refused archive) only the resume page
+    /// is recorded. A failed write answers 500, which the reader treats as
+    /// transient: it keeps the page and replays it later.
+    /// </remarks>
     /// <param name="filePath">Path to the comic file</param>
     /// <param name="page">Current page number</param>
     [HttpPost("progress")]
+    [FailureMessage("Error saving reading progress")]
     public async Task<ActionResult> SaveProgress([FromQuery] string filePath, [FromQuery] int page, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -368,18 +421,17 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
-        try
+        var userId = CurrentUserId;
+        if (userId is null)
         {
-            await _fileStore.SaveReadingProgressAsync(filePath, page, cancellationToken);
-            await RecordUserProgressAsync(filePath, resolvedPath, markComplete: false, page: page, cancellationToken);
-            _logger.LogDebug("Saved reading progress for {FilePath}: page {Page}", LoggingHelper.SanitizePathForLog(filePath), page);
+            // Progress is per user; a caller without a user id has nowhere to keep it.
             return Ok();
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error saving reading progress for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error saving reading progress" });
-        }
+
+        var totalPages = await TryGetPageCountAsync(resolvedPath);
+        await _readingProgress.RecordPageAsync(userId, filePath, page, totalPages, cancellationToken);
+        _logger.LogDebug("Saved reading progress for {FilePath}: page {Page}", LoggingHelper.SanitizePathForLog(filePath), page);
+        return Ok();
     }
 
     /// <summary>
@@ -387,6 +439,7 @@ public class ComicReaderController : ControllerBase
     /// </summary>
     /// <param name="filePath">Path to the comic file</param>
     [HttpGet("progress")]
+    [FailureMessage("Error getting reading progress")]
     public async Task<ActionResult<object>> GetProgress([FromQuery] string filePath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(filePath))
@@ -400,30 +453,48 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
-        try
+        var progress = await _fileStore.GetReadingProgressAsync(filePath, cancellationToken);
+        return Ok(new { currentPage = progress });
+    }
+
+    /// <summary>The caller's user id, or <c>null</c> when the principal has none.</summary>
+    private string? CurrentUserId
+    {
+        get
         {
-            var progress = await _fileStore.GetReadingProgressAsync(filePath, cancellationToken);
-            return Ok(new { currentPage = progress });
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error getting reading progress for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return StatusCode(500, new { error = "Error getting reading progress" });
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return string.IsNullOrEmpty(userId) ? null : userId;
         }
     }
 
     /// <summary>
-    /// Records durable per-user reading progress for the authenticated user.
+    /// The archive's page count from the reader service's cached page list, or 0
+    /// when it cannot be read (the service has logged why).
+    /// </summary>
+    private async Task<int> TryGetPageCountAsync(string resolvedPath)
+    {
+        try
+        {
+            return await _readerService.GetPageCountAsync(resolvedPath);
+        }
+        catch (ArchiveLimitExceededException)
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Records the authenticated user's durable progress for a file they
+    /// finished, which powers the per-user "Continue Reading" overview row.
     /// ContentId follows the reader convention of using the requested file
     /// path; the page count is read from the validated physical
-    /// <paramref name="resolvedPath"/>. This powers the per-user
-    /// "Continue Reading" overview row and is best-effort: failures here never
-    /// fail the originating request.
+    /// <paramref name="resolvedPath"/>. Best-effort: failures here never fail
+    /// the originating request.
     /// </summary>
-    private async Task RecordUserProgressAsync(string filePath, string resolvedPath, bool markComplete, int? page, CancellationToken cancellationToken)
+    private async Task RecordCompletedAsync(string filePath, string resolvedPath, CancellationToken cancellationToken)
     {
-        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (string.IsNullOrEmpty(userId))
+        var userId = CurrentUserId;
+        if (userId is null)
         {
             return;
         }
@@ -445,11 +516,7 @@ public class ComicReaderController : ControllerBase
                 };
 
             existing.TotalPages = totalPages;
-            var targetPage = markComplete
-                ? totalPages
-                : Math.Clamp(page ?? existing.CurrentPage, 1, totalPages);
-
-            ReadingProgressCalculator.ApplyProgress(existing, targetPage, DateTime.UtcNow);
+            ReadingProgressCalculator.ApplyProgress(existing, totalPages, DateTime.UtcNow);
             await _readingProgress.SaveProgressAsync(existing, cancellationToken);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)

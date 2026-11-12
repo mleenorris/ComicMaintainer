@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.WebApi.Startup;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -40,49 +41,41 @@ public class ServiceWorkerController : ControllerBase
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public IActionResult GetServiceWorker()
     {
-        try
-        {
-            var swPath = GetWebRootFilePath("sw.js");
+        var swPath = GetWebRootFilePath("sw.js");
             
-            if (!System.IO.File.Exists(swPath))
-            {
-                _logger.LogError("Service worker file not found at: {Path}", swPath);
-                return NotFound();
-            }
+        if (!System.IO.File.Exists(swPath))
+        {
+            _logger.LogError("Service worker file not found at: {Path}", swPath);
+            return NotFound();
+        }
 
-            var swContent = System.IO.File.ReadAllText(swPath);
+        var swContent = AppBasePath.Apply(System.IO.File.ReadAllText(swPath), _appSettings.CurrentValue.BasePath);
             
-            // Inject version into service worker content to force browser updates
-            // This ensures the browser detects changes to the service worker file
-            var version = System.Reflection.Assembly.GetExecutingAssembly()
-                .GetName()
-                .Version?
-                .ToString() ?? "1.0.0";
+        // Inject version into service worker content to force browser updates
+        // This ensures the browser detects changes to the service worker file
+        var version = System.Reflection.Assembly.GetExecutingAssembly()
+            .GetName()
+            .Version?
+            .ToString() ?? "1.0.0";
             
-            // Add version as a comment at the top of the file
-            // Browsers use byte-for-byte comparison to detect SW changes
-            swContent = $"// Service Worker Version: {version}\n{swContent}";
+        // Add version as a comment at the top of the file
+        // Browsers use byte-for-byte comparison to detect SW changes
+        swContent = $"// Service Worker Version: {version}\n{swContent}";
             
-            // Set proper headers to prevent caching and ensure correct MIME type
-            // This prevents redirect issues that can occur with cached or improperly served files
-            Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
-            Response.Headers["Pragma"] = "no-cache";
-            Response.Headers["Expires"] = "0";
+        // Set proper headers to prevent caching and ensure correct MIME type
+        // This prevents redirect issues that can occur with cached or improperly served files
+        Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+        Response.Headers["Pragma"] = "no-cache";
+        Response.Headers["Expires"] = "0";
             
-            // Add CORS headers to allow service worker to be accessed from any origin
-            // This is necessary for PWA functionality to work correctly, especially when
-            // the application is behind a reverse proxy with authentication
-            Response.Headers["Access-Control-Allow-Origin"] = "*";
-            Response.Headers["Access-Control-Allow-Methods"] = "GET, OPTIONS";
-            Response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
+        // Add CORS headers to allow service worker to be accessed from any origin
+        // This is necessary for PWA functionality to work correctly, especially when
+        // the application is behind a reverse proxy with authentication
+        Response.Headers["Access-Control-Allow-Origin"] = "*";
+        Response.Headers["Access-Control-Allow-Methods"] = "GET, OPTIONS";
+        Response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
             
-            return Content(swContent, "application/javascript; charset=utf-8");
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error serving service worker");
-            return StatusCode(500);
-        }
+        return Content(swContent, "application/javascript; charset=utf-8");
     }
 
     /// <summary>
@@ -94,38 +87,30 @@ public class ServiceWorkerController : ControllerBase
     /// <returns>The manifest.json file</returns>
     [HttpGet("manifest.json")]
     [AllowAnonymous]
-    [ResponseCache(Duration = 3600, Location = ResponseCacheLocation.Any, VaryByQueryKeys = new[] { "v" })]
+    [ResponseCache(Duration = 3600, Location = ResponseCacheLocation.Any)]
     public IActionResult GetManifest()
     {
-        try
-        {
-            var manifestPath = GetWebRootFilePath("manifest.json");
+        var manifestPath = GetWebRootFilePath("manifest.json");
             
-            if (!System.IO.File.Exists(manifestPath))
-            {
-                _logger.LogError("Manifest file not found at: {Path}", manifestPath);
-                return NotFound();
-            }
+        if (!System.IO.File.Exists(manifestPath))
+        {
+            _logger.LogError("Manifest file not found at: {Path}", manifestPath);
+            return NotFound();
+        }
 
-            var manifestContent = System.IO.File.ReadAllText(manifestPath);
+        var manifestContent = AppBasePath.Apply(System.IO.File.ReadAllText(manifestPath), _appSettings.CurrentValue.BasePath);
             
-            // Allow caching for 1 hour, but use version query parameter for cache busting
-            Response.Headers["Cache-Control"] = "public, max-age=3600";
+        // Allow caching for 1 hour, but use version query parameter for cache busting
+        Response.Headers["Cache-Control"] = "public, max-age=3600";
             
-            // Add CORS headers to allow manifest.json to be accessed from any origin
-            // This is necessary for PWA installation to work correctly, especially when
-            // the application is behind a reverse proxy with authentication
-            Response.Headers["Access-Control-Allow-Origin"] = "*";
-            Response.Headers["Access-Control-Allow-Methods"] = "GET, OPTIONS";
-            Response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
+        // Add CORS headers to allow manifest.json to be accessed from any origin
+        // This is necessary for PWA installation to work correctly, especially when
+        // the application is behind a reverse proxy with authentication
+        Response.Headers["Access-Control-Allow-Origin"] = "*";
+        Response.Headers["Access-Control-Allow-Methods"] = "GET, OPTIONS";
+        Response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
             
-            return Content(manifestContent, "application/manifest+json; charset=utf-8");
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogError(ex, "Error serving manifest");
-            return StatusCode(500);
-        }
+        return Content(manifestContent, "application/manifest+json; charset=utf-8");
     }
 
     /// <summary>

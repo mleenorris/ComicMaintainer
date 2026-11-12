@@ -5,8 +5,13 @@
        x:Class="ComicMaintainer.MauiApp.AppShell"
        Shell.FlyoutBehavior="Disabled">
 
+    <!-- The app starts on the sign-in page, which moves on to the library when an earlier sign-in is still good. -->
+    <ShellContent
+        ContentTemplate="{DataTemplate views:LoginPage}"
+        Route="login" />
+
     <ShellContent
         ContentTemplate="{DataTemplate views:MainPage}"
-        Route="MainPage" />
+        Route="library" />
 
 </Shell>

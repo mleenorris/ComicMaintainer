@@ -1,6 +1,23 @@
 ---
-# Kubernetes Deployment for ComicMaintainer
-# This example shows how to deploy ComicMaintainer on Kubernetes
+# Kubernetes Deployment for ComicMaintainer (.NET)
+#
+# ComicMaintainer keeps its state in a SQLite database under /Config and watches the library for changes, so exactly
+# one pod may run at a time: two pods would write the same database file and process and rename the same comics. The
+# Deployment therefore runs a single replica and uses the Recreate strategy, which stops the old pod before an
+# upgrade starts the new one. Never scale it up or add a HorizontalPodAutoscaler.
+#
+# Before applying this file, create the namespace and the secret the pod reads its JWT signing key and the first
+# admin account's password from (both are read from files, so they never appear in the pod spec):
+#
+#   kubectl create namespace comicmaintainer
+#   kubectl -n comicmaintainer create secret generic comicmaintainer-secrets \
+#     --from-literal=jwt-secret="$(openssl rand -base64 48)" \
+#     --from-literal=admin-password='<a password of your own>'
+#
+# The password needs at least 8 characters with an upper-case letter, a lower-case letter and a digit. Example
+# passwords published with this project, such as Admin123!, are refused.
+#
+# Then: kubectl apply -f kubernetes-deployment.yaml
 
 apiVersion: v1
 kind: Namespace
@@ -18,11 +35,20 @@ data:
   WATCHED_DIR: "/watched_dir"
   DUPLICATE_DIR: "/duplicates"
   AppSettings__MaxWorkers: "4"
+  # The app runs as this user and group. The library volumes are not chowned at start: the pod's fsGroup below gives
+  # PGID access to them. Set FIX_LIBRARY_PERMISSIONS to "true" once to hand an existing library to PUID:PGID.
   PUID: "1000"
   PGID: "1000"
+  ADMIN_USERNAME: "admin"
+  JWT_SECRET_FILE: "/run/secrets/comicmaintainer/jwt-secret"
+  ADMIN_PASSWORD_FILE: "/run/secrets/comicmaintainer/admin-password"
+  # Behind an ingress, list the addresses it connects from (often the cluster's pod CIDR), or every client shares one
+  # limit of 10 sign-in attempts per 5 minutes. See docs/REVERSE_PROXY.md.
+  # TRUSTED_PROXIES: "10.244.0.0/16"
 
 ---
-# PersistentVolumeClaim for config storage
+# PersistentVolumeClaim for config storage: the SQLite database, its backups, DataProtection keys and logs.
+# Use block or local storage; SQLite on NFS/SMB risks database corruption.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -38,8 +64,8 @@ spec:
   # storageClassName: standard
 
 ---
-# PersistentVolumeClaim for comics storage
-# This should ideally be a ReadWriteMany volume or use NFS/Ceph
+# PersistentVolumeClaim for the comic library. ReadWriteMany lets other apps (Komga, Kavita, Suwayomi) share it;
+# ComicMaintainer itself still runs as a single pod.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -47,12 +73,26 @@ metadata:
   namespace: comicmaintainer
 spec:
   accessModes:
-    - ReadWriteMany  # Allow multiple pods if needed
+    - ReadWriteMany
   resources:
     requests:
       storage: 100Gi
   # Optional: Specify storage class
   # storageClassName: nfs-client
+
+---
+# PersistentVolumeClaim for files moved aside as duplicates (DUPLICATE_DIR).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: comicmaintainer-duplicates-pvc
+  namespace: comicmaintainer
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
 
 ---
 # Deployment
@@ -64,7 +104,12 @@ metadata:
   labels:
     app: comicmaintainer
 spec:
-  replicas: 1  # Single replica recommended due to file watcher
+  # Exactly one: see the note at the top of this file.
+  replicas: 1
+  # The default RollingUpdate starts the new pod before stopping the old one, so for a while both would use the same
+  # SQLite database and library (or the new pod would hang waiting for the ReadWriteOnce config volume).
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: comicmaintainer
@@ -75,30 +120,34 @@ spec:
     spec:
       containers:
       - name: comicmaintainer
-        image: iceburn1/comictagger-watcher:latest
+        # :dotnet follows the newest release. Pin a version (for example iceburn1/comicmaintainer:3.0.0) to upgrade
+        # only when you choose to; the database is backed up before each upgrade's migrations.
+        image: iceburn1/comicmaintainer:dotnet
         imagePullPolicy: Always
-        
+
         # Environment variables from ConfigMap
         envFrom:
         - configMapRef:
             name: comicmaintainer-config
-        
+
         # Ports
         ports:
         - name: web
           containerPort: 5000
           protocol: TCP
-        
+
         # Volume mounts
         volumeMounts:
         - name: config
           mountPath: /Config
         - name: comics
           mountPath: /watched_dir
-        # Optional: Mount duplicates directory
-        # - name: duplicates
-        #   mountPath: /duplicates
-        
+        - name: duplicates
+          mountPath: /duplicates
+        - name: secrets
+          mountPath: /run/secrets/comicmaintainer
+          readOnly: true
+
         # Resource limits and requests
         resources:
           requests:
@@ -107,37 +156,35 @@ spec:
           limits:
             cpu: 2000m
             memory: 2Gi
-        
-        # Liveness probe
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 5000
-          initialDelaySeconds: 60
-          periodSeconds: 30
-          timeoutSeconds: 10
-          failureThreshold: 3
-        
-        # Readiness probe
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 5000
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
-        
-        # Startup probe (for slow startup)
+
+        # Startup probe: the first start and upgrades apply database migrations (after backing the database up),
+        # which can take a few minutes on a large library. Allows up to 5 minutes.
         startupProbe:
           httpGet:
             path: /health
             port: 5000
-          initialDelaySeconds: 10
           periodSeconds: 10
           timeoutSeconds: 5
-          failureThreshold: 12  # 2 minutes total
-      
+          failureThreshold: 30
+
+        # Liveness: the process is up and serving requests.
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+
+        # Readiness: also checks that the database is reachable.
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 5000
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
       # Volumes
       volumes:
       - name: config
@@ -146,14 +193,21 @@ spec:
       - name: comics
         persistentVolumeClaim:
           claimName: comicmaintainer-comics-pvc
-      # Optional: Duplicates volume
-      # - name: duplicates
-      #   persistentVolumeClaim:
-      #     claimName: comicmaintainer-duplicates-pvc
-      
-      # Security context
+      - name: duplicates
+        persistentVolumeClaim:
+          claimName: comicmaintainer-duplicates-pvc
+      - name: secrets
+        secret:
+          secretName: comicmaintainer-secrets
+          # The entrypoint starts as root and the app reads the files as PUID through the fsGroup below.
+          defaultMode: 0440
+
       securityContext:
+        # Volumes that support it are made group-owned by PGID, so the app user can write the library without the
+        # entrypoint changing it. OnRootMismatch only walks a volume whose top folder does not already match, instead
+        # of every file of a large library at every start.
         fsGroup: 1000  # Match PGID
+        fsGroupChangePolicy: "OnRootMismatch"
 
 ---
 # Service
@@ -182,9 +236,12 @@ metadata:
   name: comicmaintainer
   namespace: comicmaintainer
   annotations:
-    # Example for nginx ingress controller
-    # nginx.ingress.kubernetes.io/rewrite-target: /
+    # Examples for the ingress-nginx controller. Real-time updates are Server-Sent Events, which must not be buffered,
+    # and a database backup upload can be up to 2 GB.
     # cert-manager.io/cluster-issuer: letsencrypt-prod
+    # nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    # nginx.ingress.kubernetes.io/proxy-body-size: "2g"
   labels:
     app: comicmaintainer
 spec:
@@ -204,32 +261,3 @@ spec:
             name: comicmaintainer
             port:
               number: 5000
-
----
-# HorizontalPodAutoscaler (optional)
-# Note: Be careful with file watcher - may need coordination
-# apiVersion: autoscaling/v2
-# kind: HorizontalPodAutoscaler
-# metadata:
-#   name: comicmaintainer
-#   namespace: comicmaintainer
-# spec:
-#   scaleTargetRef:
-#     apiVersion: apps/v1
-#     kind: Deployment
-#     name: comicmaintainer
-#   minReplicas: 1
-#   maxReplicas: 3
-#   metrics:
-#   - type: Resource
-#     resource:
-#       name: cpu
-#       target:
-#         type: Utilization
-#         averageUtilization: 70
-#   - type: Resource
-#     resource:
-#       name: memory
-#       target:
-#         type: Utilization
-#         averageUtilization: 80

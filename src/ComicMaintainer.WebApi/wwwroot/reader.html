@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-base-path="__BASE_PATH__">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,12 +10,12 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="__BASE_PATH__/icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="__BASE_PATH__/icons/favicon-16x16.png">
     <!-- The __APP_VERSION__ placeholder is replaced server-side by
          HtmlVersionInjectionMiddleware so the very first request already
          contains the correct versioned URL. -->
-    <link rel="stylesheet" href="/css/main.css?v=__APP_VERSION__" id="mainCss">
+    <link rel="stylesheet" href="__BASE_PATH__/css/main.css?v=__APP_VERSION__" id="mainCss">
     <style>
         /* Reader-local tokens. These intentionally override the app palette
            because the reader is always dark for comfortable reading regardless
@@ -52,6 +52,9 @@
             display: flex;
             flex-direction: column;
             height: 100vh;
+            /* The visible viewport: on phones 100vh also counts the space
+               under the browser's toolbars, pushing the footer off screen. */
+            height: 100dvh;
             width: 100vw;
             position: relative;
         }
@@ -377,6 +380,7 @@
             left: 0;
             width: 100vw;
             height: 100vh;
+            height: 100dvh;
             z-index: 9999;
         }
 
@@ -566,6 +570,13 @@
             display: block;
         }
 
+        /* A page far from the one on screen, its picture released: it keeps
+           its height (set inline) so the stream does not move, and shows
+           nothing (no alt text or broken-image frame) until it is reloaded. */
+        .webcomic-container img.webcomic-page-placeholder {
+            visibility: hidden;
+        }
+
         .loading-indicator {
             padding: 2rem;
             text-align: center;
@@ -691,7 +702,7 @@
         <div class="reader-progress" aria-hidden="true">
             <div class="reader-progress-bar" id="readerProgressBar"></div>
         </div>
-        <div class="chrome-hint show-once" id="chromeHint" aria-hidden="true">Move mouse or tap to show controls</div>
+        <div class="chrome-hint show-once" id="chromeHint" aria-hidden="true">Tap the middle of the page or move the mouse to show controls</div>
         <div class="reader-header" id="readerHeader">
             <button class="reader-btn" onclick="goBack()" title="Back to library" aria-label="Back to library">
                 <span aria-hidden="true">←</span>
@@ -788,8 +799,9 @@
 
     <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="false"></div>
 
-    <!-- Helpers shared with index.html (escapeHtml, fetch credentials). -->
-    <script src="/js/shared.js?v=__APP_VERSION__"></script>
-    <script src="/js/pages/reader.js?v=__APP_VERSION__"></script>
+    <!-- Helpers shared with index.html (escapeHtml, apiUrl) and its API client (apiFetch). -->
+    <script src="__BASE_PATH__/js/shared.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/api.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/pages/reader.js?v=__APP_VERSION__"></script>
 </body>
 </html>

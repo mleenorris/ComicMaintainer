@@ -6,6 +6,12 @@ namespace ComicMaintainer.Core.Interfaces;
 /// Orchestrates emailing comics to saved ereader devices: queueing deliveries,
 /// converting to EPUB when requested, sending, and recording the outcome.
 /// </summary>
+/// <remarks>
+/// Deliveries belong to the owner of the device they are sent to. Operations
+/// on behalf of a user take that user's <see cref="EmailAccessScope"/>: a device
+/// or delivery outside it is reported exactly like one that does not exist,
+/// and listings and bulk cancellation cover only the deliveries it lists.
+/// </remarks>
 public interface IComicEmailService
 {
     /// <summary>True when SMTP settings are complete enough to send.</summary>
@@ -21,6 +27,7 @@ public interface IComicEmailService
     /// once the message is actually delivered.
     /// </summary>
     Task<EmailQueueResult> QueueFilesAsync(
+        EmailAccessScope scope,
         IEnumerable<string> filePaths,
         int deviceId,
         string? deliveryFormat,
@@ -48,6 +55,7 @@ public interface IComicEmailService
     /// is rejected.
     /// </param>
     Task<EmailQueueResult> QueueCondensedFilesAsync(
+        EmailAccessScope scope,
         IEnumerable<string> filePaths,
         int deviceId,
         string? condenseMode,
@@ -67,6 +75,7 @@ public interface IComicEmailService
     /// describes exactly the books that would be queued.
     /// </summary>
     Task<CondensePlanDto> PlanCondensedDeliveryAsync(
+        EmailAccessScope scope,
         IEnumerable<string> filePaths,
         string? condenseMode,
         int? issuesPerBook,
@@ -77,6 +86,7 @@ public interface IComicEmailService
 
     /// <summary>Resolves a condensed delivery format, including the device default.</summary>
     Task<string> ResolveCondensedFormatAsync(
+        EmailAccessScope scope,
         string? deliveryFormat,
         int? deviceId = null,
         CancellationToken cancellationToken = default);
@@ -96,6 +106,7 @@ public interface IComicEmailService
     /// whole series takes minutes, so a caller that shows a status needs it.
     /// </param>
     Task<CondensedBookFile> CreateCondensedBookAsync(
+        EmailAccessScope scope,
         IEnumerable<string> filePaths,
         string? condenseMode,
         int? issuesPerBook,
@@ -121,18 +132,35 @@ public interface IComicEmailService
     /// </summary>
     Task ProcessDeliveryAsync(int deliveryId, CancellationToken cancellationToken = default);
 
-    /// <summary>Sends a short test email to a device so the user can verify SMTP settings.</summary>
-    Task SendTestEmailAsync(int deviceId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Queues every pending delivery the queue does not already hold, oldest
+    /// first. The queue calls this when it starts, so deliveries that a restart
+    /// or a crash left pending are sent instead of staying pending (which would
+    /// also make the already-delivered check skip their files for good), and
+    /// periodically while it runs. A message whose sending was cut off by a
+    /// shutdown may therefore be sent a second time. A delivery interrupted
+    /// <see cref="Services.ComicEmailService.MaxStartsWithoutOutcome"/> times is
+    /// marked failed rather than queued, so it cannot be replayed forever.
+    /// Returns how many deliveries were queued.
+    /// </summary>
+    Task<int> ResumePendingDeliveriesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sends a short test email to a device so the user can verify SMTP settings.
+    /// Throws <see cref="EmailTestFailedException"/> when the mail server could not be
+    /// reached or refused the login or the message.
+    /// </summary>
+    Task SendTestEmailAsync(EmailAccessScope scope, int deviceId, CancellationToken cancellationToken = default);
 
     /// <summary>Most recent deliveries, newest first.</summary>
-    Task<IReadOnlyList<ComicEmailDeliveryDto>> GetRecentDeliveriesAsync(int limit, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ComicEmailDeliveryDto>> GetRecentDeliveriesAsync(EmailAccessScope scope, int limit, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// One page of the delivery history, newest first, with the total number
     /// of deliveries and how many are still pending. <paramref name="limit"/>
     /// is clamped to 1–500 and a negative <paramref name="offset"/> to 0.
     /// </summary>
-    Task<ComicEmailDeliveryPage> GetDeliveriesPageAsync(int offset, int limit, CancellationToken cancellationToken = default);
+    Task<ComicEmailDeliveryPage> GetDeliveriesPageAsync(EmailAccessScope scope, int offset, int limit, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Cancels a pending delivery. A delivery that is waiting in the queue is
@@ -141,10 +169,10 @@ public interface IComicEmailService
     /// conversion does not stop promptly. A message that is already being
     /// handed to the mail server is never interrupted.
     /// </summary>
-    Task<EmailDeliveryCancelResult> CancelDeliveryAsync(int deliveryId, CancellationToken cancellationToken = default);
+    Task<EmailDeliveryCancelResult> CancelDeliveryAsync(EmailAccessScope scope, int deliveryId, CancellationToken cancellationToken = default);
 
     /// <summary>Cancels every pending delivery, including the one being prepared.</summary>
-    Task<EmailDeliveryBulkCancelResult> CancelPendingDeliveriesAsync(CancellationToken cancellationToken = default);
+    Task<EmailDeliveryBulkCancelResult> CancelPendingDeliveriesAsync(EmailAccessScope scope, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// When the email rate limit is holding the next delivery back, the UTC

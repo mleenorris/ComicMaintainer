@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text.Json;
+using ComicMaintainer.Core.Interfaces;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ComicMaintainer.Tests.Integration;
 
@@ -63,13 +65,21 @@ public sealed class AutheliaTrustedProxyIntegrationTests : IClassFixture<Autheli
     {
         var user = await _host.CreateUserAsync();
         var victim = await _host.CreateUserAsync();
-        var (tokenStatus, tokenBody) = await GetAsync("/api/auth/sse-token", AutheliaAuthenticationHandlerIntegrationTests.AutheliaHost.ProxyAddress, Forwarded(user.UserName!, "users"));
-        Assert.Equal(HttpStatusCode.OK, tokenStatus);
+        // Give the account its role through the proxy once, then sign in with its password for a session token.
+        var (roleStatus, _) = await GetAsync("/api/auth/user", AutheliaAuthenticationHandlerIntegrationTests.AutheliaHost.ProxyAddress, Forwarded(user.UserName!, "users"));
+        Assert.Equal(HttpStatusCode.OK, roleStatus);
+        string token;
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var (success, issued, error) = await scope.ServiceProvider.GetRequiredService<IAuthService>().LoginAsync(user.UserName!, "Passw0rdOk");
+            Assert.True(success, error);
+            token = issued;
+        }
 
         var (status, body) = await GetAsync(
             "/api/auth/user",
             UntrustedPeer,
-            [.. Forwarded(victim.UserName!, "admins"), ("Authorization", "Bearer " + tokenBody.GetProperty("token").GetString())]);
+            [.. Forwarded(victim.UserName!, "admins"), ("Authorization", "Bearer " + token)]);
 
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal(user.UserName, body.GetProperty("username").GetString());

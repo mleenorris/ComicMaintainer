@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -174,7 +175,7 @@ public class ComicVineSeriesMetadataServiceTests
             ComicVineBaseUrl = "https://comicvine.example/api"
         });
 
-        await service.LookupSeriesAsync("Anything");
+        await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Anything"));
         var health = await service.CheckHealthAsync();
 
         Assert.True(health.FailureCount >= 1);

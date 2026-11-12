@@ -2,9 +2,9 @@ name: "CodeQL Advanced Security Scanning"
 
 on:
   push:
-    branches: [ master, main, dotnet, python ]
+    branches: [ dotnet ]
   pull_request:
-    branches: [ master, main, dotnet, python ]
+    branches: [ dotnet ]
   schedule:
     # Run CodeQL analysis weekly on Wednesday at 3:00 AM UTC
     - cron: '0 3 * * 3'
@@ -51,6 +51,14 @@ jobs:
             - '**/coveragereport'
             - '**/*.min.js'
             - '**/*.min.css'
+          # ArchiveEntryReader reads SharpCompress internals through [UnsafeAccessor] methods. They are
+          # managed code, but they are declared extern, so these two rules report every one of them as
+          # native code. scripts/dev.ps1 uses the same configuration.
+          query-filters:
+            - exclude:
+                id: cs/unmanaged-code
+            - exclude:
+                id: cs/call-to-unmanaged-code
 
     - name: Setup .NET
       if: matrix.language == 'csharp'
@@ -136,85 +144,5 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: codeql-summary-dotnet-${{ matrix.language }}
-        path: codeql-summary-${{ matrix.language }}.md
-        retention-days: 90
-
-  analyze-python:
-    name: CodeQL Analysis (Python)
-    # Run on master, main, or python branches for any event type
-    if: |
-      github.ref_name == 'master' || github.ref_name == 'main' || github.ref_name == 'python' || 
-      github.base_ref == 'master' || github.base_ref == 'main' || github.base_ref == 'python' ||
-      (github.event_name == 'schedule' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/python')) ||
-      (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/python'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
-
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [ 'python', 'javascript' ]
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v7
-
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v4
-      with:
-        languages: ${{ matrix.language }}
-        queries: +security-and-quality
-        config: |
-          paths-ignore:
-            - '**/node_modules'
-            - '**/__pycache__'
-            - '**/*.pyc'
-            - '**/venv'
-            - '**/.venv'
-            - '**/*.min.js'
-            - '**/*.min.css'
-
-    - name: Setup Python
-      if: matrix.language == 'python'
-      uses: actions/setup-python@v7
-      with:
-        python-version: '3.11'
-        cache: 'pip'
-
-    - name: Install Python dependencies
-      if: matrix.language == 'python'
-      run: |
-        python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v4
-      with:
-        category: "/language:${{matrix.language}}"
-        upload: true
-        wait-for-processing: true
-      timeout-minutes: 30
-
-    - name: Generate analysis summary
-      if: always()
-      run: |
-        echo "# CodeQL Analysis Summary - ${{ matrix.language }}" > codeql-summary-${{ matrix.language }}.md
-        echo "" >> codeql-summary-${{ matrix.language }}.md
-        echo "**Analysis Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> codeql-summary-${{ matrix.language }}.md
-        echo "**Language:** ${{ matrix.language }}" >> codeql-summary-${{ matrix.language }}.md
-        echo "**Branch:** ${{ github.ref_name }}" >> codeql-summary-${{ matrix.language }}.md
-        echo "**Query Suite:** security-and-quality (extended)" >> codeql-summary-${{ matrix.language }}.md
-        echo "" >> codeql-summary-${{ matrix.language }}.md
-        echo "CodeQL analysis completed successfully." >> codeql-summary-${{ matrix.language }}.md
-
-    - name: Upload analysis summary
-      if: always()
-      uses: actions/upload-artifact@v7
-      with:
-        name: codeql-summary-python-${{ matrix.language }}
         path: codeql-summary-${{ matrix.language }}.md
         retention-days: 90

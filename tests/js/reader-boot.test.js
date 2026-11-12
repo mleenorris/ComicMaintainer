@@ -6,7 +6,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
-const { validToken } = require('./support/app');
+const { jwt, validToken } = require('./support/app');
 const {
     FILE, NEXT_FILE, loadReader, openReader, readerReady, pageRequests, progressPosts, markReadPosts,
     adjacentRequests, shownPage, waitForShownPage, toasts
@@ -167,6 +167,25 @@ test('an expired session while opening the comic goes back to login', async () =
     assert.equal(page.fetchCalls.some(call => call.path === '/api/ComicReader/progress'), false);
 });
 
+const expiredToken = () => jwt({ sub: 'alice', exp: Math.floor(Date.now() / 1000) - 60 });
+
+test('a comic saved for offline still opens once the session token has expired', async () => {
+    const token = expiredToken();
+    const page = await openReader({ token });
+
+    assert.deepEqual(page.navigations, []);
+    assert.equal(page.$('#comicTitle').textContent, 'Issue 001.cbz');
+    assert.equal(infoCall(page).headers.authorization, `Bearer ${token}`);
+    assert.equal(page.window.localStorage.getItem('jwt_token'), token, 'the session is not wiped on the way');
+});
+
+test('a server that rejects the expired token still ends the session', async () => {
+    const page = loadReader({ token: expiredToken(), routes: { 'GET /api/ComicReader/info': 401 } });
+    await page.settle();
+
+    assert.deepEqual(page.navigations, [{ url: 'http://localhost/login.html', replace: false }]);
+});
+
 test('a comic that cannot be opened shows the error state', async () => {
     const missing = loadReader({ file: '/comics/missing.cbz' });
     await missing.waitFor(() => missing.$('#readerContent .error-message'));
@@ -200,6 +219,41 @@ test('a page that fails to load shows the error state', async () => {
     assert.deepEqual(page.navigations, []);
     // Nothing was read, so no progress is recorded.
     assert.deepEqual(progressPosts(page), []);
+});
+
+test('a page refused for the archive read limits shows the server\'s reason', async () => {
+    const reason = "Archive entry 'p1.jpg' is 200 MiB uncompressed, over the 100 MiB limit.";
+    const page = loadReader({ routes: { 'GET /api/ComicReader/page': respond(422, { error: reason }) } });
+    await page.waitFor(() => page.$('#readerContent .error-message'));
+
+    assert.equal(page.$('#readerContent .error-message').textContent, 'Failed to load page: ' + reason);
+});
+
+test('a webcomic page refused for the read limits logs the server\'s reason', async () => {
+    const reason = "Archive entry 'p1.jpg' is 200 MiB uncompressed, over the 100 MiB limit.";
+    const page = loadReader({
+        localStorage: { readingMode: 'webcomic' },
+        routes: { 'GET /api/ComicReader/page': respond(422, { error: reason }) },
+    });
+
+    await page.waitFor(() => page.consoleMessages.some(m => m.type === 'error' && m.args[1]?.message === reason));
+});
+
+test('a 422 without a readable reason falls back to the generic text', async () => {
+    for (const body of [undefined, { error: '' }]) {
+        const page = loadReader({ routes: { 'GET /api/ComicReader/page': respond(422, body) } });
+        await page.waitFor(() => page.$('#readerContent .error-message'));
+
+        assert.equal(page.$('#readerContent .error-message').textContent, 'Failed to load page: Failed to load page');
+    }
+});
+
+test('a comic refused for the archive read limits shows the server\'s reason', async () => {
+    const reason = "'many.cbz' has more than 20,000 entries, which is over the limit for a comic archive.";
+    const page = loadReader({ routes: { 'GET /api/ComicReader/info': respond(422, { error: reason }) } });
+    await page.waitFor(() => page.$('#readerContent .error-message'));
+
+    assert.equal(page.$('#readerContent .error-message').textContent, 'Failed to load comic: ' + reason);
 });
 
 test('a page request rejected for auth sends the reader to login', async () => {

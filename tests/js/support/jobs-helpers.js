@@ -410,7 +410,7 @@ function pageClock(t, page) {
     };
 }
 
-// How many times the page was sent to the login page (handleAuthError() on a 401).
+// How many times the page was sent to the login page (apiFetch() on a 401).
 function loginRedirects(page) {
     return page.navigations.filter(navigation => navigation.url === 'http://localhost/login.html').length;
 }
@@ -454,6 +454,7 @@ module.exports = {
     startingProgress,
     menuItem,
     chooseMenuItem,
+    issueCard,
     chooseIssueAction,
     startTrackedJob,
     endTrackedJob,

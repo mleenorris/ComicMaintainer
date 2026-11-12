@@ -102,3 +102,7 @@ node_modules/
 
 # Local tool caches
 ComicMaintainer/dotnet/
+
+# Android signing keys must never be committed.
+*.keystore
+*.jks

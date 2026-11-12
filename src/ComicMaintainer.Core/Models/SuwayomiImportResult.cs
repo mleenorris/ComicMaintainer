@@ -12,6 +12,9 @@ public sealed class SuwayomiImportResult
     /// <summary>True when the pass was skipped because no downloads folder is configured.</summary>
     public bool NotConfigured { get; init; }
 
+    /// <summary>True when the pass was skipped because another one was already running.</summary>
+    public bool AlreadyRunning { get; init; }
+
     /// <summary>Chapters moved into the library.</summary>
     public List<SuwayomiImportedChapter> Imported { get; } = new();
 
@@ -42,8 +45,8 @@ public sealed class SuwayomiImportResult
     /// </summary>
     public int ImageFolders { get; set; }
 
-    public static SuwayomiImportResult Skipped(string reason, bool notConfigured = false)
-        => new() { SkippedReason = reason, NotConfigured = notConfigured };
+    public static SuwayomiImportResult Skipped(string reason, bool notConfigured = false, bool alreadyRunning = false)
+        => new() { SkippedReason = reason, NotConfigured = notConfigured, AlreadyRunning = alreadyRunning };
 }
 
 /// <summary>A chapter archive moved into the library.</summary>

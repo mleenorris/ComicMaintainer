@@ -40,12 +40,84 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
         { "/api/jobs/update-metadata-selected", """{ "Files": [PATH], "Metadata": { "Series": "Overwritten" } }""" },
         { "/api/jobs/remove-metadata-selected", """{ "Files": [PATH] }""" },
         { "/api/jobs/delete-selected", """{ "Files": [PATH] }""" },
-        { "/api/process-selected", """{ "Files": [PATH] }""" },
-        { "/api/rename-selected?forceReprocess=true", """{ "Files": [PATH] }""" },
-        { "/api/normalize-selected?forceReprocess=true", """{ "Files": [PATH] }""" },
         { "/api/files/process-batch", """[PATH]""" },
         { "/api/files/tags", """{ "Files": [PATH], "Metadata": { "Series": "Overwritten" } }""" },
     };
+
+    public static TheoryData<string> LibraryWideRoutes => new()
+    {
+        "/api/jobs/process-all",
+        "/api/jobs/process-all?forceReprocess=true",
+        "/api/jobs/rename-all?forceReprocess=false",
+        "/api/jobs/normalize-all",
+        "/api/jobs/remove-metadata-all",
+        "/api/jobs/process-unmarked",
+        "/api/jobs/rename-unmarked",
+        "/api/jobs/normalize-unmarked?forceReprocess=true",
+    };
+
+    [Theory]
+    [MemberData(nameof(LibraryWideRoutes))]
+    public async Task LibraryWideRoutesAcceptARequestWithoutABody(string url)
+    {
+        using var response = await _host.PostWithoutBodyAsync(url);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(json.RootElement.GetProperty("job_id").TryGetGuid(out _));
+        Assert.True(json.RootElement.GetProperty("total_items").GetInt32() >= 0);
+    }
+
+    // The web app's remove-metadata-all sends a JSON Content-Type with no body.
+    [Theory]
+    [MemberData(nameof(LibraryWideRoutes))]
+    public async Task LibraryWideRoutesAcceptAnEmptyJsonBody(string url)
+    {
+        using var response = await _host.PostAsync(url, string.Empty);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(json.RootElement.GetProperty("job_id").TryGetGuid(out _));
+        Assert.True(json.RootElement.GetProperty("total_items").GetInt32() >= 0);
+    }
+
+    [Fact]
+    public async Task SelectedRouteBindsTheMobileAppsBodyAndAnswersInItsNames()
+    {
+        var comic = _host.WriteComic(_host.WatchedDirectory);
+
+        using var response = await _host.PostAsync(
+            "/api/jobs/process-selected", JsonSerializer.Serialize(new { files = new[] { comic } }));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using (var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
+        {
+            Assert.True(json.RootElement.GetProperty("jobId").TryGetGuid(out _));
+            Assert.Equal(1, json.RootElement.GetProperty("totalItems").GetInt32());
+            Assert.Equal(json.RootElement.GetProperty("jobId").GetGuid(), json.RootElement.GetProperty("job_id").GetGuid());
+            Assert.Equal(1, json.RootElement.GetProperty("total_items").GetInt32());
+        }
+
+        await _host.WaitForJobAsync(response);
+    }
+
+    [Theory]
+    [InlineData("/api/process-all")]
+    [InlineData("/api/rename-all")]
+    [InlineData("/api/normalize-all")]
+    [InlineData("/api/process-selected")]
+    [InlineData("/api/rename-selected")]
+    [InlineData("/api/normalize-selected")]
+    [InlineData("/api/process-file")]
+    [InlineData("/api/scan-unmarked")]
+    [InlineData("/api/jobs/delete-all")]
+    [InlineData("/api/jobs/update-metadata-all")]
+    public async Task RemovedAndNeverOfferedRoutesAreNotServed(string url)
+    {
+        using var response = await _host.PostWithoutBodyAsync(url);
+
+        Assert.Contains(response.StatusCode, new[] { HttpStatusCode.NotFound, HttpStatusCode.MethodNotAllowed });
+    }
 
     [Theory]
     [MemberData(nameof(BatchEndpoints))]
@@ -157,6 +229,8 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
             return await _client.PostAsync(url, content);
         }
 
+        public Task<HttpResponseMessage> PostWithoutBodyAsync(string url) => _client.PostAsync(url, content: null);
+
         /// <summary>
         /// Waits for the job named in an accepted request's response to finish.
         /// </summary>
@@ -164,11 +238,11 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
         {
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             var jobId = (json.RootElement.TryGetProperty("job_id", out var id) ? id : json.RootElement.GetProperty("jobId")).GetGuid();
-            var processor = _factory.Services.GetRequiredService<IComicProcessorService>();
+            var jobRegistry = _factory.Services.GetRequiredService<IBatchJobRegistry>();
             var deadline = DateTime.UtcNow.AddSeconds(30);
             while (true)
             {
-                var job = processor.GetJob(jobId);
+                var job = jobRegistry.GetJob(jobId);
                 if (job is { Status: not (JobStatus.Queued or JobStatus.Running) })
                 {
                     return job;

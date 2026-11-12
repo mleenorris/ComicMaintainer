@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -17,9 +19,11 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
     public const int MaxFinishedJobs = 50;
 
     private readonly ISeriesMetadataCacheService _cache;
-    private readonly IEventBroadcaster? _eventBroadcaster;
-    private readonly IFileStoreService? _fileStore;
-    private readonly IComicProcessorService? _processor;
+    private readonly IEventBroadcaster _eventBroadcaster;
+    private readonly IFileStoreService _fileStore;
+    private readonly IComicProcessorService _processor;
+    private readonly IOptionsMonitor<AppSettings> _settings;
+    private readonly ISeriesNameResolver _seriesNameResolver;
     private readonly ILogger<SeriesMetadataRefreshJobService> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<Guid, MetadataRefreshJob> _jobs = new();
@@ -31,9 +35,11 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
     public SeriesMetadataRefreshJobService(
         ISeriesMetadataCacheService cache,
         ILogger<SeriesMetadataRefreshJobService> logger,
-        IEventBroadcaster? eventBroadcaster = null,
-        IFileStoreService? fileStore = null,
-        IComicProcessorService? processor = null,
+        IEventBroadcaster eventBroadcaster,
+        IFileStoreService fileStore,
+        IComicProcessorService processor,
+        IOptionsMonitor<AppSettings> settings,
+        ISeriesNameResolver seriesNameResolver,
         TimeProvider? timeProvider = null)
     {
         _cache = cache;
@@ -42,6 +48,8 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
         _fileStore = fileStore;
         _processor = processor;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _settings = settings;
+        _seriesNameResolver = seriesNameResolver;
     }
 
     public Task<Guid> StartAsync(IEnumerable<string> seriesTitles, CancellationToken cancellationToken = default)
@@ -100,11 +108,17 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
         job.Status = JobStatus.Running;
         await BroadcastAsync(job);
 
-        // Track titles whose cache refresh produced a usable canonical record,
-        // along with their aliases, so we can re-tag the affected files at the
-        // end of the run. We collect into a case-insensitive set keyed by every
-        // title that should match a file's SeriesName.
-        var titlesToRetag = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Series keys of every series whose refresh changed what its files
+        // should say, so those files can be re-tagged at the end of the run.
+        var seriesKeysToRetag = new HashSet<string>(StringComparer.Ordinal);
+
+        // What refreshing each record concluded, by record key. A series card's
+        // refresh lists the canonical title and every alias, all of which
+        // belong to one record: once it is matched (or its providers failed)
+        // the rest share that answer, instead of each alias re-querying the
+        // providers. "Not found" is not shared: another name of an unmatched
+        // series, such as a user alias, can still find it.
+        var refreshedRecords = new Dictionary<string, RefreshResult>(StringComparer.Ordinal);
 
         try
         {
@@ -117,46 +131,34 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                 }
 
                 job.CurrentSeries = title;
-                string outcomeStatus;
-                string? outcomeSource = null;
+                RefreshResult result;
+                SeriesMetadataCacheRecord? before = null;
                 try
                 {
-                    var record = await _cache.RefreshAsync(title, cancellationToken);
-                    outcomeStatus = record.LookupStatus ?? "error";
-                    outcomeSource = record.Source;
-                    switch (record.LookupStatus)
+                    before = await _cache.GetByTitleAsync(title, cancellationToken);
+                    if (before is not null
+                        && refreshedRecords.TryGetValue(before.NormalizedKey, out var earlier)
+                        && earlier.Status != "not_found")
                     {
-                        case "success":
-                        case "manual_match":
-                            // A manually-matched series that successfully
-                            // re-resolves to its user-selected match is a
-                            // successful refresh outcome.
-                            job.Successes++;
-                            break;
-                        case "not_found":
-                            job.NotFound++;
-                            break;
-                        default:
-                            job.Failures++;
-                            break;
+                        result = earlier;
+                        if (result.Retag && SeriesKey.TryNormalize(title) is { } titleKey)
+                        {
+                            seriesKeysToRetag.Add(titleKey);
+                        }
                     }
-
-                    // Collect titles+aliases for the post-run file retag step.
-                    // We always include the input title so files whose
-                    // SeriesName still matches the pre-refresh value get
-                    // re-tagged with the freshly resolved canonical name.
-                    titlesToRetag.Add(title);
-                    if (!string.IsNullOrWhiteSpace(record.CanonicalTitle))
+                    else
                     {
-                        titlesToRetag.Add(record.CanonicalTitle);
-                    }
-                    if (record.Aliases is { Count: > 0 })
-                    {
-                        titlesToRetag.UnionWith(record.Aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
-                    }
-                    if (record.UserAliases is { Count: > 0 })
-                    {
-                        titlesToRetag.UnionWith(record.UserAliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
+                        var record = await _cache.RefreshAsync(title, cancellationToken);
+                        result = new RefreshResult(record.LookupStatus ?? "error", record.Source, null, RefreshChangedTheSeries(before, record));
+                        Remember(refreshedRecords, record, result);
+                        if (result.Retag)
+                        {
+                            // Retag the files of the series: those under the
+                            // requested title (typically the folder name) and
+                            // under any title of the refreshed record, so the
+                            // freshly resolved name reaches each file.
+                            seriesKeysToRetag.UnionWith(SeriesFileMatcher.KeysOf(record, title));
+                        }
                     }
                 }
                 catch (OperationCanceledException)
@@ -164,11 +166,37 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                     job.Status = JobStatus.Cancelled;
                     break;
                 }
+                catch (ExternalMetadataUnavailableException ex)
+                {
+                    // The provider could not answer: the record was kept as it
+                    // was, and the series counts as failed, not as not found.
+                    _logger.LogWarning("Metadata refresh failed for {SeriesTitle}: {Reason}",
+                        LoggingHelper.SanitizeForLog(title), LoggingHelper.SanitizeForLog(ex.Message));
+                    result = new RefreshResult("error", null, ex.UserMessage, Retag: false);
+                    Remember(refreshedRecords, before, result);
+                }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     _logger.LogWarning(ex, "Metadata refresh failed for {SeriesTitle}", LoggingHelper.SanitizeForLog(title));
-                    job.Failures++;
-                    outcomeStatus = "error";
+                    result = new RefreshResult("error", null, "Refresh failed; see the server log", Retag: false);
+                    Remember(refreshedRecords, before, result);
+                }
+
+                switch (result.Status)
+                {
+                    case "success":
+                    case "manual_match":
+                        // A manually-matched series that successfully
+                        // re-resolves to its user-selected match is a
+                        // successful refresh outcome.
+                        job.Successes++;
+                        break;
+                    case "not_found":
+                        job.NotFound++;
+                        break;
+                    default:
+                        job.Failures++;
+                        break;
                 }
 
                 lock (job.RecentResults)
@@ -176,8 +204,9 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                     job.RecentResults.Add(new MetadataRefreshOutcome
                     {
                         SeriesTitle = title,
-                        Status = outcomeStatus,
-                        Source = outcomeSource,
+                        Status = result.Status,
+                        Source = result.Source,
+                        Error = result.Error,
                         TimestampUtc = _timeProvider.GetUtcNow().UtcDateTime
                     });
                     while (job.RecentResults.Count > MaxRecentResults)
@@ -210,10 +239,10 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
             await BroadcastAsync(job);
         }
 
-        // A refresh run looks up the canonical title AND every alias of each
-        // series, so it can leave behind redundant "stale sibling" cache rows
-        // (e.g. a not_found result keyed by an alias already owned by the
-        // authoritative record). Prune them so they don't clutter the cache or
+        // A refresh run can leave behind redundant "stale sibling" cache rows
+        // (e.g. a not_found result keyed by a title that was not yet known to
+        // be an alias of the authoritative record, or rows from earlier
+        // versions). Prune them so they don't clutter the cache or
         // shadow the authoritative record's resolved name. Best-effort: a
         // failure here must not affect the job outcome or the retag step below.
         try
@@ -241,11 +270,11 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
         // the metadata-refresh job itself as failed — file retagging is a
         // best-effort downstream step and surfaces its own progress through
         // the standard processing-job pipeline.
-        if (job.Status == JobStatus.Completed && titlesToRetag.Count > 0)
+        if (job.Status == JobStatus.Completed && seriesKeysToRetag.Count > 0)
         {
             try
             {
-                await QueueFileRetagAsync(job.JobId, titlesToRetag, cancellationToken);
+                await QueueFileRetagAsync(job.JobId, seriesKeysToRetag, cancellationToken);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
@@ -256,30 +285,75 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
         }
     }
 
+    /// <summary>Remembers a refresh's result, so the record's other titles do not repeat it.</summary>
+    private static void Remember(
+        Dictionary<string, RefreshResult> refreshedRecords,
+        SeriesMetadataCacheRecord? record,
+        RefreshResult result)
+    {
+        if (!string.IsNullOrEmpty(record?.NormalizedKey))
+        {
+            refreshedRecords[record.NormalizedKey] = result;
+        }
+    }
+
     /// <summary>
-    /// Enumerate every tracked comic file whose <c>Metadata.Series</c> matches
-    /// any of the just-refreshed titles (canonical title or alias) and queue
-    /// them for normalization so their per-file ComicInfo.xml is rewritten
-    /// using the updated series metadata cache. No-op when the file store or
-    /// processor services are not wired up (e.g. lightweight unit tests).
+    /// True when the refresh left a usable match that differs from what was
+    /// cached before it, so the series' files have something new to pick up.
+    /// A refresh that confirms the existing match re-tags nothing: re-opening
+    /// every archive of a matched library would achieve nothing.
     /// </summary>
+    private static bool RefreshChangedTheSeries(SeriesMetadataCacheRecord? before, SeriesMetadataCacheRecord after)
+    {
+        if (!IsMatched(after.LookupStatus))
+        {
+            return false;
+        }
+
+        return before is null
+               || !IsMatched(before.LookupStatus)
+               || before.MetadataVersion != after.MetadataVersion
+               || !string.Equals(before.CanonicalTitle, after.CanonicalTitle, StringComparison.Ordinal);
+
+        static bool IsMatched(string? status) => status is "success" or "manual_match";
+    }
+
+    /// <summary>What refreshing one record concluded, shared by its other titles in the same run.</summary>
+    private sealed record RefreshResult(string Status, string? Source, string? Error, bool Retag);
+
+    /// <summary>
+    /// Queues a forced normalization of the tracked files of the just-refreshed series
+    /// (by <see cref="SeriesFileMatcher"/>: its tracked <c>&lt;Series&gt;</c> or its
+    /// folder-derived series name has one of <paramref name="seriesKeys"/>) that still
+    /// need rewriting, so their per-file ComicInfo.xml picks up the updated series
+    /// metadata cache. No-op when the file store or processor services are not wired
+    /// up (e.g. lightweight unit tests).
+    /// </summary>
+    /// <remarks>
+    /// <c>ComicFiles.Metadata</c> caches every archive's tags, so a matching title
+    /// no longer means "the user edited this file": after a refresh of the whole
+    /// library most files match. Only the files whose cached <c>&lt;Series&gt;</c>
+    /// differs from what normalization would write are queued, which keeps a refresh
+    /// from opening and rewriting the whole library, and nothing is queued when the
+    /// administrator has turned normalization off.
+    /// </remarks>
     private async Task QueueFileRetagAsync(
         Guid sourceJobId,
-        HashSet<string> titles,
+        IReadOnlySet<string> seriesKeys,
         CancellationToken cancellationToken)
     {
-        if (_fileStore is null || _processor is null) return;
+        if (!_settings.CurrentValue.WatcherEnableNormalize)
+        {
+            _logger.LogWarning(
+                "Metadata refresh job {JobId} will not rewrite per-file metadata because WatcherEnableNormalize is false.",
+                sourceJobId);
+            return;
+        }
 
         var files = await _fileStore.GetAllFilesAsync(cancellationToken);
-        var matchedPaths = files
-            .Where(f => !string.IsNullOrWhiteSpace(f.Metadata?.Series)
-                && titles.Contains(f.Metadata!.Series!))
-            .Select(f => f.FilePath)
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var matchedFiles = SeriesFileMatcher.SelectFiles(files, seriesKeys);
 
-        if (matchedPaths.Count == 0)
+        if (matchedFiles.Count == 0)
         {
             _logger.LogInformation(
                 "Metadata refresh job {JobId} completed; no tracked files matched the refreshed series titles, nothing to retag.",
@@ -287,19 +361,61 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
             return;
         }
 
+        var pathsToRetag = await SelectFilesNeedingRetagAsync(matchedFiles, cancellationToken);
+        if (pathsToRetag.Count == 0)
+        {
+            _logger.LogInformation(
+                "Metadata refresh job {JobId} completed; all {FileCount} matching files already carry the resolved series name, nothing to retag.",
+                sourceJobId, matchedFiles.Count);
+            return;
+        }
+
         // Force re-normalization so files already flagged as normalized still
         // get rewritten with the updated series name pulled from the cache.
-        var processJobId = await _processor.NormalizeFilesAsync(matchedPaths, forceReprocess: true, cancellationToken);
+        var processJobId = await _processor.NormalizeFilesAsync(pathsToRetag, forceReprocess: true, cancellationToken);
         _logger.LogInformation(
             "Metadata refresh job {JobId} queued normalization job {ProcessJobId} for {FileCount} files to propagate updated series metadata.",
-            sourceJobId, processJobId, matchedPaths.Count);
+            sourceJobId, processJobId, pathsToRetag.Count);
+    }
+
+    /// <summary>
+    /// The files of <paramref name="candidates"/> whose cached <c>&lt;Series&gt;</c> differs
+    /// from the name normalization would write, decided without opening any archive. The
+    /// name depends only on the file's folder and its current tag, so each combination is
+    /// resolved once.
+    /// </summary>
+    private async Task<List<string>> SelectFilesNeedingRetagAsync(
+        IReadOnlyList<ComicFile> candidates,
+        CancellationToken cancellationToken)
+    {
+        var resolvedNames = new Dictionary<(string? Folder, string? Series), string?>();
+        var paths = new List<string>();
+        foreach (var file in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var key = (Path.GetDirectoryName(file.FilePath), file.Metadata?.Series);
+            if (!resolvedNames.TryGetValue(key, out var resolved))
+            {
+                var resolution = await _seriesNameResolver.ResolveAsync(
+                    file.FilePath, file.Metadata, mutateCache: false, cancellationToken);
+                resolved = resolution.ResolvedSeries;
+                resolvedNames[key] = resolved;
+            }
+
+            if (!string.Equals(file.Metadata?.Series, resolved, StringComparison.Ordinal))
+            {
+                paths.Add(file.FilePath);
+            }
+        }
+
+        return paths;
     }
 
     // Best-effort: a failed broadcast (thrown or a faulted task) is logged and
     // never changes the job's outcome.
     private async Task BroadcastAsync(MetadataRefreshJob job)
     {
-        if (_eventBroadcaster is null) return;
         try
         {
             await _eventBroadcaster.BroadcastJobUpdateAsync(
@@ -327,6 +443,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                     SeriesTitle = r.SeriesTitle,
                     Status = r.Status,
                     Source = r.Source,
+                    Error = r.Error,
                     TimestampUtc = r.TimestampUtc
                 })
                 .ToList();

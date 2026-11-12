@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const { respond, plain } = require('./support/dom');
 const { bootApp, deferred } = require('./support/app');
 const {
-    settingsResponse, settingsRoutes, bootSettings, messages, lastMessage, clearMessages, callsTo
+    settingsResponse, settingsRoutes, bootSettings, messages, lastMessage, clearMessages, callsTo, SERVER_FAILURE, serverFailure
 } = require('./support/settings-helpers');
 
 const networkError = () => {
@@ -26,9 +26,9 @@ function formValues(page) {
         theme: value('themeSelect'),
         rename: checked('watcherEnableRenameCheckbox'),
         normalize: checked('watcherEnableNormalizeCheckbox'),
+        convertRarToCbz: checked('convertRarToCbzOnWriteCheckbox'),
         coverToArchive: checked('writeCoverToFirstArchiveCheckbox'),
         coverToFolder: checked('writeCoverToSeriesFolderCheckbox'),
-        allowRegistration: checked('allowRegistrationCheckbox'),
         downloadSeriesImages: checked('downloadExternalSeriesImagesCheckbox'),
         seriesImageMaxMB: value('seriesImageMaxMB'),
         seriesImageMaxDownloadMB: value('seriesImageMaxDownloadMB'),
@@ -36,6 +36,11 @@ function formValues(page) {
         logMaxSize: value('logMaxSize'),
         padding: value('issueNumberPadding'),
         cleanupHours: value('dbCleanupInterval'),
+        staleCleanupMaxRemovalPercent: value('staleCleanupMaxRemovalPercent'),
+        staleCleanupMissingGraceHours: value('staleCleanupMissingGraceHours'),
+        staleCleanupSentinelFile: value('staleCleanupSentinelFile'),
+        processingHistoryRetentionDays: value('processingHistoryRetentionDays'),
+        processingHistoryMaxEntries: value('processingHistoryMaxEntries'),
         externalMetadata: checked('enableExternalSeriesMetadata'),
         comicVineApiKey: value('comicVineApiKey'),
         comicVineApiKeyHint: text('comicVineApiKeyHint'),
@@ -45,6 +50,7 @@ function formValues(page) {
         mangaDexBaseUrl: value('mangaDexBaseUrl'),
         aniList: checked('enableAniListMetadata'),
         aniListBaseUrl: value('aniListBaseUrl'),
+        fillComicInfo: checked('fillComicInfoFromProvidersCheckbox'),
         suwayomi: checked('enableSuwayomiCheckbox'),
         suwayomiBaseUrl: value('suwayomiBaseUrl'),
         suwayomiUsername: value('suwayomiUsername'),
@@ -53,7 +59,8 @@ function formValues(page) {
         suwayomiClearPassword: checked('suwayomiClearPasswordCheckbox'),
         suwayomiDownloadsDirectory: value('suwayomiDownloadsDirectory'),
         suwayomiImportDirectory: value('suwayomiImportDirectory'),
-        defaultView: value('defaultLibraryViewSelect'),
+        opds: checked('opdsEnabledCheckbox'),
+        opdsFeedUrl: value('opdsFeedUrl'),
         preferredLanguage: value('defaultPreferredLanguageSelect'),
         smtpHost: value('smtpHost'),
         smtpPort: value('smtpPort'),
@@ -103,9 +110,9 @@ test('the settings page fills every group from GET /api/settings', async () => {
         theme: 'light',
         rename: true,
         normalize: false,
+        convertRarToCbz: false,
         coverToArchive: true,
         coverToFolder: false,
-        allowRegistration: true,
         downloadSeriesImages: true,
         seriesImageMaxMB: '5',
         seriesImageMaxDownloadMB: '20',
@@ -113,6 +120,11 @@ test('the settings page fills every group from GET /api/settings', async () => {
         logMaxSize: '10',
         padding: '3',
         cleanupHours: '12',
+        staleCleanupMaxRemovalPercent: '15',
+        staleCleanupMissingGraceHours: '24',
+        staleCleanupSentinelFile: '.mounted',
+        processingHistoryRetentionDays: '30',
+        processingHistoryMaxEntries: '20000',
         externalMetadata: true,
         comicVineApiKey: '',
         comicVineApiKeyHint: 'Leave blank to keep the stored key.',
@@ -122,6 +134,7 @@ test('the settings page fills every group from GET /api/settings', async () => {
         mangaDexBaseUrl: 'https://mangadex.example',
         aniList: false,
         aniListBaseUrl: 'https://anilist.example/graphql',
+        fillComicInfo: true,
         suwayomi: true,
         suwayomiBaseUrl: 'http://suwayomi.local:4567',
         suwayomiUsername: 'reader',
@@ -130,7 +143,8 @@ test('the settings page fills every group from GET /api/settings', async () => {
         suwayomiClearPassword: false,
         suwayomiDownloadsDirectory: '/suwayomi/downloads/mangas',
         suwayomiImportDirectory: 'Manga',
-        defaultView: 'series',
+        opds: true,
+        opdsFeedUrl: page.window.location.origin + '/opds/v1.2/catalog',
         preferredLanguage: 'ja',
         smtpHost: 'smtp.example.com',
         smtpPort: '2525',
@@ -216,9 +230,8 @@ test('unset optional settings fall back to defaults and first-time hints', async
             suwayomi_username: null,
             suwayomi_password_set: false,
             suwayomi_downloads_directory: null,
-            default_library_view: 'files',
-            allow_registration: false,
             default_preferred_language: null,
+            convert_rar_to_cbz_on_write: undefined,
             write_cover_to_first_archive: false,
             download_external_series_images: false,
             series_image_max_bytes: null,
@@ -260,7 +273,7 @@ test('unset optional settings fall back to defaults and first-time hints', async
     assert.equal(values.suwayomiUsername, '');
     assert.equal(values.suwayomiPasswordHint, 'Enter a password only if your Suwayomi server requires one.');
     assert.equal(values.suwayomiDownloadsDirectory, '');
-    assert.equal(values.defaultView, 'files');
+    assert.equal(values.convertRarToCbz, true, 'converting CBR/RAR to CBZ defaults to on');
     assert.equal(values.preferredLanguage, '');
     // Image limits that are not numbers leave the inputs untouched (blank).
     assert.equal(values.seriesImageMaxMB, '');
@@ -315,7 +328,7 @@ test('a failed load shows a retry prompt, and retrying loads the settings', asyn
         retryHidden: false
     });
     assert.deepEqual(messages(page), [
-        { type: 'error', text: 'Failed to load settings: HTTP error! status: 500 - database is locked' }
+        { type: 'error', text: 'Failed to load settings: HTTP error! status: 500' }
     ]);
     assert.equal(page.$('#messageContainer .message').getAttribute('role'), 'alert');
     // Nothing can be edited or saved until the settings are known.
@@ -415,7 +428,7 @@ test('non-administrators see server-wide settings read-only', async () => {
     assert.equal(page.$('#settingsReadOnlyNotice').hidden, false);
     // The personal theme preference stays editable; nothing server-wide does.
     assert.equal(page.$('#themeSelect').disabled, false);
-    for (const id of ['filenameFormat', 'defaultLibraryViewSelect', 'watcherEnableRenameCheckbox', 'smtpHost',
+    for (const id of ['filenameFormat', 'defaultPreferredLanguageSelect', 'watcherEnableRenameCheckbox', 'smtpHost',
         'errorReportingToken', 'saveSettingsBtn', 'resetFilenameFormatBtn']) {
         assert.equal(page.$(`#${id}`).disabled, true, `#${id} is disabled`);
     }
@@ -434,12 +447,12 @@ test('non-administrators see server-wide settings read-only', async () => {
 
 // Checkboxes that save on change: [element, method, endpoint, success label, error prefix].
 const TOGGLES = [
-    ['watcherEnableRenameCheckbox', 'POST', '/api/settings/watcher-enable-rename', 'File rename', 'Failed to update rename setting: '],
-    ['watcherEnableNormalizeCheckbox', 'POST', '/api/settings/watcher-enable-normalize', 'Metadata normalize', 'Failed to update normalize setting: '],
-    ['writeCoverToFirstArchiveCheckbox', 'POST', '/api/settings/write-cover-to-first-archive', 'Embed cover into first issue archive', 'Failed to update cover embed setting: '],
-    ['writeCoverToSeriesFolderCheckbox', 'POST', '/api/settings/write-cover-to-series-folder', 'Write cover into series folder', 'Failed to update cover folder setting: '],
-    ['allowRegistrationCheckbox', 'PUT', '/api/settings/allow-registration', 'Self-service registration', 'Failed to update registration setting: '],
-    ['downloadExternalSeriesImagesCheckbox', 'POST', '/api/settings/download-external-series-images', 'Download external series images', 'Failed to update series image download setting: ']
+    ['watcherEnableRenameCheckbox', 'PUT', '/api/settings/watcher-enable-rename', 'File rename', 'Failed to update rename setting: '],
+    ['watcherEnableNormalizeCheckbox', 'PUT', '/api/settings/watcher-enable-normalize', 'Metadata normalize', 'Failed to update normalize setting: '],
+    ['convertRarToCbzOnWriteCheckbox', 'PUT', '/api/settings/convert-rar-to-cbz-on-write', 'Convert CBR/RAR to CBZ when writing tags', 'Failed to update CBR/RAR conversion setting: '],
+    ['writeCoverToFirstArchiveCheckbox', 'PUT', '/api/settings/write-cover-to-first-archive', 'Embed cover into first issue archive', 'Failed to update cover embed setting: '],
+    ['writeCoverToSeriesFolderCheckbox', 'PUT', '/api/settings/write-cover-to-series-folder', 'Write cover into series folder', 'Failed to update cover folder setting: '],
+    ['downloadExternalSeriesImagesCheckbox', 'PUT', '/api/settings/download-external-series-images', 'Download external series images', 'Failed to update series image download setting: ']
 ];
 
 test('settings checkboxes save as soon as they change', async t => {
@@ -479,7 +492,8 @@ test('settings checkboxes save as soon as they change', async t => {
             page.route(route, respond(500, { error: 'Failed to save setting' }));
             page.input(checkbox, !initial);
             await page.settle();
-            assert.deepEqual(lastMessage(page), { type: 'error', text: `${errorPrefix}HTTP error! status: 500` });
+            // Every toggle passes the server's reason on.
+            assert.deepEqual(lastMessage(page), { type: 'error', text: `${errorPrefix}Failed to save setting` });
             assert.equal(checkbox.checked, initial);
 
             page.route(route, networkError);
@@ -503,6 +517,23 @@ test('settings checkboxes save as soon as they change', async t => {
     }
 });
 
+test('an unexpected failure of a checkbox quotes the reference of its request', async t => {
+    const page = await bootSettings();
+
+    for (const [id, method, path, label, errorPrefix] of TOGGLES) {
+        await t.test(label, async () => {
+            const checkbox = page.$(`#${id}`);
+            page.route(`${method} ${path}`, serverFailure(`corr-${id}`));
+
+            page.input(checkbox, !checkbox.checked);
+            await page.settle();
+
+            // Every toggle passes the server's reason on.
+            assert.deepEqual(lastMessage(page), { type: 'error', text: `${errorPrefix}${SERVER_FAILURE} (ref: corr-${id})` });
+        });
+    }
+});
+
 test('changing the theme applies it and saves the preference', async () => {
     const page = await bootSettings({ routes: { 'PUT /api/preferences': {} } });
 
@@ -513,39 +544,6 @@ test('changing the theme applies it and saves the preference', async () => {
     const calls = callsTo(page, 'PUT /api/preferences');
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0].body, { theme: 'dark' });
-});
-
-test('the default library view saves on change', async () => {
-    const page = await bootSettings({ routes: { 'PUT /api/settings/default-library-view': { message: 'ok' } } });
-    const route = 'PUT /api/settings/default-library-view';
-
-    page.input('#defaultLibraryViewSelect', 'files');
-    await page.settle();
-    assert.deepEqual(callsTo(page, route).at(-1).body, { view: 'files' });
-    assert.deepEqual(lastMessage(page), { type: 'success', text: 'Default library view set to Files (folder view)' });
-
-    page.input('#defaultLibraryViewSelect', 'series');
-    await page.settle();
-    assert.deepEqual(callsTo(page, route).at(-1).body, { view: 'series' });
-    assert.deepEqual(lastMessage(page), { type: 'success', text: 'Default library view set to Series' });
-
-    page.route(route, respond(500, { error: 'nope' }));
-    page.input('#defaultLibraryViewSelect', 'files');
-    await page.settle();
-    assert.deepEqual(lastMessage(page), { type: 'error', text: 'Failed to update default library view: HTTP error! status: 500' });
-
-    const shown = messages(page).length;
-    page.route(route, 401);
-    page.input('#defaultLibraryViewSelect', 'series');
-    await page.settle();
-    assert.equal(messages(page).length, shown);
-    assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
-
-    // Without the select (e.g. markup from an older page) there is nothing to save.
-    const before = page.fetchCalls.length;
-    page.$('#defaultLibraryViewSelect').remove();
-    await page.run('updateDefaultLibraryViewFromSettings()');
-    assert.equal(page.fetchCalls.length, before);
 });
 
 test('the default preferred language saves on change and refreshes the series list', async () => {
@@ -603,6 +601,15 @@ test('the default preferred language saves on change and refreshes the series li
     page.$('#defaultPreferredLanguageSelect').remove();
     await page.run('updateDefaultPreferredLanguageFromSettings()');
     assert.equal(page.fetchCalls.length, before);
+});
+
+test('the default language select quotes the reference of an unexpected failure', async () => {
+    const languageRoute = 'PUT /api/settings/default-preferred-language';
+    const page = await bootSettings({ routes: { [languageRoute]: serverFailure('corr-language') } });
+
+    page.input('#defaultPreferredLanguageSelect', 'ko');
+    await page.settle();
+    assert.deepEqual(lastMessage(page), { type: 'error', text: `Failed to update default preferred language: ${SERVER_FAILURE} (ref: corr-language)` });
 });
 
 test('settings opens from the sidebar and Cancel returns to the previous page', async () => {
@@ -666,15 +673,15 @@ test('the section navigation scrolls to a card and focuses its heading', async (
     assert.equal(page.document.activeElement, page.$('#settings-danger-title'));
 
     // A card without a title heading is still scrolled to.
-    page.$('#settings-access .settings-card-title').remove();
-    page.run("scrollToSettingsSection('settings-access')");
-    assert.equal(scrolls.at(-1).id, 'settings-access');
-    assert.deepEqual(activeLinks(), ['settings-access']);
+    page.$('#settings-language .settings-card-title').remove();
+    page.run("scrollToSettingsSection('settings-language')");
+    assert.equal(scrolls.at(-1).id, 'settings-language');
+    assert.deepEqual(activeLinks(), ['settings-language']);
 
     // Unknown sections are ignored.
     page.run("scrollToSettingsSection('settings-nope')");
     assert.equal(scrolls.length, 3);
-    assert.deepEqual(activeLinks(), ['settings-access']);
+    assert.deepEqual(activeLinks(), ['settings-language']);
 });
 
 test('the section navigation follows the card nearest the top while scrolling', async () => {
@@ -690,10 +697,10 @@ test('the section navigation follows the card nearest the top while scrolling', 
     assert.deepEqual(activeLinks(), ['settings-appearance'], 'the first section starts active');
 
     const entry = (id, isIntersecting, top = 0) => ({ target: card(id), isIntersecting, boundingClientRect: { top } });
-    observer.callback([entry('settings-watcher', true, 220), entry('settings-access', true, 40)]);
-    assert.deepEqual(activeLinks(), ['settings-access']);
+    observer.callback([entry('settings-watcher', true, 220), entry('settings-language', true, 40)]);
+    assert.deepEqual(activeLinks(), ['settings-language']);
 
-    observer.callback([entry('settings-access', false)]);
+    observer.callback([entry('settings-language', false)]);
     assert.deepEqual(activeLinks(), ['settings-watcher']);
 
     // Nothing visible (between cards): the last highlight stays.
@@ -734,4 +741,10 @@ test('the section highlight is skipped where IntersectionObserver is unavailable
     assert.equal(page.evaluate('settingsLoaded'), true);
     assert.equal(page.intersectionObservers.length, observers);
     assert.deepEqual(page.errors, []);
+});
+
+test('the ComicInfo fill checkbox shows the saved value', async () => {
+    const page = await bootSettings({ settings: { fill_comicinfo_from_providers: false } });
+
+    assert.equal(page.$('#fillComicInfoFromProvidersCheckbox').checked, false);
 });

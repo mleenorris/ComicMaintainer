@@ -1,4 +1,4 @@
-using ComicMaintainer.Core.Models;
+using ComicMaintainer.MauiApp.Models;
 
 namespace ComicMaintainer.MauiApp.Extensions;
 

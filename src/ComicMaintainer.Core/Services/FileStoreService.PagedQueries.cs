@@ -115,13 +115,14 @@ public partial class FileStoreService
         query = ApplyEntityFilter(dbContext, query, filter);
         query = ApplyEntitySearch(query, search);
 
-        // Page-through requests for the same view re-ask for the same total,
-        // so memoize it against the store's change version.
-        var countCacheKey = $"FileStore.PageCount|{ChangeVersion}|{readUserId}|{filter}|{search}";
-        if (_memoryCache == null || !_memoryCache.TryGetValue(countCacheKey, out int totalFiles))
+        // Page-through requests for the same view re-ask for the same total, so memoize it
+        // against the store's change version and, because the read/unread filters depend on
+        // it, the caller's own read-state version (which ChangeVersion does not track).
+        var countCacheKey = $"FileStore.PageCount|{ChangeVersion}|{readUserId}|{GetReadStateVersion(readUserId)}|{filter}|{search}";
+        if (!_memoryCache.TryGetValue(countCacheKey, out int totalFiles))
         {
             totalFiles = await query.CountAsync(cancellationToken);
-            _memoryCache?.Set(countCacheKey, totalFiles, DerivedCacheTtl);
+            _memoryCache.Set(countCacheKey, totalFiles, DerivedCacheTtl);
         }
 
         var ordered = ApplyEntityOrder(query, sort, direction);
@@ -244,7 +245,7 @@ public partial class FileStoreService
         CancellationToken cancellationToken)
     {
         var cacheKey = $"FileStore.DistinctDirectories|{ChangeVersion}";
-        if (_memoryCache != null && _memoryCache.TryGetValue(cacheKey, out List<string>? cached) && cached != null)
+        if (_memoryCache.TryGetValue(cacheKey, out List<string>? cached) && cached != null)
         {
             return cached;
         }
@@ -255,7 +256,7 @@ public partial class FileStoreService
             .Distinct()
             .ToListAsync(cancellationToken);
 
-        _memoryCache?.Set(cacheKey, directories, DerivedCacheTtl);
+        _memoryCache.Set(cacheKey, directories, DerivedCacheTtl);
         return directories;
     }
 
@@ -263,7 +264,7 @@ public partial class FileStoreService
     {
         var changeVersion = ChangeVersion;
         var cacheKey = $"{UnmarkedCountCacheKeyPrefix}.{changeVersion}";
-        if (_memoryCache != null && _memoryCache.TryGetValue(cacheKey, out int cached))
+        if (_memoryCache.TryGetValue(cacheKey, out int cached))
         {
             return cached;
         }
@@ -273,7 +274,7 @@ public partial class FileStoreService
             .AsNoTracking()
             .CountAsync(f => !(f.IsRenamed && f.IsNormalized) && !f.IsDuplicate, cancellationToken);
 
-        _memoryCache?.Set(cacheKey, count, UnmarkedCountCacheTtl);
+        _memoryCache.Set(cacheKey, count, UnmarkedCountCacheTtl);
         return count;
     }
 

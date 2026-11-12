@@ -1,7 +1,7 @@
 'use strict';
 
 // Selecting series in the library (js/app/library.js toggleSeriesSelection
-// and friends, plus the shared selection status in js/app/file-list.js):
+// and friends, plus the shared selection status in js/app/selection.js):
 // the select boxes, the selection toolbar, the bulk-action menu state and
 // the asynchronous resolution of each series' files.
 
@@ -77,7 +77,7 @@ test('a card\'s select box selects the whole series, fetching all its files, wit
     const [call] = issuesCalls(page);
     assert.equal(call.path, '/api/files/series/series-1/issues');
     assert.deepEqual(call.query, { per_page: '-1', filter: 'all' });
-    assert.equal(call.init.credentials, 'same-origin');
+    assert.equal(call.init.credentials, 'include');
     assert.match(call.headers.authorization, /^Bearer /);
 
     answer.resolve(issuesFor(call));
@@ -118,25 +118,84 @@ test('clicking a selected box again deselects the series and releases its files'
     assert.equal(issuesCalls(page).length, 2);
 });
 
-test('Space and Enter toggle a focused select box; other keys do nothing', async () => {
+test('the select box is a native button exposed as a checkbox, so the keyboard reaches and toggles it', async () => {
     const page = await bootSelectable(1);
     const selectBox = box(page, 'series-1');
+
+    // A native <button> is focusable and fires click on Space and Enter, so
+    // no tabindex or key handling of its own is needed.
+    assert.equal(selectBox.tagName, 'BUTTON');
+    assert.equal(selectBox.type, 'button');
+    assert.equal(selectBox.getAttribute('role'), 'checkbox');
+    assert.equal(selectBox.hasAttribute('tabindex'), false);
+    assert.equal(selectBox.hasAttribute('onkeydown'), false);
 
     const other = pressKey(page, selectBox, 'a');
     await page.settle();
     assert.equal(other.defaultPrevented, false);
     assert.equal(selectBox.getAttribute('aria-checked'), 'false');
 
-    const space = pressKey(page, selectBox, ' ');
+    // What the browser does for Space or Enter on a focused button.
+    selectBox.focus();
+    assert.equal(page.document.activeElement, selectBox);
+    page.click(selectBox);
     await page.settle();
-    assert.equal(space.defaultPrevented, true);
     assert.equal(selectBox.getAttribute('aria-checked'), 'true');
     assert.equal(page.$('#selectInfo').textContent, '1 series · 2 files selected');
 
-    pressKey(page, selectBox, 'Enter');
+    page.click(selectBox);
     await page.settle();
     assert.equal(selectBox.getAttribute('aria-checked'), 'false');
     assert.equal(page.$('#selectInfo').textContent, 'No files selected');
+});
+
+// FE-11: a button's descendants are presentational, so a select box nested in
+// the card's "Open series" button was hidden from screen readers, and list
+// rows replaced the button role with role="listitem".
+test('every layout renders a series as a list item with separate select and open controls', async () => {
+    for (const [layout, list, item, open] of [
+        ['compact', '.series-grid--compact', '.series-card', '.series-card-open'],
+        ['grid', '.series-grid--titled', '.series-card--titled', '.series-card-open'],
+        ['list', '.series-list', '.series-list-row', '.series-list-row-open']
+    ]) {
+        const page = await bootSelectable(2, issuesFor, { localStorage: { seriesLayout: layout } });
+        const container = page.$(`#fileList ${list}`);
+        assert.equal(container.getAttribute('role'), 'list', layout);
+        const items = [...container.children];
+        assert.equal(items.length, 2, layout);
+
+        for (const [index, element] of items.entries()) {
+            const title = `Series 00${index + 1}`;
+            assert.ok(element.matches(item), layout);
+            assert.equal(element.tagName, 'DIV', `${layout}: the item itself is not a control`);
+            assert.equal(element.getAttribute('role'), 'listitem', layout);
+
+            const controls = [...element.querySelectorAll('button, input, [role="checkbox"], [tabindex]')];
+            assert.deepEqual(controls.map(control => control.className.split(' ')[0]), ['series-select-box', open.slice(1)], layout);
+            const [select, opener] = controls;
+            assert.equal(select.getAttribute('aria-label'), `Select ${title}`, layout);
+            assert.equal(opener.tagName, 'BUTTON', layout);
+            assert.equal(opener.hasAttribute('role'), false, `${layout}: the open button keeps its button role`);
+            assert.equal(opener.getAttribute('aria-label'), `Open series ${title}`, layout);
+            assert.equal(opener.getAttribute('aria-controls'), 'seriesDetailPanel', layout);
+            assert.equal(opener.getAttribute('aria-expanded'), 'false', layout);
+            // Neither control is nested in the other (or in any other control).
+            for (const control of controls) {
+                assert.equal(control.parentElement.closest('button, a, [role="button"], [role="checkbox"]'), null, layout);
+            }
+        }
+
+        // Toggling selection does not open the series; the open button does.
+        page.click(box(page, 'series-2'));
+        await page.settle();
+        assert.equal(box(page, 'series-2').getAttribute('aria-checked'), 'true', layout);
+        assert.ok(items[1].classList.contains(layout === 'list' ? 'series-list-row--selected' : 'series-card--selected'), layout);
+        assert.equal(page.window.location.hash, '#/library', layout);
+        page.click(items[0].querySelector(open));
+        await page.settle();
+        assert.equal(page.window.location.hash, '#/series/series-1', layout);
+        page.close();
+    }
 });
 
 test('"Select all series" selects every loaded series and Clear empties the selection', async () => {
@@ -370,7 +429,7 @@ test('a series page opened while a selection is resolving leaves the page alone'
     page.route('GET /api/files/series/series-1/issues', call => (call.query.filter === 'all' ? answer.promise : issuesFor(call)));
 
     page.click(box(page, 'series-1'));
-    page.click('#fileList .series-card');
+    page.click('#fileList .series-card-open');
     await page.settle();
     assert.equal(page.window.location.hash, '#/series/series-1');
     const detailGrid = page.$('#seriesDetailPanel .series-issues-grid');

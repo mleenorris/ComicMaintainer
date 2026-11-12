@@ -81,7 +81,7 @@ public class FileStoreServiceIntegrationTests : IDisposable
 
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        var fileStoreService = new FileStoreService(options, logger, dbContextFactory);
+        var fileStoreService = TestServices.CreateFileStore(options, logger, dbContextFactory);
 
         var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
@@ -130,7 +130,7 @@ public class FileStoreServiceIntegrationTests : IDisposable
 
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        var fileStoreService = new FileStoreService(options, logger, dbContextFactory);
+        var fileStoreService = TestServices.CreateFileStore(options, logger, dbContextFactory);
 
         var filePath = Path.Join(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
@@ -177,7 +177,7 @@ public class FileStoreServiceIntegrationTests : IDisposable
 
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        var fileStoreService = new FileStoreService(options, logger, dbContextFactory);
+        var fileStoreService = TestServices.CreateFileStore(options, logger, dbContextFactory);
 
         var filePath = Path.Join(_testDirectory, "nonexistent.cbz");
 
@@ -209,7 +209,7 @@ public class FileStoreServiceIntegrationTests : IDisposable
 
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        var fileStoreService = new FileStoreService(options, logger, dbContextFactory);
+        var fileStoreService = TestServices.CreateFileStore(options, logger, dbContextFactory);
 
         var trackedPath = Path.Join(_testDirectory, "tracked.cbz");
         var duplicatePath = Path.Join(_testDirectory, "dupe.cbz");

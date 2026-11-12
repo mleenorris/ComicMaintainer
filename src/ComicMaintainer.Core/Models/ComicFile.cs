@@ -176,7 +176,15 @@ public class ProcessingJob
     /// <summary>
     /// True once the job has reached a state it can never leave.
     /// </summary>
-    public bool IsTerminal => Status is JobStatus.Completed
+    public bool IsTerminal => Status.IsTerminal();
+}
+
+public static class JobStatusExtensions
+{
+    /// <summary>
+    /// True for a state a job can never leave.
+    /// </summary>
+    public static bool IsTerminal(this JobStatus status) => status is JobStatus.Completed
         or JobStatus.Failed
         or JobStatus.Cancelled
         or JobStatus.Interrupted;

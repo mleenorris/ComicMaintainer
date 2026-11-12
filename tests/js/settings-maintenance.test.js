@@ -6,7 +6,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
-const { bootSettings, messages, lastMessage, clearMessages, callsTo, requestLog } = require('./support/settings-helpers');
+const { bootSettings, messages, lastMessage, clearMessages, callsTo, requestLog, SERVER_FAILURE, serverFailure } = require('./support/settings-helpers');
 
 const networkError = () => {
     throw new TypeError('Failed to fetch');
@@ -94,6 +94,7 @@ test('a failed reset is reported', async () => {
         [respond(500, { success: false, error: 'Error resetting database: disk I/O error' }),
             'Failed to reset database: Error resetting database: disk I/O error'],
         [respond(500, {}), 'Failed to reset database: HTTP error! status: 500'],
+        [serverFailure('corr-reset'), `Failed to reset database: ${SERVER_FAILURE} (ref: corr-reset)`],
         // A reverse proxy's error page, an empty body, or JSON that is not an object.
         [respond(502, '<html><head><title>502 Bad Gateway</title></head><body><h1>502 Bad Gateway</h1></body></html>',
             { 'Content-Type': 'text/html' }), 'Failed to reset database: HTTP error! status: 502'],
@@ -144,8 +145,10 @@ test('Clean up database now reports how many stale entries were removed', async 
     const failures = [
         [{ success: false, error: 'Cleanup already running' }, 'Cleanup already running'],
         [{ success: false }, 'Failed to cleanup database'],
-        [respond(500, { success: false, error: 'Error during database cleanup: locked' }),
-            'Failed to cleanup database: HTTP error! status: 500'],
+        [respond(500, { success: false, error: 'The cleanup failed. No rows were removed.' }),
+            'Failed to cleanup database: The cleanup failed. No rows were removed.'],
+        [respond(502, 'Bad gateway'), 'Failed to cleanup database: HTTP error! status: 502'],
+        [serverFailure('corr-cleanup'), `Failed to cleanup database: ${SERVER_FAILURE} (ref: corr-cleanup)`],
         [networkError, 'Failed to cleanup database: Failed to fetch']
     ];
     for (const [response, expected] of failures) {
@@ -161,6 +164,69 @@ test('Clean up database now reports how many stale entries were removed', async 
     await page.settle();
     assert.deepEqual(messages(page), [{ type: 'info', text: 'Starting database cleanup...' }]);
     assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
+});
+
+test('Clean up database now asks before removing more than the guard allows, and repeats with confirm=true', async () => {
+    const route = 'POST /api/settings/cleanup-database';
+    const guarded = {
+        success: false,
+        status: 'ThresholdExceeded',
+        requiresConfirmation: true,
+        message: '300 of 1000 tracked files are missing, more than the 10% one cleanup may remove without confirmation. No rows were removed; check that the whole library is mounted.',
+        removedCount: 0
+    };
+    const page = await bootSettings({
+        routes: {
+            [route]: call => call.query.confirm === 'true'
+                ? { success: true, message: 'Removed 300 stale database entries.', removedCount: 300 }
+                : respond(409, guarded)
+        }
+    });
+    const button = 'button[onclick="cleanupDatabaseNow()"]';
+
+    // Declined: nothing else is sent.
+    page.window.confirm = message => {
+        page.dialogs.push({ kind: 'confirm', message });
+        return false;
+    };
+    clearMessages(page);
+    page.click(button);
+    await page.settle();
+    assert.deepEqual(callsTo(page, route).map(call => call.url), ['/api/settings/cleanup-database']);
+    assert.equal(page.dialogs.at(-1).message, `${guarded.message}\n\nRemove these entries anyway?`);
+    assert.deepEqual(messages(page), [
+        { type: 'info', text: 'Starting database cleanup...' },
+        { type: 'info', text: 'Database cleanup cancelled. No entries were removed.' }
+    ]);
+
+    // Confirmed: the cleanup is repeated with confirm=true.
+    page.window.confirm = () => true;
+    const since = page.fetchCalls.length;
+    clearMessages(page);
+    page.click(button);
+    await page.settle();
+    assert.deepEqual(callsTo(page, route, since).map(call => call.url), [
+        '/api/settings/cleanup-database',
+        '/api/settings/cleanup-database?confirm=true'
+    ]);
+    assert.deepEqual(lastMessage(page), { type: 'success', text: 'Removed 300 stale database entries.' });
+});
+
+test('Clean up database now reports a cleanup the server refused because the library looks unmounted', async () => {
+    const route = 'POST /api/settings/cleanup-database';
+    const message = "the watched directory '/comics' does not exist or cannot be read, so the library is presumed unmounted. No rows were removed.";
+    const page = await bootSettings({
+        routes: { [route]: respond(409, { success: false, status: 'WatchedDirectoryUnavailable', requiresConfirmation: false, message }) }
+    });
+    const dialogsBefore = page.dialogs.length;
+
+    clearMessages(page);
+    page.click('button[onclick="cleanupDatabaseNow()"]');
+    await page.settle();
+
+    assert.equal(page.dialogs.length, dialogsBefore, 'confirmation cannot override a missing library');
+    assert.equal(callsTo(page, route).length, 1);
+    assert.deepEqual(lastMessage(page), { type: 'warning', text: message });
 });
 
 test('the About dialog shows the server version', async () => {
@@ -191,7 +257,7 @@ test('the About dialog shows the server version', async () => {
     clearMessages(page);
     page.route('GET /api/version', respond(500, { error: 'boom' }));
     await page.run('openAboutModal()');
-    assert.deepEqual(messages(page), [{ type: 'error', text: 'Failed to load version information: HTTP error! status: 500' }]);
+    assert.deepEqual(messages(page), [{ type: 'error', text: 'Failed to load version information: boom' }]);
     assert.equal(isActive(page, 'aboutModal'), false);
 
     page.route('GET /api/version', networkError);

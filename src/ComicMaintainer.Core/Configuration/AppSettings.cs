@@ -39,6 +39,16 @@ public class AppSettings
     public bool WatcherEnableNormalize { get; set; } = true;
 
     /// <summary>
+    /// Whether writing tags to a CBR, RAR or ZIP archive converts it to CBZ. Only CBZ files are
+    /// rewritten in place. When true (the default), a metadata write to any other archive writes
+    /// the tagged archive as a new <c>.cbz</c> next to it, moves the file's library record (its
+    /// processing state, per-user read status and reading progress) to the new path and deletes
+    /// the original. When false, those archives are never rewritten: tag edits made in the app
+    /// are kept in the database only, and normalize leaves the archive as it is.
+    /// </summary>
+    public bool ConvertRarToCbzOnWrite { get; set; } = true;
+
+    /// <summary>
     /// Size (in kilobytes) of the FileSystemWatcher internal buffer. A larger buffer lets the
     /// watcher hold more pending file-system events before the OS drops them, which is important
     /// when a large batch of files arrives at once. The OS caps this at 64 KB and the default of
@@ -50,23 +60,55 @@ public class AppSettings
     // Database cleanup settings
     public int DatabaseCleanupIntervalHours { get; set; } = 12;
 
-    /// <summary>
-    /// Default library view shown on initial page load.
-    /// Supported values: "files" (folder/file list) or "series" (grouped series grid).
-    /// </summary>
-    public string DefaultLibraryView { get; set; } = "files";
+    /// <summary>The largest accepted <see cref="StaleCleanupMaxRemovalPercent"/>.</summary>
+    public const int MaxStaleCleanupRemovalPercent = 100;
+
+    /// <summary>The largest accepted <see cref="StaleCleanupMissingGraceHours"/> (30 days).</summary>
+    public const int MaxStaleCleanupMissingGraceHours = 720;
 
     /// <summary>
-    /// When true, anonymous visitors may create their own account via
-    /// <c>POST /api/auth/register</c>. Defaults to <c>false</c>: ComicMaintainer
-    /// is normally deployed as a private, self-hosted library, so anyone able to
-    /// reach the port would otherwise be able to sign themselves up. Regardless
-    /// of this setting, an administrator can always create accounts because the
-    /// register endpoint additionally accepts authenticated Admin callers, and
-    /// the one-time <c>POST /api/auth/setup</c> bootstrap remains available
-    /// while no admin exists.
+    /// Largest share (percent of all tracked files) that one stale-entry cleanup may delete
+    /// without explicit confirmation. A run that would delete more is skipped and logged, so
+    /// a library mount that is missing or only partly available cannot wipe the database.
+    /// Removals of at most <c>FileStoreService.StaleCleanupAlwaysAllowedRemovals</c> rows are
+    /// never blocked, so small libraries can still be tidied. 100 disables the guard.
     /// </summary>
-    public bool AllowRegistration { get; set; }
+    public int StaleCleanupMaxRemovalPercent { get; set; } = 10;
+
+    /// <summary>
+    /// How long (hours) a tracked file must have been missing, as seen by two cleanup runs at
+    /// least this far apart, before a cleanup deletes its row. The first run that cannot find
+    /// the file only stamps <c>MissingSince</c>, so even 0 takes a second run; a file that
+    /// reappears in the meantime keeps its row and everything stored on it. A manual cleanup
+    /// asks for confirmation before deleting a file that has not been missing this long.
+    /// </summary>
+    public int StaleCleanupMissingGraceHours { get; set; } = 6;
+
+    /// <summary>
+    /// Optional path of a file that must exist before any stale-entry cleanup runs, relative
+    /// to <see cref="WatchedDirectory"/> (or absolute). Create it on the library share (for
+    /// example <c>.comicmaintainer-library</c>) so the cleanup can tell a mounted library
+    /// from an empty mount point. Empty disables the check.
+    /// </summary>
+    public string? StaleCleanupSentinelFile { get; set; }
+
+    /// <summary>The largest accepted <see cref="ProcessingHistoryRetentionDays"/> (10 years).</summary>
+    public const int MaxProcessingHistoryRetentionDays = 3650;
+
+    /// <summary>The largest accepted <see cref="ProcessingHistoryMaxEntries"/>.</summary>
+    public const int MaxProcessingHistoryEntries = 10_000_000;
+
+    /// <summary>
+    /// Processing-history entries older than this many days are pruned by the scheduled
+    /// database cleanup. 0 keeps entries regardless of age.
+    /// </summary>
+    public int ProcessingHistoryRetentionDays { get; set; } = 90;
+
+    /// <summary>
+    /// Upper bound on the number of processing-history entries kept; the oldest are pruned by
+    /// the scheduled database cleanup. 0 disables the cap.
+    /// </summary>
+    public int ProcessingHistoryMaxEntries { get; set; } = 50000;
 
     // External series metadata / alias enrichment
     public bool EnableExternalSeriesMetadata { get; set; }
@@ -128,12 +170,37 @@ public class AppSettings
     public int AniListRequestsPerMinute { get; set; } = 28;
 
     /// <summary>
+    /// Client-side request budget for the ComicVine API. ComicVine allows
+    /// 200 requests per resource per hour (and blocks clients that send
+    /// bursts), so the default of 180/hour leaves headroom. Requests are also
+    /// spaced at least one second apart. Once the hourly budget is spent,
+    /// ComicVine is skipped until it refills instead of queueing lookups.
+    /// </summary>
+    public int ComicVineRequestsPerHour { get; set; } = 180;
+
+    /// <summary>
+    /// Per-attempt timeout, in seconds, for a request to an external metadata
+    /// provider (ComicVine, MangaDex, AniList). A provider that does not answer
+    /// in time counts as failed, so it is skipped for a back-off period instead
+    /// of holding up file processing. Clamped to 1-30 seconds.
+    /// </summary>
+    public int MetadataProviderTimeoutSeconds { get; set; } = 15;
+
+    /// <summary>
     /// When true (the default), external metadata refreshes also try to
     /// download a series cover image from the chosen provider and persist it
     /// under <see cref="SeriesImageCacheDirectory"/>. Set to false to keep
     /// metadata-only refreshes (e.g. for limited-bandwidth deployments).
     /// </summary>
     public bool DownloadExternalSeriesImages { get; set; } = true;
+
+    /// <summary>
+    /// When true (the default), processing a file also fills its empty ComicInfo fields
+    /// (Summary, Genre, Web, Count, Manga) from the series' provider match. A value already in
+    /// the file or a Summary locked by a user is never changed, and files are not rewritten
+    /// until they are next processed.
+    /// </summary>
+    public bool FillComicInfoFromProviders { get; set; } = true;
 
     /// <summary>
     /// Directory where downloaded and user-uploaded series cover images are
@@ -206,19 +273,6 @@ public class AppSettings
     /// available, the library will show it in place of the canonical title.
     /// </summary>
     public string? DefaultPreferredLanguage { get; set; }
-
-    /// <summary>
-    /// Hard cap on the number of comic archives a single
-    /// <c>GetSeriesIssuesAsync</c> call is allowed to open from disk to
-    /// upgrade missing <c>Title</c> / <c>Issue</c> metadata. The upgrade
-    /// path is best-effort and only runs for issues whose cached DTO is
-    /// missing both fields, so most requests do zero disk reads. This cap
-    /// protects the request from pathological cases (e.g. a 1000-issue
-    /// series with no cached metadata) where the upgrade loop would
-    /// otherwise dominate the request latency. Default 100 matches the
-    /// default frontend page size.
-    /// </summary>
-    public int SeriesIssuesMaxArchiveUpgrades { get; set; } = 100;
 
     /// <summary>
     /// When true (the default), the server caches the cover (page 1) bytes of
@@ -295,10 +349,13 @@ public class AppSettings
     public string EmailFromName { get; set; } = "ComicMaintainer";
 
     /// <summary>
-    /// Maximum size, in megabytes, of a single comic attachment. Issues larger
-    /// than this are failed with a clear message rather than being handed to the
-    /// SMTP server, which would reject them anyway (Kindle's personal-document
-    /// limit is 50 MB, most providers cap at 25 MB). Defaults to 25.
+    /// Maximum size, in megabytes, of a whole comic email as the SMTP server
+    /// measures it: the attachment once base64 encoded (about 37% larger than
+    /// the file) plus headers. Providers enforce their limits on this encoded
+    /// size (most cap at 25 MB), so with the default of 25 a book can be about
+    /// 18 MB. Converted books are recompressed to fit; anything still larger is
+    /// failed with a clear message rather than being handed to the SMTP server,
+    /// which would reject it anyway.
     /// </summary>
     public int EmailMaxAttachmentMegabytes { get; set; } = 25;
 
@@ -389,6 +446,88 @@ public class AppSettings
     public bool ErrorReportingCommentOnRecurrence { get; set; } = true;
 
     // ---------------------------------------------------------------------
+    // Notifications and media-server rescans
+    // ---------------------------------------------------------------------
+    // One target of each type. A target does nothing until it is enabled, and the *Events
+    // lists (comma-separated, see NotificationEventType) choose what it receives. Secrets, and
+    // webhook URLs that carry a token, are never returned by the settings API or logged.
+
+    /// <summary>Send notifications to an ntfy topic.</summary>
+    public bool NotifyNtfyEnabled { get; set; }
+
+    /// <summary>Base URL of the ntfy server, e.g. <c>https://ntfy.sh</c>.</summary>
+    public string? NotifyNtfyUrl { get; set; }
+
+    /// <summary>The ntfy topic to publish to.</summary>
+    public string? NotifyNtfyTopic { get; set; }
+
+    /// <summary>Optional ntfy access token. Never returned by the settings API.</summary>
+    public string? NotifyNtfyToken { get; set; }
+
+    /// <summary>Events sent to ntfy.</summary>
+    public string NotifyNtfyEvents { get; set; } = Notifications.NotificationEventType.DefaultPushEvents;
+
+    /// <summary>Send notifications to a Gotify server.</summary>
+    public bool NotifyGotifyEnabled { get; set; }
+
+    /// <summary>Base URL of the Gotify server.</summary>
+    public string? NotifyGotifyUrl { get; set; }
+
+    /// <summary>Gotify application token. Never returned by the settings API.</summary>
+    public string? NotifyGotifyToken { get; set; }
+
+    /// <summary>Events sent to Gotify.</summary>
+    public string NotifyGotifyEvents { get; set; } = Notifications.NotificationEventType.DefaultPushEvents;
+
+    /// <summary>Send notifications to a Discord webhook.</summary>
+    public bool NotifyDiscordEnabled { get; set; }
+
+    /// <summary>Discord webhook URL. It contains the webhook's token, so it is treated as a secret.</summary>
+    public string? NotifyDiscordWebhookUrl { get; set; }
+
+    /// <summary>Events sent to Discord.</summary>
+    public string NotifyDiscordEvents { get; set; } = Notifications.NotificationEventType.DefaultPushEvents;
+
+    /// <summary>POST notifications as JSON to a webhook.</summary>
+    public bool NotifyWebhookEnabled { get; set; }
+
+    /// <summary>Webhook URL. Such URLs often contain a token, so it is treated as a secret.</summary>
+    public string? NotifyWebhookUrl { get; set; }
+
+    /// <summary>Events sent to the webhook.</summary>
+    public string NotifyWebhookEvents { get; set; } = Notifications.NotificationEventType.DefaultPushEvents;
+
+    /// <summary>Ask Komga to rescan the library when files change.</summary>
+    public bool NotifyKomgaEnabled { get; set; }
+
+    /// <summary>Base URL of the Komga server.</summary>
+    public string? NotifyKomgaUrl { get; set; }
+
+    /// <summary>API key of a Komga administrator. Never returned by the settings API.</summary>
+    public string? NotifyKomgaApiKey { get; set; }
+
+    /// <summary>The Komga library to scan; every library when empty.</summary>
+    public string? NotifyKomgaLibraryId { get; set; }
+
+    /// <summary>Events that make Komga scan.</summary>
+    public string NotifyKomgaEvents { get; set; } = Notifications.NotificationEventType.DefaultRescanEvents;
+
+    /// <summary>Ask Kavita to rescan the library when files change.</summary>
+    public bool NotifyKavitaEnabled { get; set; }
+
+    /// <summary>Base URL of the Kavita server.</summary>
+    public string? NotifyKavitaUrl { get; set; }
+
+    /// <summary>Kavita Auth Key. Never returned by the settings API.</summary>
+    public string? NotifyKavitaApiKey { get; set; }
+
+    /// <summary>The Kavita library to scan (a number); every library when empty.</summary>
+    public string? NotifyKavitaLibraryId { get; set; }
+
+    /// <summary>Events that make Kavita scan.</summary>
+    public string NotifyKavitaEvents { get; set; } = Notifications.NotificationEventType.DefaultRescanEvents;
+
+    // ---------------------------------------------------------------------
     // File cover thumbnails
     // ---------------------------------------------------------------------
 
@@ -428,4 +567,15 @@ public class AppSettings
     /// backup). Values below 1 disable pruning. Defaults to 7.
     /// </summary>
     public int DatabaseBackupRetention { get; set; } = 7;
+
+    // ---------------------------------------------------------------------
+    // OPDS catalog
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Whether the OPDS catalog under <c>/opds/v1.2/</c> is served, so that comic apps (Panels, Chunky, KOReader and
+    /// others) can browse and read the library with HTTP Basic credentials. Off by default because it adds a way to
+    /// sign in; while off, every <c>/opds</c> route answers 404.
+    /// </summary>
+    public bool OpdsEnabled { get; set; }
 }

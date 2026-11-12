@@ -15,7 +15,6 @@ tests/
 │   ├── Fuzz/              # Randomized-input tests of models and path helpers
 │   ├── HealthChecks/      # Health check implementations
 │   ├── Helpers/           # Shared test doubles
-│   ├── Hubs/              # SignalR progress hub
 │   ├── Infrastructure/    # Global exception handler
 │   ├── Integration/       # In-process API tests (WebApplicationFactory, Category=Integration)
 │   ├── Middleware/        # Request pipeline middleware and filters

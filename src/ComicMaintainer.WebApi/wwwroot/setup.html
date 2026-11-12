@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-base-path="__BASE_PATH__">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -15,8 +15,8 @@
     <meta http-equiv="Expires" content="0">
     
     <!-- Favicons and Icons -->
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="__BASE_PATH__/icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="__BASE_PATH__/icons/favicon-16x16.png">
     
     <style>
         :root {
@@ -381,6 +381,11 @@
         <!-- Setup Form -->
         <form id="setupForm">
             <div class="form-group">
+                <label for="setupToken">Setup Code</label>
+                <input type="text" id="setupToken" name="setupToken" required autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="setupTokenHelp">
+                <small id="setupTokenHelp">Printed in the server log when ComicMaintainer starts (for example <code>docker logs comicmaintainer-dotnet</code>), or the value of SETUP_TOKEN</small>
+            </div>
+            <div class="form-group">
                 <label for="username">Username</label>
                 <input type="text" id="username" name="username" required autocomplete="username" minlength="3">
                 <small>Minimum 3 characters</small>
@@ -407,6 +412,8 @@
         </form>
     </main>
     
-    <script src="/js/pages/setup.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/shared.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/api.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/pages/setup.js?v=__APP_VERSION__"></script>
 </body>
 </html>

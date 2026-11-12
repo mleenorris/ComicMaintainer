@@ -55,22 +55,43 @@ public class CompositeExternalSeriesMetadataServiceCoverageTests
     public async Task LookupSeriesAsync_CallerCancellation_IsRethrownWithoutBackingOffTheProvider()
     {
         using var cts = new CancellationTokenSource();
-        await cts.CancelAsync();
+        var calls = 0;
         var provider = new Mock<IExternalSeriesMetadataService>();
-        provider.Setup(p => p.LookupSeriesAsync("Batman", cts.Token))
-            .ThrowsAsync(new OperationCanceledException(cts.Token));
-        provider.Setup(p => p.LookupSeriesAsync("Batman", CancellationToken.None))
-            .ReturnsAsync(Meta("Batman", "Primary"));
-        var next = new Mock<IExternalSeriesMetadataService>();
-        var service = CreateService(provider.Object, next.Object);
+        provider.Setup(p => p.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()))
+            .Returns((string _, CancellationToken token) =>
+            {
+                if (++calls == 1)
+                {
+                    // The caller gives up while the provider is working.
+                    cts.Cancel();
+                    throw new OperationCanceledException(token);
+                }
+                return Task.FromResult<ExternalSeriesMetadata?>(Meta("Batman", "Primary"));
+            });
+        var service = CreateService(provider.Object);
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.LookupSeriesAsync("Batman", cts.Token));
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.LookupSeriesAsync("Batman", cts.Token));
 
-        next.Verify(p => p.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(cts.Token, cancelled.CancellationToken);
         // Cancellation is not a provider failure: it is consulted again immediately.
         var result = await service.LookupSeriesAsync("Batman");
         Assert.Equal("Primary", result!.Source);
         Assert.DoesNotContain(_logger.Entries, e => e.Message.Contains("cooling down"));
+        Assert.DoesNotContain(_logger.Entries, e => e.Message.Contains("failed for"));
+    }
+
+    [Fact]
+    public async Task LookupSeriesAsync_AlreadyCancelledCaller_AsksNoProvider()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var provider = new Mock<IExternalSeriesMetadataService>();
+        var service = CreateService(provider.Object);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.LookupSeriesAsync("Batman", cts.Token));
+
+        provider.Verify(p => p.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Empty(_logger.Entries);
     }
 
     [Fact]
@@ -85,7 +106,9 @@ public class CompositeExternalSeriesMetadataServiceCoverageTests
         Assert.Equal("Fallback", (await service.LookupSeriesAsync("Batman"))!.Source);
         var failure = Assert.Single(_logger.Entries, e => e.Message.Contains("failed for Batman"));
         Assert.Equal(LogLevel.Debug, failure.Level);
-        Assert.IsType<TaskCanceledException>(failure.Exception);
+        var unavailable = Assert.IsType<ExternalMetadataUnavailableException>(failure.Exception);
+        Assert.Equal(ExternalMetadataFailureKind.Timeout, unavailable.Kind);
+        Assert.IsType<TaskCanceledException>(unavailable.InnerException);
 
         Assert.Equal("Fallback", (await service.LookupSeriesAsync("Batman"))!.Source);
         timedOut.Verify(p => p.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -98,12 +121,13 @@ public class CompositeExternalSeriesMetadataServiceCoverageTests
         var failing = FailingLookupProvider(new HttpRequestException("boom"));
         var service = new CompositeExternalSeriesMetadataService(
             new[] { failing.Object }, _logger, _clock, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(45));
+        Task LookupAsync() => Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Batman"));
 
-        await service.LookupSeriesAsync("Batman"); // failure 1 -> 30s
+        await LookupAsync(); // failure 1 -> 30s
         _clock.Advance(TimeSpan.FromSeconds(30));
-        await service.LookupSeriesAsync("Batman"); // failure 2 -> min(60s, 45s)
+        await LookupAsync(); // failure 2 -> min(60s, 45s)
         _clock.Advance(TimeSpan.FromSeconds(44));
-        await service.LookupSeriesAsync("Batman"); // still cooling down
+        await LookupAsync(); // still cooling down
         failing.Verify(p => p.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
 
         // The exponent is capped, so dozens of consecutive failures neither
@@ -111,29 +135,30 @@ public class CompositeExternalSeriesMetadataServiceCoverageTests
         for (var i = 0; i < 40; i++)
         {
             _clock.Advance(TimeSpan.FromSeconds(45));
-            await service.LookupSeriesAsync("Batman");
+            await LookupAsync();
         }
         failing.Verify(p => p.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(42));
 
         _clock.Advance(TimeSpan.FromSeconds(44));
-        await service.LookupSeriesAsync("Batman");
+        await LookupAsync();
         failing.Verify(p => p.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(42));
     }
 
     [Fact]
-    public async Task SearchSeriesAsync_AggregatesProvidersInOrder_AndStopsOnceLimitIsReached()
+    public async Task SearchSeriesAsync_AsksEveryProvider_AndInterleavesUpToTheLimit()
     {
         var first = SearchProvider(Meta("A1"), Meta("A2"));
         var second = SearchProvider(Meta("B1"), Meta("B2"));
         var third = SearchProvider(Meta("C1"));
         var service = CreateService(first.Object, second.Object, third.Object);
 
-        var results = await service.SearchSeriesAsync("query", 3);
+        var results = await service.SearchSeriesAsync("query", 4);
 
-        Assert.Equal(new[] { "A1", "A2", "B1" }, results.Select(r => r.CanonicalTitle));
-        first.Verify(p => p.SearchSeriesAsync("query", 3, It.IsAny<CancellationToken>()), Times.Once);
-        second.Verify(p => p.SearchSeriesAsync("query", 3, It.IsAny<CancellationToken>()), Times.Once);
-        third.Verify(p => p.SearchSeriesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(new[] { "A1", "B1", "C1", "A2" }, results.Select(r => r.CanonicalTitle));
+        foreach (var provider in new[] { first, second, third })
+        {
+            provider.Verify(p => p.SearchSeriesAsync("query", 4, It.IsAny<CancellationToken>()), Times.Once);
+        }
     }
 
     [Fact]
@@ -168,16 +193,16 @@ public class CompositeExternalSeriesMetadataServiceCoverageTests
         var service = CreateService(failing.Object, healthy.Object);
 
         Assert.Equal("H1", Assert.Single(await service.SearchSeriesAsync("query")).CanonicalTitle);
-        var failure = Assert.Single(_logger.Entries, e => e.Message.Contains("search failed for query"));
+        var failure = Assert.Single(_logger.Entries, e => e.Message.Contains("failed for query"));
         Assert.Equal(LogLevel.Debug, failure.Level);
-        Assert.IsType<HttpRequestException>(failure.Exception);
+        Assert.IsType<HttpRequestException>(Assert.IsType<ExternalMetadataUnavailableException>(failure.Exception).InnerException);
         Assert.EndsWith("next attempt at " + (Start + TimeSpan.FromSeconds(30)).ToString("O"), failure.Message);
 
         _clock.Advance(TimeSpan.FromSeconds(29));
         Assert.Equal("H1", Assert.Single(await service.SearchSeriesAsync("query")).CanonicalTitle);
         failing.Verify(p => p.SearchSeriesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
         Assert.Contains(_logger.Entries, e => e.Level == LogLevel.Debug
-            && e.Message.Contains("search for query; cooling down until"));
+            && e.Message.Contains("for query; cooling down until"));
 
         _clock.Advance(TimeSpan.FromSeconds(1));
         await service.SearchSeriesAsync("query");
@@ -212,12 +237,14 @@ public class CompositeExternalSeriesMetadataServiceCoverageTests
                 : Task.FromException<IReadOnlyList<ExternalSeriesMetadata>>(new HttpRequestException("boom")));
         var service = CreateService(flaky.Object);
 
-        Assert.Empty(await service.SearchSeriesAsync("query")); // failure -> 30s cooldown
+        Task FailedSearchAsync() => Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.SearchSeriesAsync("query"));
+
+        await FailedSearchAsync(); // failure -> 30s cooldown
         _clock.Advance(TimeSpan.FromSeconds(30));
         Assert.Single(await service.SearchSeriesAsync("query")); // success resets the failure count
-        Assert.Empty(await service.SearchSeriesAsync("query")); // failure -> 30s again, not 60s
+        await FailedSearchAsync(); // failure -> 30s again, not 60s
         _clock.Advance(TimeSpan.FromSeconds(30));
-        Assert.Empty(await service.SearchSeriesAsync("query"));
+        await FailedSearchAsync();
 
         Assert.Equal(4, calls);
     }
@@ -242,7 +269,7 @@ public class CompositeExternalSeriesMetadataServiceCoverageTests
         broken.Setup(p => p.CheckHealthAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("probe exploded"));
         var service = CreateService(healthy.Object, coolingDown.Object, broken.Object);
-        Assert.Null(await service.LookupSeriesAsync("Batman"));
+        await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => service.LookupSeriesAsync("Batman"));
         _clock.Advance(TimeSpan.FromSeconds(10));
 
         var health = await service.CheckAllHealthAsync();

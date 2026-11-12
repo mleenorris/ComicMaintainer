@@ -1350,6 +1350,35 @@
             outline-offset: 2px;
         }
 
+        /* A library card (and list row) is a list item holding two sibling
+           controls: the select box and the button that opens the series. The
+           open button fills the card; the select box is laid over it. */
+        .series-card-open,
+        .series-list-row-open {
+            display: block;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+            color: inherit;
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .series-card-open:focus-visible {
+            outline: 3px solid var(--accent-primary);
+            outline-offset: -3px;
+        }
+
+        /* Keyboard focus lifts the card like hovering does. */
+        .series-card:has(> .series-card-open:focus-visible) {
+            border-color: var(--brand-ink);
+            box-shadow: var(--shadow-pop);
+        }
+
         /* ── Series selection (series list view) ──────────────────────────── */
         .series-card--selected,
         .series-list-row--selected {
@@ -1364,6 +1393,9 @@
             z-index: 3;
             width: 24px;
             height: 24px;
+            margin: 0;
+            padding: 0;
+            font-family: inherit;
             border-radius: 6px;
             border: 2px solid rgba(255, 255, 255, 0.85);
             background: rgba(0, 0, 0, 0.45);
@@ -1403,6 +1435,7 @@
             position: static;
             align-self: center;
             flex: 0 0 auto;
+            margin-left: 12px;
             background: var(--bg-secondary);
             color: var(--text-primary);
             border-color: var(--text-muted);
@@ -1552,6 +1585,80 @@
 
         .series-detail-synopsis-toggle:hover {
             text-decoration: underline;
+        }
+
+        /* ── Series details from the provider (genres, status, link) ── */
+        .series-detail-details {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+            margin-top: 6px;
+            font-size: 12px;
+        }
+
+        .series-detail-chip {
+            padding: 2px 8px;
+            border: 1px solid var(--border-input);
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary, var(--text-muted));
+            overflow-wrap: anywhere;
+        }
+
+        .series-detail-chip--status {
+            border-color: var(--accent-primary);
+            color: var(--accent-text);
+            font-weight: 600;
+        }
+
+        .series-detail-link {
+            color: var(--accent-text);
+        }
+
+        /* ── Genre and status filters (library page) ── */
+        .library-facets {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 16px;
+            padding: 8px 0;
+            font-size: var(--text-md);
+            color: var(--text-muted);
+        }
+
+        .library-facets[hidden],
+        .library-facets-hint[hidden] {
+            display: none;
+        }
+
+        .library-facet {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .library-facet select {
+            max-width: min(220px, 60vw);
+            min-height: var(--control-height);
+            padding: 6px 10px;
+            border: 1px solid var(--border-input);
+            border-radius: var(--radius-sm);
+            font-family: inherit;
+            font-size: var(--text-md);
+            background: var(--bg-raised);
+            color: var(--text-primary);
+        }
+
+        .library-facets-hint {
+            font-size: 12px;
+        }
+
+        .series-detail-details-pending {
+            margin-top: 6px;
+            color: var(--text-muted);
+            font-size: 12px;
+            line-height: 1.5;
         }
 
         /* ── Overview page (home) ── */
@@ -2088,9 +2195,14 @@
         /* Used by the "Grid" layout option so long titles can wrap onto two
            lines against the page background instead of being clipped against
            the dark overlay on top of the cover. */
-        .series-grid--titled .series-card {
+        .series-grid--titled .series-card,
+        .series-grid--titled .series-card-open {
             display: flex;
             flex-direction: column;
+        }
+
+        .series-grid--titled .series-card-open {
+            flex: 1 1 auto;
         }
 
         .series-card-body--below {
@@ -2134,20 +2246,28 @@
             box-sizing: border-box;
         }
 
+        /* The row holds the select box and the open button side by side; the
+           open button carries the padding so the whole row beside the select
+           box is its click target. */
         .series-list-row {
             display: flex;
             align-items: stretch;
-            gap: 12px;
             width: 100%;
-            padding: 10px 12px;
+            box-sizing: border-box;
             border: none;
             border-bottom: 1px solid var(--border-primary);
             background: var(--bg-secondary);
             color: inherit;
-            font: inherit;
-            text-align: left;
-            cursor: pointer;
             transition: background 0.15s ease;
+        }
+
+        .series-list-row-open {
+            display: flex;
+            align-items: stretch;
+            flex: 1 1 auto;
+            min-width: 0;
+            gap: 12px;
+            padding: 10px 12px;
             /* Big touch target — at least the 48px Apple/Material guideline. */
             min-height: 84px;
         }
@@ -2164,11 +2284,11 @@
         }
 
         .series-list-row:hover,
-        .series-list-row:focus-visible {
+        .series-list-row:has(> .series-list-row-open:focus-visible) {
             background: var(--bg-hover);
         }
 
-        .series-list-row:focus-visible {
+        .series-list-row-open:focus-visible {
             outline: 2px solid var(--text-primary);
             outline-offset: -2px;
         }
@@ -2298,284 +2418,6 @@
             min-height: 0;
             width: 100%;
             box-sizing: border-box;
-        }
-        
-        .file-list-header {
-            background: var(--bg-tertiary);
-            padding: 15px;
-            font-weight: 600;
-            display: grid;
-            grid-template-columns: 30px 40px 1fr minmax(100px, auto) minmax(150px, auto) minmax(200px, auto);
-            gap: 10px;
-            border-bottom: 2px solid var(--border-secondary);
-            align-items: center;
-        }
-        
-        /* Center Size, Modified, and Actions columns */
-        .file-list-header > *:nth-child(4),
-        .file-list-header > *:nth-child(5),
-        .file-list-header > *:nth-child(6) {
-            text-align: center;
-        }
-        
-        .file-list-header input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-            justify-self: center;
-        }
-        
-        .toggle-all-btn {
-            background: none;
-            border: none;
-            cursor: pointer;
-            color: var(--text-secondary);
-            font-size: 16px;
-            padding: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
-            border-radius: 3px;
-        }
-        
-        .toggle-all-btn:hover {
-            background: var(--bg-hover);
-        }
-        
-        .directory-header {
-            padding: 15px;
-            background: var(--bg-hover);
-            border-bottom: 1px solid var(--border-tertiary);
-            font-weight: 600;
-            color: var(--text-secondary);
-            display: grid;
-            grid-template-columns: 30px 40px 1fr minmax(100px, auto) minmax(150px, auto) minmax(200px, auto);
-            gap: 10px;
-            align-items: center;
-            -webkit-user-select: none;
-            user-select: none;
-            transition: background 0.2s;
-        }
-        
-        .directory-toggle-btn {
-            background: none;
-            border: none;
-            cursor: pointer;
-            color: var(--text-secondary);
-            font-size: 12px;
-            padding: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
-            border-radius: 3px;
-            width: 100%;
-            height: 100%;
-        }
-        
-        .directory-toggle-btn:hover {
-            background: var(--bg-hover-alt);
-        }
-        
-        .directory-name-section {
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            min-width: 0;
-        }
-        
-        .directory-header:hover {
-            background: var(--bg-hover-alt);
-        }
-        
-        .directory-toggle {
-            font-size: 12px;
-            transition: transform 0.2s;
-            display: inline-block;
-            width: 16px;
-            flex-shrink: 0;
-        }
-        
-        .directory-toggle.collapsed {
-            transform: rotate(-90deg);
-        }
-        
-        .directory-icon {
-            font-size: 16px;
-            flex-shrink: 0;
-        }
-        
-        .directory-path {
-            font-size: 14px;
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        
-        .directory-file-count {
-            font-size: 12px;
-            color: var(--text-muted);
-            font-weight: normal;
-            text-align: center;
-        }
-        
-        .directory-checkbox {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-            justify-self: center;
-            align-self: center;
-        }
-        
-        /* Wrapper around a folder's header + contents. Purely a rendering
-           unit: renderFileList() reuses the whole section unchanged when the
-           folder's markup has not changed, so it must not introduce any layout
-           of its own. */
-        .folder-section {
-            display: block;
-        }
-
-        .directory-content {
-            display: block;
-        }
-        
-        .directory-content.collapsed {
-            display: none;
-        }
-        
-        /* Grid layout: checkbox (30px) + spacer for toggle button alignment (40px) + file info (1fr) + size + date + actions */
-        .file-item {
-            padding: 15px;
-            display: grid;
-            grid-template-columns: 30px 40px 1fr minmax(100px, auto) minmax(150px, auto) minmax(200px, auto);
-            gap: 10px;
-            border-bottom: 1px solid var(--border-primary);
-            align-items: center;
-            transition: background 0.2s;
-        }
-        
-        .file-item.indented {
-            padding-left: 35px;
-            background: var(--bg-indented);
-        }
-        
-        .file-item:hover {
-            background: var(--bg-hover);
-        }
-        
-        .file-item.indented:hover {
-            background: var(--bg-indented-hover);
-        }
-        
-        /* Spacer element to align with header's toggle button column (40px)
-           No explicit styling needed - grid-template-columns handles sizing */
-        .grid-spacer {
-            /* Intentionally empty - exists only for grid alignment */
-        }
-        
-        .file-item input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-            justify-self: center;
-            align-self: center;
-        }
-        
-        /* Center Size, Modified, and Actions columns in file items */
-        .file-item > *:nth-child(4),
-        .file-item > *:nth-child(5),
-        .file-item > *:nth-child(6) {
-            justify-self: center;
-        }
-        
-        .file-name {
-            font-weight: 500;
-            color: var(--text-secondary);
-            display: flex;
-            align-items: center;
-            min-width: 0;
-        }
-        
-        .file-name-content {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            flex: 1;
-            min-width: 0;
-        }
-        
-        .file-name-start {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            flex-shrink: 1;
-            min-width: 0;
-        }
-        
-        .file-name-end {
-            flex-shrink: 0;
-            white-space: nowrap;
-        }
-        
-        .file-path {
-            font-size: 12px;
-            color: var(--text-muted);
-            margin-top: 3px;
-        }
-        
-        /* File status background colors */
-        .file-item.status-marked,
-        .file-item.indented.status-marked {
-            background: var(--status-marked);
-        }
-        
-        .file-item.status-marked:hover,
-        .file-item.indented.status-marked:hover {
-            background: var(--status-marked-hover);
-        }
-        
-        .file-item.status-unmarked,
-        .file-item.indented.status-unmarked {
-            background: var(--status-unmarked);
-        }
-        
-        .file-item.status-unmarked:hover,
-        .file-item.indented.status-unmarked:hover {
-            background: var(--status-unmarked-hover);
-        }
-        
-        .file-item.status-duplicate,
-        .file-item.indented.status-duplicate {
-            background: var(--status-duplicate);
-            border-left: 4px solid var(--color-warning);
-        }
-        
-        .file-item.status-duplicate:hover,
-        .file-item.indented.status-duplicate:hover {
-            background: var(--status-duplicate-hover);
-        }
-        
-        .file-item.status-renamed,
-        .file-item.indented.status-renamed {
-            background: var(--status-renamed);
-        }
-        
-        .file-item.status-renamed:hover,
-        .file-item.indented.status-renamed:hover {
-            background: var(--status-renamed-hover);
-        }
-        
-        .file-item.status-normalized,
-        .file-item.indented.status-normalized {
-            background: var(--status-normalized);
-        }
-        
-        .file-item.status-normalized:hover,
-        .file-item.indented.status-normalized:hover {
-            background: var(--status-normalized-hover);
         }
         
         .file-actions {
@@ -3562,28 +3404,7 @@
                 margin-top: 8px;
             }
             
-            .file-list-header {
-                grid-template-columns: 30px 40px 1fr minmax(80px, auto) minmax(120px, auto) minmax(150px, auto);
-            }
-            
-            .file-item {
-                grid-template-columns: 30px 40px 1fr minmax(80px, auto) minmax(120px, auto) minmax(150px, auto);
-                margin-left: 30px;
-            }
-            
-            .directory-header {
-                grid-template-columns: 30px 40px 1fr minmax(80px, auto);
-            }
-            
             /* Hide empty placeholder columns in tablet */
-            .directory-header > *:nth-child(5),
-            .directory-header > *:nth-child(6) {
-                display: none;
-            }
-            
-            .directory-name-section {
-                gap: 6px;
-            }
         }
         
         /* Mobile Responsive Styles */
@@ -3954,44 +3775,6 @@
                 flex: none;
             }
             
-            .file-list-header {
-                grid-template-columns: 30px 40px 1fr 60px;
-                padding: 10px;
-                font-size: 13px;
-                overflow: hidden;
-                gap: 8px;
-            }
-            
-            /* Hide Size column and Modified column on mobile */
-            .file-list-header > *:nth-child(4),
-            .file-list-header > *:nth-child(5) {
-                display: none;
-            }
-            
-            .file-item {
-                grid-template-columns: 30px 40px 1fr 60px;
-                padding: 10px;
-                gap: 8px;
-                overflow: hidden;
-            }
-            
-            .file-item.indented {
-                padding-left: 25px;
-            }
-            
-            /* Hide Size and Modified columns on mobile */
-            .file-item > *:nth-child(4),
-            .file-item > *:nth-child(5) {
-                display: none;
-            }
-            
-            .status-badge {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 18px;
-            }
-            
             .file-actions {
                 flex-direction: column;
                 gap: 5px;
@@ -4061,76 +3844,7 @@
                 width: auto;
             }
             
-            .file-name {
-                font-size: 14px;
-                max-width: 100%;
-                min-width: 0;
-            }
-            
-            .file-name-content {
-                font-size: 14px;
-            }
-            
-            .file-name-start {
-                font-size: 14px;
-            }
-            
-            .file-name-end {
-                font-size: 14px;
-            }
-            
-            .file-path {
-                font-size: 11px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-                min-width: 0;
-            }
-            
-            .directory-header {
-                padding: 10px;
-                font-size: 13px;
-                grid-template-columns: 30px 30px 1fr 60px;
-                gap: 8px;
-                overflow: hidden;
-            }
-            
             /* Hide empty placeholder columns in mobile */
-            .directory-header > *:nth-child(5),
-            .directory-header > *:nth-child(6) {
-                display: none;
-            }
-            
-            .directory-name-section {
-                gap: 6px;
-                font-size: 13px;
-                overflow: hidden;
-            }
-            
-            .directory-path {
-                font-size: 12px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-                min-width: 0;
-            }
-            
-            .directory-file-count {
-                font-size: 11px;
-                text-align: center;
-            }
-            
-            .directory-toggle {
-                font-size: 12px;
-            }
-            
-            .directory-toggle-btn {
-                padding: 2px;
-            }
-            
-            .directory-icon {
-                font-size: 14px;
-            }
             
             .modal-content {
                 max-width: 95%;
@@ -4250,56 +3964,7 @@
                 padding: 6px 10px;
             }
             
-            .file-list-header {
-                grid-template-columns: 25px 35px 1fr 55px;
-                padding: 8px;
-                gap: 6px;
-                overflow: hidden;
-            }
-            
-            .file-item {
-                grid-template-columns: 25px 35px 1fr 55px;
-                padding: 8px;
-                gap: 6px;
-                overflow: hidden;
-            }
-            
-            .file-item.indented {
-                padding-left: 20px;
-            }
-            
-            .directory-header {
-                padding: 8px;
-                font-size: 12px;
-                grid-template-columns: 25px 25px 1fr 55px;
-                overflow: hidden;
-            }
-            
             /* Hide empty placeholder columns in small mobile */
-            .directory-header > *:nth-child(5),
-            .directory-header > *:nth-child(6) {
-                display: none;
-            }
-            
-            .directory-name-section {
-                gap: 5px;
-            }
-            
-            .directory-path {
-                font-size: 11px;
-            }
-            
-            .directory-file-count {
-                font-size: 10px;
-            }
-            
-            .directory-toggle {
-                font-size: 11px;
-            }
-            
-            .directory-icon {
-                font-size: 12px;
-            }
 
             .library-health-dashboard {
                 padding: 14px;
@@ -4473,25 +4138,6 @@
         .metadata-refresh-toast--done { opacity: 0.85; }
 
         /* Incremental library view */
-        .folder-loading {
-            padding: 16px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: var(--text-muted);
-        }
-        .folder-loading .spinner {
-            width: 18px;
-            height: 18px;
-            border-width: 2px;
-        }
-        .folder-error {
-            padding: 16px;
-            color: var(--danger, #c33);
-        }
-        .folder-error .btn {
-            margin-left: 8px;
-        }
         #libraryScrollSentinel {
             height: 1px;
             width: 100%;
@@ -5815,6 +5461,191 @@ summary:focus-visible,
     overflow-wrap: anywhere;
 }
 
+/* ===========================================================================
+   Users page (#/users)
+   ---------------------------------------------------------------------------
+   One settings-style card per account, like the Scheduled Jobs cards. An
+   account's details flow into as many columns as fit, so on a phone they
+   stack and nothing scrolls sideways.
+=========================================================================== */
+.users-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-4);
+}
+
+.users-toolbar .users-notice {
+    flex: 1 1 280px;
+    min-width: 0;
+    margin: 0;
+}
+
+.users-count {
+    margin: 0 0 var(--space-3);
+}
+
+.users-list-items {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.user-account-heading {
+    flex: 1;
+    min-width: 0;
+}
+
+.user-account-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-3);
+}
+
+.user-account-name {
+    overflow-wrap: anywhere;
+}
+
+.user-account-tag,
+.user-account-status {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: var(--radius-pill);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.user-account-tag {
+    background: var(--accent-primary-soft);
+    color: var(--accent-text);
+}
+
+.user-account-status {
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+}
+
+.user-account-status--active {
+    background: rgba(39, 174, 96, 0.15);
+    color: var(--status-ok-text);
+}
+
+.user-account-status--locked {
+    background: rgba(243, 156, 18, 0.18);
+    color: var(--status-warn-text);
+}
+
+.user-account-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: var(--space-3) var(--space-5);
+    margin: 0 0 var(--space-4);
+}
+
+.user-account-field {
+    min-width: 0;
+}
+
+.user-account-field dt {
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.user-account-field dd {
+    margin: 2px 0 0;
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+}
+
+.user-account-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-4);
+}
+
+.user-account-note {
+    margin: 0 0 var(--space-4);
+}
+
+/* The role choices in the Add User and Change Role dialogs: a radio button
+   with its name, and what the role can do underneath. */
+.users-role-options {
+    min-width: 0;
+    padding: 0;
+    border: none;
+}
+
+.users-role-options legend {
+    margin-bottom: 6px;
+    padding: 0;
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+.users-role-option {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 10px;
+    margin-bottom: 6px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-sm);
+}
+
+.users-role-option input[type="radio"] {
+    grid-row: 1 / span 2;
+    width: 18px;
+    height: 18px;
+    margin: 2px 0 0;
+    cursor: pointer;
+}
+
+.form-group .users-role-option label {
+    margin: 0;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.users-role-option .form-hint {
+    margin-top: 2px;
+}
+
+.users-optional {
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.users-confirm-message p,
+.users-confirm-message ul {
+    margin: 0 0 12px;
+}
+
+.users-confirm-message ul {
+    padding-left: 20px;
+}
+
+@media (max-width: 768px) {
+    /* Two buttons to a row rather than the full-width small buttons the
+       library uses on phones. */
+    .user-account-actions .btn-small {
+        flex: 1 1 calc(50% - var(--space-2));
+        width: auto;
+    }
+}
+
 /* Current page name in the desktop top bar; the sidebar replaces the
    header brand there, so this keeps the bar from reading as empty. */
 .topbar-title {
@@ -5865,11 +5696,6 @@ summary:focus-visible,
 .series-list-row {
     content-visibility: auto;
     contain-intrinsic-block-size: auto 84px;
-}
-
-.file-item {
-    content-visibility: auto;
-    contain-intrinsic-block-size: auto 56px;
 }
 
 /* ── Find a series on Suwayomi ─────────────────────────────────────────── */

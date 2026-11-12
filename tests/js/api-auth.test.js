@@ -74,12 +74,12 @@ test('booting with an expired token clears the session and goes to the login pag
     assert.equal(requests(page, 'GET', '/api/auth/user').length, 0);
 });
 
-test('an Authelia session is remembered and uses cookies plus an SSE token instead of a JWT', async () => {
+test('an Authelia session is remembered and uses cookies plus a stream token instead of a JWT', async () => {
     const page = await boot({
         localStorage: { jwt_token: '', username: '' },
         routes: {
             'GET /api/auth/status': { autheliaEnabled: true, isAuthenticated: true, username: 'bob', authMethod: 'authelia', requiresLogin: false },
-            'GET /api/auth/sse-token': { token: 'sse token/1' }
+            'POST /api/auth/stream-token': { token: 'sse token/1', expiresIn: 60 }
         }
     });
     const storage = page.window.localStorage;
@@ -93,8 +93,9 @@ test('an Authelia session is remembered and uses cookies plus an SSE token inste
     assert.equal(user.headers.authorization, undefined);
     assert.equal(user.headers['x-client-session'], storage.getItem('client_cache_session_id'));
 
-    const tokenCall = requests(page, 'GET', '/api/auth/sse-token')[0];
+    const tokenCall = requests(page, 'POST', '/api/auth/stream-token')[0];
     assert.equal(tokenCall.init.credentials, 'include');
+    assert.equal(tokenCall.headers.authorization, undefined);
     assert.equal(page.eventSources.length, 1);
     assert.equal(page.eventSources[0].url, '/api/events/stream?access_token=sse%20token%2F1');
 });
@@ -141,16 +142,6 @@ test('getAuthHeaders for an Authelia session never sends a stored JWT', () => {
     assert.deepEqual(Object.keys(headers).sort(), ['Content-Type', 'X-Client-Session']);
 });
 
-test('handleAuthError only treats 401 as a lost session', () => {
-    const page = apiPage({ localStorage: { jwt_token: validToken() } });
-    assert.equal(page.run('handleAuthError({ status: 403 })'), false);
-    assert.equal(page.run('handleAuthError({ status: 500 })'), false);
-    assert.equal(wentToLogin(page), false);
-    assert.equal(page.run('handleAuthError({ status: 401 })'), true);
-    assert.ok(wentToLogin(page));
-    assert.equal(page.window.localStorage.getItem('jwt_token'), null);
-});
-
 test('redirectToLogin clears only the session keys and asks the service worker to drop cached images', () => {
     const page = apiPage({
         localStorage: {
@@ -187,15 +178,34 @@ test('redirectToLogin still redirects when the image cache clear cannot be reque
     assert.ok(wentToLogin(noWorker));
 });
 
-test('the Log out button asks for confirmation before signing out', () => {
+test('the Log out button asks for confirmation, then has the server revoke the session', () => {
     const declined = apiPage({ confirm: false, localStorage: { jwt_token: validToken(), username: 'alice' } });
     declined.click('.sidebar-icon-btn--danger');
     assert.deepEqual(declined.dialogs, [{ kind: 'confirm', message: 'Are you sure you want to logout?' }]);
     assert.equal(wentToLogin(declined), false);
     assert.notEqual(declined.window.localStorage.getItem('jwt_token'), null);
+    assert.deepEqual(requests(declined, 'POST', '/api/auth/logout'), []);
 
-    const confirmed = apiPage({ confirm: true, localStorage: { jwt_token: validToken(), username: 'alice' } });
+    const token = validToken();
+    const confirmed = apiPage({ confirm: true, localStorage: { jwt_token: token, username: 'alice' }, routes: { 'POST /api/auth/logout': 204 } });
     confirmed.click('.sidebar-icon-btn--danger');
     assert.ok(wentToLogin(confirmed));
     assert.equal(confirmed.window.localStorage.getItem('jwt_token'), null);
+    // The token is revoked on the server, so a copy of it stops working too.
+    const [logout] = requests(confirmed, 'POST', '/api/auth/logout');
+    assert.equal(logout.headers.authorization, `Bearer ${token}`);
+    assert.equal(logout.init.keepalive, true, 'the request outlives the page');
+});
+
+test('signing out still leaves when the server cannot be told, and Authelia sessions are left to the proxy', async () => {
+    const offline = apiPage({ confirm: true, localStorage: { jwt_token: validToken() }, routes: { 'POST /api/auth/logout': () => { throw new TypeError('Failed to fetch'); } } });
+    offline.click('.sidebar-icon-btn--danger');
+    assert.ok(wentToLogin(offline));
+    await offline.settle(2);
+    assert.ok(consoleLines(offline, 'warn').some(line => line.startsWith('[AUTH] Sign-out request failed:')));
+
+    const authelia = apiPage({ confirm: true, localStorage: { jwt_token: validToken(), authelia_authenticated: 'true', username: 'bob' } });
+    authelia.click('.sidebar-icon-btn--danger');
+    assert.ok(wentToLogin(authelia));
+    assert.deepEqual(requests(authelia, 'POST', '/api/auth/logout'), []);
 });

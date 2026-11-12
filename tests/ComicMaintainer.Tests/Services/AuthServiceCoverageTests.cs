@@ -4,6 +4,7 @@ using System.Text;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Services.Auth;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -31,7 +32,13 @@ public class AuthServiceCoverageTests
             ExpirationMinutes = 60
         });
 
-        _authService = new AuthService(_userManager.Object, settings);
+        _authService = new AuthService(
+            _userManager.Object,
+            settings,
+            Options.Create(new AutheliaSettings()),
+            new ComicMaintainer.Core.Services.Auth.SetupTokenProvider(null),
+            Mock.Of<ComicMaintainer.Core.Services.Auth.IAuthSessionValidator>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthService>.Instance);
     }
 
     [Fact]
@@ -56,42 +63,101 @@ public class AuthServiceCoverageTests
     public async Task GetUserByApiKeyAsync_RejectsAMissingKeyWithoutQueryingUsers(string? apiKey)
     {
         Assert.Null(await _authService.GetUserByApiKeyAsync(apiKey!));
-        Assert.False(await _authService.ValidateApiKeyAsync(apiKey!));
 
         _userManager.VerifyGet(x => x.Users, Times.Never());
     }
 
     [Fact]
-    public async Task GetUserByApiKeyAsync_RejectsTheKeyOfAUserOutsideTheUserRole()
+    public async Task GetUserByApiKeyAsync_RejectsAnOverlongKeyWithoutQueryingUsers()
     {
-        var user = new ApplicationUser { Id = "admin-only", ApiKey = "the-key", IsActive = true };
-        _userManager.Setup(x => x.Users).Returns(new List<ApplicationUser> { user }.AsQueryable());
-        _userManager.Setup(x => x.IsInRoleAsync(user, "User")).ReturnsAsync(false);
+        Assert.Null(await _authService.GetUserByApiKeyAsync(new string('k', ApiKeys.MaxLength + 1)));
 
-        Assert.Null(await _authService.GetUserByApiKeyAsync("the-key"));
-        Assert.False(await _authService.ValidateApiKeyAsync("the-key"));
+        _userManager.VerifyGet(x => x.Users, Times.Never());
     }
 
     [Fact]
     public async Task GetUserByApiKeyAsync_IgnoresTheKeyOfADisabledUser()
     {
-        var user = new ApplicationUser { Id = "disabled", ApiKey = "the-key", IsActive = false };
+        var user = new ApplicationUser { Id = "disabled", ApiKeyHash = ApiKeys.Hash("the-key"), IsActive = false };
         _userManager.Setup(x => x.Users).Returns(new List<ApplicationUser> { user }.AsQueryable());
-        _userManager.Setup(x => x.IsInRoleAsync(user, "User")).ReturnsAsync(true);
 
         Assert.Null(await _authService.GetUserByApiKeyAsync("the-key"));
+    }
+
+    // The key acts as its owner whatever the owner's roles: before 3.0.0 only accounts in the User role matched.
+    [Fact]
+    public async Task GetUserByApiKeyAsync_ReturnsTheActiveUserWhoseKeyHashMatches()
+    {
+        var other = new ApplicationUser { Id = "other", ApiKeyHash = ApiKeys.Hash("another-key"), IsActive = true };
+        var owner = new ApplicationUser { Id = "owner", ApiKeyHash = ApiKeys.Hash("the-key"), IsActive = true };
+        _userManager.Setup(x => x.Users).Returns(new List<ApplicationUser> { other, owner }.AsQueryable());
+
+        Assert.Same(owner, await _authService.GetUserByApiKeyAsync("the-key"));
+        Assert.Null(await _authService.GetUserByApiKeyAsync(owner.ApiKeyHash!));
         _userManager.Verify(x => x.IsInRoleAsync(It.IsAny<ApplicationUser>(), It.IsAny<string>()), Times.Never());
     }
 
     [Fact]
-    public async Task GetUserByApiKeyAsync_ReturnsTheActiveUserHoldingTheKey()
+    public async Task GenerateApiKeyAsync_StoresOnlyTheHashAndReplacesThePreviousKey()
     {
-        var other = new ApplicationUser { Id = "other", ApiKey = "another-key", IsActive = true };
-        var owner = new ApplicationUser { Id = "owner", ApiKey = "the-key", IsActive = true };
-        _userManager.Setup(x => x.Users).Returns(new List<ApplicationUser> { other, owner }.AsQueryable());
-        _userManager.Setup(x => x.IsInRoleAsync(owner, "User")).ReturnsAsync(true);
+        var user = new ApplicationUser
+        {
+            Id = "user-1",
+            IsActive = true,
+            ApiKeyHash = ApiKeys.Hash("old-key"),
+            ApiKeyLastUsedAt = DateTime.UtcNow.AddDays(-1),
+        };
+        _userManager.Setup(x => x.FindByIdAsync("user-1")).ReturnsAsync(user);
+        _userManager.Setup(x => x.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
 
-        Assert.Same(owner, await _authService.GetUserByApiKeyAsync("the-key"));
+        var (success, apiKey, error) = await _authService.GenerateApiKeyAsync("user-1");
+
+        Assert.True(success, error);
+        Assert.StartsWith(ApiKeys.Prefix, apiKey);
+        Assert.Equal(ApiKeys.Hash(apiKey!), user.ApiKeyHash);
+        Assert.DoesNotContain(apiKey!, user.ApiKeyHash);
+        Assert.NotNull(user.ApiKeyCreatedAt);
+        Assert.Null(user.ApiKeyLastUsedAt);
+    }
+
+    [Fact]
+    public async Task GenerateApiKeyAsync_RefusesADisabledAccount()
+    {
+        _userManager.Setup(x => x.FindByIdAsync("user-1")).ReturnsAsync(new ApplicationUser { Id = "user-1", IsActive = false });
+
+        var (success, apiKey, _) = await _authService.GenerateApiKeyAsync("user-1");
+
+        Assert.False(success);
+        Assert.Null(apiKey);
+        _userManager.Verify(x => x.UpdateAsync(It.IsAny<ApplicationUser>()), Times.Never());
+    }
+
+    [Fact]
+    public async Task RevokeApiKeyAsync_ClearsTheKeyAndReportsWhetherThereWasOne()
+    {
+        var user = new ApplicationUser { Id = "user-1", IsActive = true, ApiKeyHash = ApiKeys.Hash("k"), ApiKeyCreatedAt = DateTime.UtcNow };
+        _userManager.Setup(x => x.FindByIdAsync("user-1")).ReturnsAsync(user);
+        _userManager.Setup(x => x.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+
+        Assert.True(await _authService.RevokeApiKeyAsync("user-1"));
+        Assert.Null(user.ApiKeyHash);
+        Assert.Null(user.ApiKeyCreatedAt);
+        Assert.Equal(ApiKeyStatus.None, await _authService.GetApiKeyStatusAsync("user-1"));
+
+        Assert.False(await _authService.RevokeApiKeyAsync("user-1"));
+        _userManager.Verify(x => x.UpdateAsync(user), Times.Once());
+    }
+
+    [Fact]
+    public async Task GetApiKeyStatusAsync_ReportsWhenTheKeyWasCreatedAndLastUsed()
+    {
+        var created = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        var used = created.AddHours(5);
+        _userManager.Setup(x => x.FindByIdAsync("user-1")).ReturnsAsync(
+            new ApplicationUser { Id = "user-1", ApiKeyHash = ApiKeys.Hash("k"), ApiKeyCreatedAt = created, ApiKeyLastUsedAt = used });
+
+        Assert.Equal(new ApiKeyStatus(true, created, used), await _authService.GetApiKeyStatusAsync("user-1"));
+        Assert.Equal(ApiKeyStatus.None, await _authService.GetApiKeyStatusAsync("missing"));
     }
 
     [Fact]

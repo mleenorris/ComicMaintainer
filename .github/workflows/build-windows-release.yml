@@ -1,21 +1,50 @@
 name: Build Windows Release
 
+# The release workflow (version-bump.yml) calls this with the tag of every release and attaches the
+# Windows x64 and x86 downloads to that release. A tag pushed with GITHUB_TOKEN cannot start a workflow, so a tag
+# trigger would never run for the automatic releases. Run it by hand with a tag to rebuild a
+# release's downloads, or without one to build the selected branch without publishing anything.
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_call:
+    inputs:
+      tag:
+        description: 'The release tag to build and attach the downloads to, such as v3.0.1.'
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build and attach the downloads to, such as v3.0.1. Leave empty to build the selected branch without publishing.'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 45
     permissions:
+      # Attaches the downloads to the release.
       contents: write
-      packages: write
-    
+    env:
+      # Read from the environment rather than expanded into scripts, so the input can never run as
+      # shell code.
+      RELEASE_TAG: ${{ inputs.tag }}
+
     steps:
+      - name: Validate the release tag
+        if: inputs.tag != ''
+        shell: pwsh
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
+            Write-Error "The tag must be a release tag such as v3.0.1, got: $env:RELEASE_TAG"
+            exit 1
+          }
+
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag != '' && format('refs/tags/{0}', inputs.tag) || '' }}
       
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -26,7 +55,7 @@ jobs:
         id: get_version
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF -match 'refs/tags/v(.+)') {
+          if ($env:RELEASE_TAG -match '^v(.+)$') {
             $version = $matches[1]
           } else {
             $version = (Select-Xml -Path "src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj" -XPath "//Version" | Select-Object -First 1).Node.InnerText
@@ -34,8 +63,9 @@ jobs:
           Write-Output "version=$version" >> $env:GITHUB_OUTPUT
           Write-Host "Version: $version"
       
+      # The server only: the solution also holds the MAUI app, whose workload this job does not install.
       - name: Restore dependencies
-        run: dotnet restore ComicMaintainer.sln
+        run: dotnet restore src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
       
       - name: Build Windows x64 (Self-Contained)
         run: |
@@ -121,7 +151,7 @@ jobs:
           
           ## Troubleshooting
           
-          - If the application doesn't start, check the logs in the `Config/Log` directory
+          - If the application doesn't start, check the logs in the `Config` directory
           - Ensure the WATCHED_DIR exists and you have read/write permissions
           - Check Windows Event Viewer for system errors
           
@@ -175,15 +205,15 @@ jobs:
           name: ComicMaintainer-win-x86
           path: ComicMaintainer-v${{ steps.get_version.outputs.version }}-win-x86.zip
       
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+      # The release workflow created the release with its notes; this adds the downloads to it.
+      - name: Attach to the GitHub release
+        if: inputs.tag != ''
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
+          tag_name: ${{ inputs.tag }}
+          fail_on_unmatched_files: true
           files: |
             ComicMaintainer-v${{ steps.get_version.outputs.version }}-win-x64.zip
             ComicMaintainer-v${{ steps.get_version.outputs.version }}-win-x86.zip
-          draft: false
-          prerelease: false
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

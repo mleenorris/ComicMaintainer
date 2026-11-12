@@ -21,7 +21,6 @@ public class SeriesLibrarySnapshotCacheTests
     private readonly Mock<IChangeVersionSource> _fileVersions;
     private readonly Mock<ISeriesMetadataCacheService> _metadataCache = new();
     private readonly Mock<IChangeVersionSource> _metadataVersions;
-    private readonly Mock<IComicProcessorService> _processor = new();
     private readonly AppSettings _appSettings = new();
     private readonly Mock<IOptionsMonitor<AppSettings>> _settings = new();
     private readonly TestUserContextAccessor _user = new("alice");
@@ -59,9 +58,8 @@ public class SeriesLibrarySnapshotCacheTests
         Metadata = new ComicMetadata { Series = series }
     };
 
-    private SeriesLibraryService CreateService(IUserContextAccessor? user) => new(
+    private SeriesLibraryService CreateService(IUserContextAccessor? user) => TestServices.CreateSeriesLibrary(
         _fileStore.Object,
-        _processor.Object,
         _metadataCache.Object,
         _settings.Object,
         new Mock<ILogger<SeriesLibraryService>>().Object,
@@ -153,21 +151,39 @@ public class SeriesLibrarySnapshotCacheTests
     public async Task DifferentFileFilters_GetSeparateSnapshots()
     {
         var service = CreateService(_user);
-        await service.GetSeriesSummariesAsync(filter: "unmarked");
+        await service.GetSeriesSummariesAsync(filter: "processed");
         await service.GetSeriesSummariesAsync(filter: null);
-        await service.GetSeriesSummariesAsync(filter: "unmarked");
+        await service.GetSeriesSummariesAsync(filter: "processed");
 
         VerifyBuilds(2);
     }
 
     [Fact]
-    public async Task WithoutUserContext_NeverCaches()
+    public async Task UnknownFileFilters_ShareTheUnfilteredSnapshot()
     {
-        var service = CreateService(user: null);
-        await service.GetSeriesSummariesAsync();
-        await service.GetSeriesSummariesAsync();
+        // Each distinct ?filter= value a client sends must not cost another snapshot and
+        // another build lock kept forever.
+        var service = CreateService(_user);
+        await service.GetSeriesSummariesAsync(filter: null);
+        await service.GetSeriesSummariesAsync(filter: "bogus-1");
+        await service.GetSeriesSummariesAsync(filter: "bogus-2");
+        await service.GetSeriesSummariesAsync(filter: "   ");
 
-        VerifyBuilds(2);
+        VerifyBuilds(1);
+        _fileStore.Verify(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("processed", "processed")]
+    [InlineData("  ProCessed ", "processed")]
+    [InlineData("unread", "unread")]
+    [InlineData("matched", null)]
+    [InlineData("bogus", null)]
+    [InlineData("   ", null)]
+    [InlineData(null, null)]
+    public void NormalizeFileFilter_KeepsOnlyWhatTheStoreUnderstands(string? filter, string? expected)
+    {
+        Assert.Equal(expected, FileStoreService.NormalizeFileFilter(filter));
     }
 
     [Fact]
@@ -176,8 +192,8 @@ public class SeriesLibrarySnapshotCacheTests
         var fileStore = new Mock<IFileStoreService>();
         fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => _files.ToList());
-        var service = new SeriesLibraryService(
-            fileStore.Object, _processor.Object, _metadataCache.Object, _settings.Object,
+        var service = TestServices.CreateSeriesLibrary(
+            fileStore.Object, _metadataCache.Object, _settings.Object,
             new Mock<ILogger<SeriesLibraryService>>().Object, userContext: _user);
 
         await service.GetSeriesSummariesAsync();

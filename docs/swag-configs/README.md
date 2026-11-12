@@ -1,98 +1,73 @@
 # SWAG Proxy Configuration for ComicMaintainer
 
-This directory contains ready-to-use reverse proxy configuration files for [SWAG (Secure Web Application Gateway)](https://github.com/linuxserver/docker-swag) from linuxserver.io.
+This folder holds reverse proxy configuration files for [SWAG (Secure Web Application Gateway)](https://github.com/linuxserver/docker-swag), the linuxserver.io container that combines nginx, Let's Encrypt certificates and fail2ban.
 
-## What is SWAG?
-
-SWAG is an all-in-one Docker container that includes:
-- **Nginx** - High-performance web server and reverse proxy
-- **Let's Encrypt** - Automatic SSL/TLS certificate generation and renewal
-- **Fail2ban** - Protection against brute-force attacks
-- **PHP** - Optional PHP support
-
-SWAG makes it incredibly easy to expose your services securely with automatic HTTPS.
+For a guide to other reverse proxies, see the [Reverse Proxy Guide](../REVERSE_PROXY.md).
 
 ## Prerequisites
 
-1. **SWAG container running** - Follow the [SWAG setup guide](https://docs.linuxserver.io/general/swag)
-2. **Domain name** - You need a domain pointing to your server
-3. **ComicMaintainer container** - Running and accessible on your Docker network
+1. A running SWAG container ([setup guide](https://docs.linuxserver.io/general/swag))
+2. A domain name that points to your server
+3. ComicMaintainer running on the same Docker network as SWAG
 
-## Configuration Options
+## Choose a Deployment
 
-Choose one of the following deployment methods:
+| | Subdomain (recommended) | Subfolder |
+|---|---|---|
+| **Address** | `https://comics.yourdomain.com` | `https://yourdomain.com/comics` |
+| **Config file** | `comicmaintainer.subdomain.conf` | `comicmaintainer.subfolder.conf` |
+| **`BASE_PATH`** | Do not set it | Required: `BASE_PATH=/comics` |
+| **DNS** | A record for the subdomain | None beyond the main domain |
 
-### Option 1: Subdomain Deployment (Recommended)
+[COMPARISON.md](COMPARISON.md) compares the two in more detail.
 
-Access ComicMaintainer at: `https://comics.yourdomain.com`
+## Installation
 
-**Configuration file:** `comicmaintainer.subdomain.conf`
-
-### Option 2: Subfolder Deployment
-
-Access ComicMaintainer at: `https://yourdomain.com/comics`
-
-**Configuration file:** `comicmaintainer.subfolder.conf`
-
-**Need help choosing?** See [COMPARISON.md](COMPARISON.md) for a detailed comparison of both methods.
-
-## Installation Instructions
-
-### Step 1: Set Up Docker Network
-
-Ensure both SWAG and ComicMaintainer are on the same Docker network:
+### Step 1: Put Both Containers on One Network
 
 ```bash
 # Create a network if you don't have one
 docker network create swag-network
 
-# Your SWAG container should already be on this network
-# Add ComicMaintainer to the same network
+# Add both containers to it
+docker network connect swag-network swag
 docker network connect swag-network comicmaintainer
 ```
 
-### Step 2A: Subdomain Setup
+The config files expect the container to be named `comicmaintainer`. If yours has another name, change the `set $upstream_app` line in the file you copy.
 
-**1. Configure DNS:**
-Create a CNAME record pointing to your domain:
+### Step 2A: Subdomain
+
+**1. Configure DNS.** Create a CNAME record pointing to your domain, or an A record pointing to your server's IP:
+
 ```
 comics.yourdomain.com → yourdomain.com
 ```
 
-Or create an A record pointing to your server's IP:
-```
-comics.yourdomain.com → YOUR.SERVER.IP.ADDRESS
-```
-
 **2. Copy the configuration file:**
-```bash
-# Copy the subdomain config to SWAG
-cp comicmaintainer.subdomain.conf /path/to/swag/config/nginx/proxy-confs/
 
-# Or use docker cp if accessing SWAG container directly
-docker cp comicmaintainer.subdomain.conf swag:/config/nginx/proxy-confs/
+```bash
+# Run from the docs/swag-configs folder
+cp comicmaintainer.subdomain.conf /path/to/swag/config/nginx/proxy-confs/
 ```
 
-**3. Update docker-compose.yml for ComicMaintainer:**
-```yaml
-version: '3.8'
+**3. Run ComicMaintainer without `BASE_PATH`:**
 
+```yaml
 services:
   comicmaintainer:
-    image: iceburn1/comictagger-watcher:latest
+    image: iceburn1/comicmaintainer:dotnet
     container_name: comicmaintainer
     environment:
-      - WATCHED_DIR=/watched_dir
-      - PUID=1000
+      - PUID=1000                      # The user that owns your comic folders
       - PGID=1000
-      - TRUSTED_PROXIES=172.18.0.0/16  # swag-network's subnet: gives each client its own rate limit (see below)
-      # No BASE_PATH needed for subdomain
+      - TRUSTED_PROXIES=172.18.0.0/16  # swag-network's subnet (see Trusted Proxies below)
     volumes:
       - /path/to/comics:/watched_dir
+      - /path/to/duplicates:/duplicates
       - /path/to/config:/Config
     networks:
       - swag-network
-    # No need to expose port 5000 externally
     expose:
       - 5000
     restart: unless-stopped
@@ -102,48 +77,41 @@ networks:
     external: true
 ```
 
-**4. Restart SWAG:**
+**4. Restart SWAG and open the address:**
+
 ```bash
 docker restart swag
 ```
 
-**5. Access your service:**
-Navigate to `https://comics.yourdomain.com`
+Then go to `https://comics.yourdomain.com`.
 
-### Step 2B: Subfolder Setup
+### Step 2B: Subfolder
 
 **1. Copy the configuration file:**
-```bash
-# Copy the subfolder config to SWAG
-cp comicmaintainer.subfolder.conf /path/to/swag/config/nginx/proxy-confs/
 
-# Or use docker cp if accessing SWAG container directly
-docker cp comicmaintainer.subfolder.conf swag:/config/nginx/proxy-confs/
+```bash
+# Run from the docs/swag-configs folder
+cp comicmaintainer.subfolder.conf /path/to/swag/config/nginx/proxy-confs/
 ```
 
-**2. Update docker-compose.yml for ComicMaintainer:**
-
-**IMPORTANT:** You must set the `BASE_PATH` environment variable for subfolder deployment:
+**2. Run ComicMaintainer with `BASE_PATH`:**
 
 ```yaml
-version: '3.8'
-
 services:
   comicmaintainer:
-    image: iceburn1/comictagger-watcher:latest
+    image: iceburn1/comicmaintainer:dotnet
     container_name: comicmaintainer
     environment:
-      - WATCHED_DIR=/watched_dir
-      - BASE_PATH=/comics  # REQUIRED for subfolder deployment
-      - PUID=1000
+      - BASE_PATH=/comics              # Must match the folder in the config file
+      - PUID=1000                      # The user that owns your comic folders
       - PGID=1000
-      - TRUSTED_PROXIES=172.18.0.0/16  # swag-network's subnet: gives each client its own rate limit (see below)
+      - TRUSTED_PROXIES=172.18.0.0/16  # swag-network's subnet (see Trusted Proxies below)
     volumes:
       - /path/to/comics:/watched_dir
+      - /path/to/duplicates:/duplicates
       - /path/to/config:/Config
     networks:
       - swag-network
-    # No need to expose port 5000 externally
     expose:
       - 5000
     restart: unless-stopped
@@ -153,208 +121,133 @@ networks:
     external: true
 ```
 
-**3. Restart both containers:**
+**3. Restart both containers and open the address:**
+
 ```bash
-docker restart comicmaintainer
-docker restart swag
+docker restart comicmaintainer swag
 ```
 
-**4. Access your service:**
-Navigate to `https://yourdomain.com/comics`
+Then go to `https://yourdomain.com/comics`.
 
-### Trusted Proxies (`TRUSTED_PROXIES`)
+`BASE_PATH` must be the real subfolder. It must also stay unset when the app is served at the root of a domain: if it is set there, every URL the app generates points at a folder that does not exist. See [Serving Under a Subfolder](../REVERSE_PROXY.md#serving-under-a-subfolder-base_path).
 
-Every request reaches ComicMaintainer from SWAG's address, so without `TRUSTED_PROXIES` all signed-out visitors share
-one rate limit (100 requests a minute), and a single client can stop everyone from signing in until the minute is
-over. Set it to the subnet of `swag-network` (`docker network inspect swag-network --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}'`)
-or to SWAG's fixed IP address: requests from SWAG are then counted per client, using the address that SWAG's
-`proxy.conf` appends to `X-Forwarded-For`. With Authelia enabled, `AUTHELIA_TRUSTED_PROXIES` already covers this. See
-[Trusted Proxies and Rate Limiting](../REVERSE_PROXY.md#trusted-proxies-and-rate-limiting).
+The file passes requests on with `/comics` still on them, and ComicMaintainer removes the prefix itself. The `proxy_pass` line must therefore end at the port, with no `/` after it.
 
-## Authentication Options
+### First Sign-In
 
-Both configuration files support multiple authentication methods. Uncomment the relevant sections in the config file:
+A new install has no accounts. Open the address and create the first administrator on the setup page. It asks for a one-time setup code, which is printed in the log until the first account exists:
 
-### HTTP Basic Authentication
-```nginx
-# In the location block, uncomment:
-auth_basic "Restricted";
-auth_basic_user_file /config/nginx/.htpasswd;
-```
-
-Then create the password file:
 ```bash
-docker exec -it swag htpasswd -c /config/nginx/.htpasswd username
+docker logs comicmaintainer 2>&1 | grep -i "setup code"
 ```
+
+You can also set your own code with `SETUP_TOKEN`, or create the administrator with `ADMIN_USERNAME` and `ADMIN_PASSWORD`. See the [Docker Deployment Guide](../DOCKER_DEPLOYMENT_DOTNET.md#first-administrator).
+
+## Trusted Proxies
+
+Every request reaches ComicMaintainer from SWAG's address. Without `TRUSTED_PROXIES`, all clients share one limit of 10 sign-in attempts per 5 minutes, and all signed-out requests share one limit of 100 a minute, so a single client can stop everyone from signing in.
+
+Set `TRUSTED_PROXIES` to the subnet of `swag-network`, or to SWAG's fixed IP address:
+
+```bash
+docker network inspect swag-network --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}'
+```
+
+Requests from SWAG are then counted per client, using the address SWAG's `proxy.conf` appends to `X-Forwarded-For`. With Authelia enabled, `AUTHELIA_TRUSTED_PROXIES` already covers this. See [Trusted Proxies and Rate Limiting](../REVERSE_PROXY.md#trusted-proxies-and-rate-limiting).
+
+## Adding a Sign-In in Front of the App
+
+ComicMaintainer has its own sign-in, so this is optional.
 
 ### Authelia
 
-Authelia provides forward authentication with support for two-factor authentication (2FA) and single sign-on (SSO).
+Authelia adds two-factor authentication and single sign-on, and ComicMaintainer signs people in from its headers.
 
-**SWAG Configuration:**
+In the SWAG config, uncomment:
+
 ```nginx
-# In the server block, uncomment:
+# In the server block (subdomain) or in SWAG's default site (subfolder):
 include /config/nginx/authelia-server.conf;
 
-# In the location block, uncomment:
+# In the location block:
 include /config/nginx/authelia-location.conf;
 ```
 
-**ComicMaintainer Configuration:**
+In the ComicMaintainer container, set:
+
 ```yaml
 environment:
-  - AUTHELIA_ENABLED=true              # Enable Authelia mode
+  - AUTHELIA_ENABLED=true
   - AUTHELIA_TRUSTED_PROXIES=172.18.0.0/16  # Required: SWAG's address or its Docker network subnet
-  - AUTHELIA_DEFAULT_ROLE=User         # Default role for users
-  - AUTHELIA_ADMIN_GROUPS=admins,admin # Groups that get Admin role
-  - AUTHELIA_URL=http://authelia:9091  # Optional: log Authelia outages
+  - AUTHELIA_ADMIN_GROUPS=admins            # Groups that get the Admin role
+  - AUTHELIA_URL=http://authelia:9091       # Optional: log Authelia outages
 ```
 
-**Important**: When using Authelia, ComicMaintainer will:
-- Trust authentication headers only on connections from the addresses in `AUTHELIA_TRUSTED_PROXIES` (required: the
-  container refuses to start without it; see [Choosing `AUTHELIA_TRUSTED_PROXIES`](../AUTHELIA.md#choosing-authelia_trusted_proxies))
-- Automatically create user accounts on first login
-- Synchronize user information (email, display name) from Authelia
-- Map Authelia groups to application roles
-- Log Authelia outages, which SWAG answers with HTTP 500, when `AUTHELIA_URL` is set (see
-  [Logging Authelia Outages](../AUTHELIA.md#logging-authelia-outages))
+The container refuses to start without `AUTHELIA_TRUSTED_PROXIES`. If you use the OPDS catalog, Authelia also needs a bypass rule for it. The [Authelia Integration Guide](../AUTHELIA.md) covers both.
 
-For detailed setup instructions, see the [Authelia Integration Guide](../AUTHELIA.md).
+### Authentik and LDAP
 
-### Authentik
-```nginx
-# In the server block, uncomment:
-include /config/nginx/authentik-server.conf;
+The config files have commented-out lines for SWAG's Authentik and LDAP includes. These put a sign-in in front of the app, but ComicMaintainer does not read their headers, so people still sign in to ComicMaintainer afterwards. OPDS apps need the same exception as under Authelia, because they cannot follow a sign-in page.
 
-# In the location block, uncomment:
-include /config/nginx/authentik-location.conf;
-```
+### HTTP Basic
 
-### LDAP
-```nginx
-# In the server block, uncomment:
-include /config/nginx/ldap-server.conf;
+The commented-out `auth_basic` lines are SWAG's standard template and do not work with this app. ComicMaintainer sends its session token in the `Authorization` header, and nginx refuses any request whose `Authorization` header is not Basic credentials, so the app stops working after you sign in. Use Authelia, or ComicMaintainer's own sign-in, instead.
 
-# In the location block, uncomment:
-include /config/nginx/ldap-location.conf;
-```
+## Caching
+
+Comic pages and covers (`/api/comicreader/page`, `/api/comicreader/cover`) are sent with `Cache-Control: private`, because they are behind authentication. Do not add a `proxy_cache` or a CDN "cache everything" rule for them.
 
 ## Troubleshooting
 
-### Issue: 502 Bad Gateway
+### 502 Bad Gateway
 
-**Solution:**
-1. Check that ComicMaintainer is running:
-   ```bash
-   docker ps | grep comicmaintainer
-   ```
-2. Verify the container name matches the config (`comicmaintainer`):
-   ```bash
-   docker inspect comicmaintainer | grep Name
-   ```
-3. Check both containers are on the same network:
-   ```bash
-   docker network inspect swag-network
-   ```
-4. Check SWAG logs:
-   ```bash
-   docker logs swag
-   ```
+1. Check that ComicMaintainer is running: `docker ps | grep comicmaintainer`
+2. Check the container name matches the `set $upstream_app` line
+3. Check both containers are on the network: `docker network inspect swag-network`
+4. Check the SWAG log: `docker logs swag`
 
-### Issue: 404 Not Found (Subfolder Setup)
+### Every Subfolder Address Shows the App's Start Page, or Files Fail to Load
 
-**Solution:**
-1. Verify `BASE_PATH=/comics` is set in ComicMaintainer environment
-2. Check ComicMaintainer logs:
-   ```bash
-   docker logs comicmaintainer | grep BASE_PATH
-   ```
-3. Restart ComicMaintainer after adding BASE_PATH:
-   ```bash
-   docker restart comicmaintainer
-   ```
+- Check that `proxy_pass` ends at the port, with no `/` after it
+- Check that `BASE_PATH` matches the folder: `docker exec comicmaintainer env | grep BASE_PATH`
+- Look for `Serving the app under the base path` in `docker logs comicmaintainer`. `Ignoring BASE_PATH` means the value could not be used and the log line says why
+- Restart ComicMaintainer after changing `BASE_PATH`
 
-### Issue: Real-time Updates Not Working
+### Real-Time Updates Not Working
 
-**Solution:**
-The configuration files already include the necessary settings for Server-Sent Events (SSE):
-- `proxy_buffering off;`
-- `proxy_cache off;`
-- WebSocket upgrade headers
+Real-time updates use Server-Sent Events. The config files already set `proxy_buffering off` and `proxy_cache off`, which they need.
 
-If real-time updates still don't work:
-1. Check browser console for connection errors
-2. Verify the timeout settings (already set to 600s)
-3. Check SWAG error logs:
-   ```bash
-   docker logs swag 2>&1 | grep error
-   ```
+1. In the browser's developer tools, check the Network tab for `/api/events/stream`, with status 200 and type `eventsource`
+2. Check the SWAG log: `docker logs swag 2>&1 | grep error`
 
-### Issue: Certificate Errors
+### "429 Too Many Requests" When Signing In
 
-**Solution:**
-1. Verify your domain's DNS is correctly configured
-2. Check SWAG certificate generation logs:
-   ```bash
-   docker logs swag | grep -i cert
-   ```
-3. Wait a few minutes for Let's Encrypt to issue the certificate
-4. Ensure ports 80 and 443 are forwarded to your server
+Set `TRUSTED_PROXIES` as described in [Trusted Proxies](#trusted-proxies).
+
+### Certificate Errors
+
+1. Check your domain's DNS
+2. Check the certificate generation log: `docker logs swag | grep -i cert`
+3. Make sure ports 80 and 443 are forwarded to your server
 
 ## Testing Your Configuration
 
-### Test 1: Check Nginx Syntax
 ```bash
+# nginx syntax
 docker exec swag nginx -t
-```
 
-### Test 2: Check API Endpoint
-```bash
+# The app answers through the proxy. Should return: {"version":"..."}
 curl https://comics.yourdomain.com/api/version
-# Should return: {"version": "x.x.x"}
+
+# For a subfolder install
+curl https://yourdomain.com/comics/api/version
 ```
 
-### Test 3: Check SSL Certificate
-```bash
-curl -I https://comics.yourdomain.com
-# Should return 200 OK with valid SSL
-```
+## Complete Example
 
-### Test 4: Check Real-time Events
-Open browser developer tools and check the Network tab for:
-- `/api/events/stream` with status 200 and type "eventsource"
-
-## Container Name Customization
-
-If your ComicMaintainer container has a different name, update the config file:
-
-```nginx
-set $upstream_app your-container-name;  # Change this line
-set $upstream_port 5000;
-set $upstream_proto http;
-```
-
-## Additional Resources
-
-- [SWAG Documentation](https://docs.linuxserver.io/general/swag)
-- [ComicMaintainer Reverse Proxy Guide](../REVERSE_PROXY.md) - General reverse proxy documentation
-- [Let's Encrypt Documentation](https://letsencrypt.org/docs/)
-- [Nginx Reverse Proxy Guide](https://docs.nginx.com/nginx/admin-guide/web-server/reverse-proxy/)
-
-## Support
-
-If you encounter issues:
-1. Check the [ComicMaintainer issues](https://github.com/mleenorris/ComicMaintainer/issues)
-2. Check the [SWAG issues](https://github.com/linuxserver/docker-swag/issues)
-3. Review the [Troubleshooting](#troubleshooting) section above
-
-## Example Complete Setup
-
-Here's a complete `docker-compose.yml` showing both SWAG and ComicMaintainer:
+A single compose file with SWAG and ComicMaintainer on a subdomain. The fixed subnet is what `TRUSTED_PROXIES` refers to:
 
 ```yaml
-version: '3.8'
-
 services:
   swag:
     image: lscr.io/linuxserver/swag:latest
@@ -366,7 +259,7 @@ services:
       - PGID=1000
       - TZ=America/New_York
       - URL=yourdomain.com
-      - SUBDOMAINS=comics  # For subdomain setup
+      - SUBDOMAINS=comics
       - VALIDATION=http
       - EMAIL=your-email@example.com
     volumes:
@@ -379,15 +272,16 @@ services:
     restart: unless-stopped
 
   comicmaintainer:
-    image: iceburn1/comictagger-watcher:latest
+    image: iceburn1/comicmaintainer:dotnet
     container_name: comicmaintainer
     environment:
-      - WATCHED_DIR=/watched_dir
       - PUID=1000
       - PGID=1000
-      # Add BASE_PATH=/comics only for subfolder setup
+      - TRUSTED_PROXIES=172.30.0.0/24
+      # Add BASE_PATH=/comics only for a subfolder install
     volumes:
       - /path/to/comics:/watched_dir
+      - /path/to/duplicates:/duplicates
       - /path/to/config:/Config
     networks:
       - swag-network
@@ -397,19 +291,17 @@ services:
 
 networks:
   swag-network:
+    name: swag-network
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
 ```
 
-## Additional Documentation
+## Further Reading
 
-- **[COMPARISON.md](COMPARISON.md)** - Detailed comparison of subdomain vs subfolder deployment
-- **[EXAMPLE_SETUP.md](EXAMPLE_SETUP.md)** - Complete step-by-step setup with docker-compose examples
-- **[../REVERSE_PROXY.md](../REVERSE_PROXY.md)** - General reverse proxy documentation
-
-## Notes
-
-- These configurations disable proxy buffering for proper SSE (Server-Sent Events) support
-- Timeouts are set to 600 seconds (10 minutes) to support long-running batch operations
-- WebSocket support is included for real-time updates
-- The configurations follow SWAG's standard format and include optional authentication
-- Both IPv4 and IPv6 are supported in the subdomain configuration
+- [COMPARISON.md](COMPARISON.md): subdomain and subfolder compared
+- [EXAMPLE_SETUP.md](EXAMPLE_SETUP.md): a complete walkthrough
+- [OPDS.md](../OPDS.md): reading from comic apps
+- [SWAG Documentation](https://docs.linuxserver.io/general/swag)
+- [ComicMaintainer issues](https://github.com/mleenorris/ComicMaintainer/issues)

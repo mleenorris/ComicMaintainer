@@ -13,6 +13,7 @@ namespace ComicMaintainer.Tests.Controllers;
 public class JobsControllerCoverageTests
 {
     private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<IBatchJobRegistry> _jobRegistry = new();
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly JobsController _controller;
 
@@ -20,35 +21,11 @@ public class JobsControllerCoverageTests
     {
         var settings = new AppSettings { WatchedDirectory = "/c", DuplicateDirectory = "/duplicates" };
         _controller = new JobsController(
-            _processor.Object, _fileStore.Object, NullLogger<JobsController>.Instance, new TestOptionsMonitor<AppSettings>(settings));
+            _processor.Object, _jobRegistry.Object, _fileStore.Object, NullLogger<JobsController>.Instance, new TestOptionsMonitor<AppSettings>(settings));
     }
-
-    private static List<ComicFile> Files(params string[] paths) =>
-        paths.Select(p => new ComicFile { FilePath = p }).ToList();
-
-    private void SetupAllFiles(params string[] paths) =>
-        _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Files(paths));
-
-    private void SetupUnprocessedFiles(params string[] paths) =>
-        _fileStore.Setup(f => f.GetFilteredFilesAsync("unprocessed", It.IsAny<CancellationToken>())).ReturnsAsync(Files(paths));
 
     private static JObject OkJson(ActionResult<object> result) =>
         JObject.FromObject(Assert.IsType<OkObjectResult>(result.Result).Value!);
-
-    private static (string JobId, int TotalItems) JobResponse(ActionResult<object> result)
-    {
-        var json = OkJson(result);
-        return (json["job_id"]!.ToString(), json["total_items"]!.Value<int>());
-    }
-
-    private static string ErrorOf(IActionResult? result, int expectedStatus)
-    {
-        var obj = Assert.IsAssignableFrom<ObjectResult>(result);
-        Assert.Equal(expectedStatus, obj.StatusCode);
-        return JObject.FromObject(obj.Value!)["error"]!.ToString();
-    }
-
-    private static string ErrorOf(ActionResult<object> result, int expectedStatus) => ErrorOf((IActionResult?)result.Result, expectedStatus);
 
     // ---- GetJob -------------------------------------------------------------------------
 
@@ -69,7 +46,7 @@ public class JobsControllerCoverageTests
             StartTime = start,
             Errors = new Dictionary<string, string> { ["/c/b.cbz"] = "corrupt archive" }
         };
-        _processor.Setup(p => p.GetJob(jobId)).Returns(job);
+        _jobRegistry.Setup(p => p.GetJob(jobId)).Returns(job);
 
         var json = OkJson(_controller.GetJob(jobId));
 
@@ -124,7 +101,7 @@ public class JobsControllerCoverageTests
             FailedFiles = 1,
             CurrentFile = "/c/x.cbz"
         };
-        _processor.Setup(p => p.GetActiveJob()).Returns(job);
+        _jobRegistry.Setup(p => p.GetActiveJob()).Returns(job.ToSummary());
 
         var json = OkJson(_controller.GetActiveJob());
 
@@ -135,480 +112,22 @@ public class JobsControllerCoverageTests
         Assert.Equal(processed, json["processed_items"]!.Value<int>());
         Assert.Equal(1, json["failed_items"]!.Value<int>());
         Assert.Equal("/c/x.cbz", json["current_file"]!.ToString());
-        _processor.Verify(p => p.GetAllJobs(), Times.Never);
-    }
-
-    [Fact]
-    public void GetActiveJob_NullJobHistory_ReportsInactive()
-    {
-        _processor.Setup(p => p.GetActiveJob()).Returns(default(ProcessingJob?));
-        _processor.Setup(p => p.GetAllJobs()).Returns(default(IEnumerable<ProcessingJob>)!);
-
-        var json = OkJson(_controller.GetActiveJob());
-
-        Assert.False(json["active"]!.Value<bool>());
+        _jobRegistry.Verify(p => p.GetJobSummaries(), Times.Never);
     }
 
     [Fact]
     public void GetActiveJob_OnlyFinishedJobsInHistory_ReportsInactive()
     {
-        _processor.Setup(p => p.GetActiveJob()).Returns(default(ProcessingJob?));
-        _processor.Setup(p => p.GetAllJobs()).Returns(new List<ProcessingJob>
+        _jobRegistry.Setup(p => p.GetActiveJob()).Returns(default(ProcessingJobSummary?));
+        _jobRegistry.Setup(p => p.GetJobSummaries()).Returns(new List<ProcessingJobSummary>
         {
-            new() { JobId = Guid.NewGuid(), Status = JobStatus.Completed },
-            new() { JobId = Guid.NewGuid(), Status = JobStatus.Cancelled }
+            new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Completed }.ToSummary(),
+            new ProcessingJob { JobId = Guid.NewGuid(), Status = JobStatus.Cancelled }.ToSummary()
         });
 
         var json = OkJson(_controller.GetActiveJob());
 
         Assert.False(json["active"]!.Value<bool>());
-    }
-
-    [Fact]
-    public void GetActiveJob_WhenProcessorThrows_Returns500()
-    {
-        _processor.Setup(p => p.GetActiveJob()).Throws(new InvalidOperationException("boom"));
-
-        var result = _controller.GetActiveJob();
-
-        var obj = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(500, obj.StatusCode);
-        Assert.Equal("Error retrieving active job", obj.Value);
-    }
-
-    // ---- *-all endpoints ----------------------------------------------------------------
-
-    [Fact]
-    public async Task ProcessAll_WhenFileStoreThrows_Returns500()
-    {
-        _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("db locked"));
-
-        var result = await _controller.ProcessAll();
-
-        Assert.Equal("Error starting job", ErrorOf(result, 500));
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task RenameAll_QueuesRenameJobForEveryFile(bool force)
-    {
-        SetupAllFiles("/c/a.cbz", "/c/b.cbz");
-        var jobId = Guid.NewGuid();
-        _processor.Setup(p => p.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), force, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(jobId);
-
-        var (id, total) = JobResponse(await _controller.RenameAll(force));
-
-        Assert.Equal(jobId.ToString(), id);
-        Assert.Equal(2, total);
-        _processor.Verify(p => p.RenameFilesAsync(
-            It.Is<IEnumerable<string>>(paths => paths.SequenceEqual(new[] { "/c/a.cbz", "/c/b.cbz" })),
-            force,
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task RenameAll_NoFiles_ReturnsEmptyJobWithoutQueuing()
-    {
-        SetupAllFiles();
-
-        var (id, total) = JobResponse(await _controller.RenameAll());
-
-        Assert.Equal(Guid.Empty.ToString(), id);
-        Assert.Equal(0, total);
-        _processor.Verify(p => p.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task RenameAll_WhenProcessorThrows_Returns500()
-    {
-        SetupAllFiles("/c/a.cbz");
-        _processor.Setup(p => p.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("busy"));
-
-        Assert.Equal("Error starting job", ErrorOf(await _controller.RenameAll(), 500));
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task NormalizeAll_QueuesNormalizeJobForEveryFile(bool force)
-    {
-        SetupAllFiles("/c/a.cbz", "/c/b.cbz", "/c/c.cbz");
-        var jobId = Guid.NewGuid();
-        _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), force, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(jobId);
-
-        var (id, total) = JobResponse(await _controller.NormalizeAll(force));
-
-        Assert.Equal(jobId.ToString(), id);
-        Assert.Equal(3, total);
-        _processor.Verify(p => p.NormalizeFilesAsync(
-            It.Is<IEnumerable<string>>(paths => paths.SequenceEqual(new[] { "/c/a.cbz", "/c/b.cbz", "/c/c.cbz" })),
-            force,
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task NormalizeAll_NoFiles_ReturnsEmptyJobWithoutQueuing()
-    {
-        SetupAllFiles();
-
-        var (id, total) = JobResponse(await _controller.NormalizeAll());
-
-        Assert.Equal(Guid.Empty.ToString(), id);
-        Assert.Equal(0, total);
-        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task NormalizeAll_WhenFileStoreThrows_Returns500()
-    {
-        _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("db locked"));
-
-        Assert.Equal("Error starting job", ErrorOf(await _controller.NormalizeAll(), 500));
-    }
-
-    [Fact]
-    public async Task RemoveMetadataAll_QueuesJobForEveryFile()
-    {
-        SetupAllFiles("/c/a.cbz", "/c/b.cbz");
-        var jobId = Guid.NewGuid();
-        _processor.Setup(p => p.RemoveMetadataFromFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(jobId);
-
-        var (id, total) = JobResponse(await _controller.RemoveMetadataAll());
-
-        Assert.Equal(jobId.ToString(), id);
-        Assert.Equal(2, total);
-        _processor.Verify(p => p.RemoveMetadataFromFilesAsync(
-            It.Is<IEnumerable<string>>(paths => paths.SequenceEqual(new[] { "/c/a.cbz", "/c/b.cbz" })),
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task RemoveMetadataAll_NoFiles_ReturnsEmptyJobWithoutQueuing()
-    {
-        SetupAllFiles();
-
-        var (id, total) = JobResponse(await _controller.RemoveMetadataAll());
-
-        Assert.Equal(Guid.Empty.ToString(), id);
-        Assert.Equal(0, total);
-        _processor.Verify(p => p.RemoveMetadataFromFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task RemoveMetadataAll_WhenProcessorThrows_Returns500()
-    {
-        SetupAllFiles("/c/a.cbz");
-        _processor.Setup(p => p.RemoveMetadataFromFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("busy"));
-
-        Assert.Equal("Error starting job", ErrorOf(await _controller.RemoveMetadataAll(), 500));
-    }
-
-    // ---- *-unmarked endpoints -----------------------------------------------------------
-
-    [Fact]
-    public async Task ProcessUnmarked_QueuesProcessJobForUnprocessedFiles()
-    {
-        SetupUnprocessedFiles("/c/new1.cbz", "/c/new2.cbz");
-        var jobId = Guid.NewGuid();
-        _processor.Setup(p => p.ProcessFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(jobId);
-
-        var (id, total) = JobResponse(await _controller.ProcessUnmarked());
-
-        Assert.Equal(jobId.ToString(), id);
-        Assert.Equal(2, total);
-        _processor.Verify(p => p.ProcessFilesAsync(
-            It.Is<IEnumerable<string>>(paths => paths.SequenceEqual(new[] { "/c/new1.cbz", "/c/new2.cbz" })),
-            It.IsAny<CancellationToken>()), Times.Once);
-        _fileStore.Verify(f => f.GetFilteredFilesAsync("unprocessed", It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task ProcessUnmarked_NoUnprocessedFiles_ReturnsEmptyJobWithoutQueuing()
-    {
-        SetupUnprocessedFiles();
-
-        var (id, total) = JobResponse(await _controller.ProcessUnmarked());
-
-        Assert.Equal(Guid.Empty.ToString(), id);
-        Assert.Equal(0, total);
-        _processor.Verify(p => p.ProcessFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task ProcessUnmarked_WhenFileStoreThrows_Returns500()
-    {
-        _fileStore.Setup(f => f.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new IOException("db locked"));
-
-        Assert.Equal("Error starting job", ErrorOf(await _controller.ProcessUnmarked(), 500));
-    }
-
-    [Fact]
-    public async Task RenameUnmarked_WhenProcessorThrows_Returns500()
-    {
-        SetupUnprocessedFiles("/c/a.cbz");
-        _processor.Setup(p => p.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("busy"));
-
-        Assert.Equal("Error starting job", ErrorOf(await _controller.RenameUnmarked(), 500));
-    }
-
-    [Fact]
-    public async Task NormalizeUnmarked_WhenFileStoreThrows_Returns500()
-    {
-        _fileStore.Setup(f => f.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new IOException("db locked"));
-
-        Assert.Equal("Error starting job", ErrorOf(await _controller.NormalizeUnmarked(), 500));
-    }
-
-    // ---- *-selected endpoints -----------------------------------------------------------
-
-    public static TheoryData<List<string>?> MissingFiles => new() { null, new List<string>() };
-
-    [Theory]
-    [MemberData(nameof(MissingFiles))]
-    public async Task ProcessSelected_WithoutFiles_ReturnsBadRequest(List<string>? files)
-    {
-        var result = await _controller.ProcessSelected(new JobsController.ProcessSelectedRequest { Files = files! });
-
-        Assert.Equal("No files specified", ErrorOf(result, 400));
-        _processor.Verify(p => p.ProcessFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task ProcessSelected_WhenProcessorThrows_Returns500()
-    {
-        _processor.Setup(p => p.ProcessFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("busy"));
-
-        var result = await _controller.ProcessSelected(new JobsController.ProcessSelectedRequest { Files = new() { "/c/a.cbz" } });
-
-        Assert.Equal("Error starting job", ErrorOf(result, 500));
-    }
-
-    [Theory]
-    [MemberData(nameof(MissingFiles))]
-    public async Task RenameSelected_WithoutFiles_ReturnsBadRequest(List<string>? files)
-    {
-        var result = await _controller.RenameSelected(new JobsController.ProcessSelectedRequest { Files = files! });
-
-        Assert.Equal("No files specified", ErrorOf(result, 400));
-        _processor.Verify(p => p.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task RenameSelected_QueuesRenameJobForRequestedFiles(bool force)
-    {
-        var files = new List<string> { "/c/a.cbz", "/c/b.cbz" };
-        var jobId = Guid.NewGuid();
-        _processor.Setup(p => p.RenameFilesAsync(files, force, It.IsAny<CancellationToken>())).ReturnsAsync(jobId);
-
-        var (id, total) = JobResponse(await _controller.RenameSelected(
-            new JobsController.ProcessSelectedRequest { Files = files, ForceReprocess = force }));
-
-        Assert.Equal(jobId.ToString(), id);
-        Assert.Equal(2, total);
-        _processor.Verify(p => p.RenameFilesAsync(files, force, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task RenameSelected_WhenProcessorThrows_Returns500()
-    {
-        _processor.Setup(p => p.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("busy"));
-
-        var result = await _controller.RenameSelected(new JobsController.ProcessSelectedRequest { Files = new() { "/c/a.cbz" } });
-
-        Assert.Equal("Error starting job", ErrorOf(result, 500));
-    }
-
-    [Theory]
-    [MemberData(nameof(MissingFiles))]
-    public async Task NormalizeSelected_WithoutFiles_ReturnsBadRequest(List<string>? files)
-    {
-        var result = await _controller.NormalizeSelected(new JobsController.ProcessSelectedRequest { Files = files! });
-
-        Assert.Equal("No files specified", ErrorOf(result, 400));
-        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task NormalizeSelected_QueuesNormalizeJobForRequestedFiles(bool force)
-    {
-        var files = new List<string> { "/c/a.cbz" };
-        var jobId = Guid.NewGuid();
-        _processor.Setup(p => p.NormalizeFilesAsync(files, force, It.IsAny<CancellationToken>())).ReturnsAsync(jobId);
-
-        var (id, total) = JobResponse(await _controller.NormalizeSelected(
-            new JobsController.ProcessSelectedRequest { Files = files, ForceReprocess = force }));
-
-        Assert.Equal(jobId.ToString(), id);
-        Assert.Equal(1, total);
-        _processor.Verify(p => p.NormalizeFilesAsync(files, force, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task NormalizeSelected_WhenProcessorThrows_Returns500()
-    {
-        _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("busy"));
-
-        var result = await _controller.NormalizeSelected(new JobsController.ProcessSelectedRequest { Files = new() { "/c/a.cbz" } });
-
-        Assert.Equal("Error starting job", ErrorOf(result, 500));
-    }
-
-    [Fact]
-    public async Task UpdateMetadataSelected_NullFiles_ReturnsBadRequest()
-    {
-        var result = await _controller.UpdateMetadataSelected(
-            new JobsController.UpdateMetadataSelectedRequest { Files = null!, Metadata = new ComicMetadata() });
-
-        Assert.Equal("No files specified", ErrorOf(result, 400));
-    }
-
-    [Theory]
-    [MemberData(nameof(MissingFiles))]
-    public async Task RemoveMetadataSelected_WithoutFiles_ReturnsBadRequest(List<string>? files)
-    {
-        var result = await _controller.RemoveMetadataSelected(new JobsController.ProcessSelectedRequest { Files = files! });
-
-        Assert.Equal("No files specified", ErrorOf(result, 400));
-        _processor.Verify(p => p.RemoveMetadataFromFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task RemoveMetadataSelected_QueuesJobForRequestedFiles()
-    {
-        var files = new List<string> { "/c/a.cbz", "/c/b.cbz", "/c/c.cbz" };
-        var jobId = Guid.NewGuid();
-        _processor.Setup(p => p.RemoveMetadataFromFilesAsync(files, It.IsAny<CancellationToken>())).ReturnsAsync(jobId);
-
-        var (id, total) = JobResponse(await _controller.RemoveMetadataSelected(
-            new JobsController.ProcessSelectedRequest { Files = files }));
-
-        Assert.Equal(jobId.ToString(), id);
-        Assert.Equal(3, total);
-        _processor.Verify(p => p.RemoveMetadataFromFilesAsync(files, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task RemoveMetadataSelected_WhenProcessorThrows_Returns500()
-    {
-        _processor.Setup(p => p.RemoveMetadataFromFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("busy"));
-
-        var result = await _controller.RemoveMetadataSelected(new JobsController.ProcessSelectedRequest { Files = new() { "/c/a.cbz" } });
-
-        Assert.Equal("Error starting job", ErrorOf(result, 500));
-    }
-
-    [Fact]
-    public async Task DeleteSelected_NullRequest_ReturnsBadRequest()
-    {
-        var result = await _controller.DeleteSelected(null!);
-
-        Assert.Equal("No files specified", ErrorOf(result, 400));
-        _processor.Verify(p => p.DeleteFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task DeleteSelected_NullFiles_ReturnsBadRequest()
-    {
-        var result = await _controller.DeleteSelected(new JobsController.ProcessSelectedRequest { Files = null! });
-
-        Assert.Equal("No files specified", ErrorOf(result, 400));
-        _processor.Verify(p => p.DeleteFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Theory]
-    [InlineData("/Config/victim.txt")]
-    [InlineData("/c/../Config/victim.txt")]
-    [InlineData("/c-private/a.cbz")]
-    [InlineData("../../etc/passwd")]
-    [InlineData("/c/a.cbz/")]
-    [InlineData("/c/a.cbz/.")]
-    [InlineData("/c/series/..")]
-    [InlineData("/c/missing/../a.cbz")]
-    public async Task DeleteSelected_PathOutsideTheLibrary_RejectsTheWholeBatch(string path)
-    {
-        var request = new JobsController.ProcessSelectedRequest { Files = new() { "/c/a.cbz", path } };
-
-        var result = await _controller.DeleteSelected(request);
-
-        Assert.Equal(JobsController.OutsideAllowedDirectoryError, ErrorOf(result, 400));
-        _processor.Verify(p => p.DeleteFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task DeleteSelected_LinkOutsideTheLibraryToAComicInIt_RejectsTheWholeBatch()
-    {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
-        var root = Path.Join(Path.GetTempPath(), "jobs-delete-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            var library = Directory.CreateDirectory(Path.Join(root, "library")).FullName;
-            var outside = Directory.CreateDirectory(Path.Join(root, "outside")).FullName;
-            var comic = Path.Join(library, "a.cbz");
-            File.WriteAllText(comic, "keep me");
-            var link = Path.Join(outside, "a.cbz");
-            File.CreateSymbolicLink(link, comic);
-            var controller = new JobsController(
-                _processor.Object, _fileStore.Object, NullLogger<JobsController>.Instance,
-                new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = library }));
-
-            var result = await controller.DeleteSelected(
-                new JobsController.ProcessSelectedRequest { Files = new() { comic, link } });
-
-            Assert.Equal(JobsController.OutsideAllowedDirectoryError, ErrorOf(result, 400));
-            _processor.Verify(p => p.DeleteFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task DeleteSelected_FilesInTheWatchedAndDuplicateDirectories_QueueTheJob()
-    {
-        var jobId = Guid.NewGuid();
-        var files = new List<string> { "/c/a.cbz", "/duplicates/a.cbz" };
-        _processor.Setup(p => p.DeleteFilesAsync(files, It.IsAny<CancellationToken>())).ReturnsAsync(jobId);
-
-        var result = await _controller.DeleteSelected(new JobsController.ProcessSelectedRequest { Files = files });
-
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        Assert.Equal(jobId.ToString(), JObject.FromObject(ok.Value!)["job_id"]!.ToString());
-    }
-
-    [Fact]
-    public async Task DeleteSelected_LeavesBlankEntriesToTheBatchJob()
-    {
-        var jobId = Guid.NewGuid();
-        var files = new List<string> { "/c/a.cbz", "", "  ", null! };
-        _processor.Setup(p => p.DeleteFilesAsync(files, It.IsAny<CancellationToken>())).ReturnsAsync(jobId);
-
-        var result = await _controller.DeleteSelected(new JobsController.ProcessSelectedRequest { Files = files });
-
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        Assert.Equal(jobId.ToString(), JObject.FromObject(ok.Value!)["job_id"]!.ToString());
     }
 
     // ---- CancelJob ----------------------------------------------------------------------
@@ -617,7 +136,7 @@ public class JobsControllerCoverageTests
     public void CancelJob_UnknownOrFinishedJob_ReturnsNotFound()
     {
         var jobId = Guid.NewGuid();
-        _processor.Setup(p => p.CancelJob(jobId)).Returns(false);
+        _jobRegistry.Setup(p => p.CancelJob(jobId)).Returns(false);
 
         var result = _controller.CancelJob(jobId);
 
@@ -625,21 +144,6 @@ public class JobsControllerCoverageTests
         var json = JObject.FromObject(notFound.Value!);
         Assert.False(json["success"]!.Value<bool>());
         Assert.Equal("Job not found or already completed", json["error"]!.ToString());
-        _processor.Verify(p => p.CancelJob(jobId), Times.Once);
-    }
-
-    [Fact]
-    public void CancelJob_WhenProcessorThrows_Returns500()
-    {
-        var jobId = Guid.NewGuid();
-        _processor.Setup(p => p.CancelJob(jobId)).Throws(new InvalidOperationException("boom"));
-
-        var result = _controller.CancelJob(jobId);
-
-        var obj = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(500, obj.StatusCode);
-        var json = JObject.FromObject(obj.Value!);
-        Assert.False(json["success"]!.Value<bool>());
-        Assert.Equal("Error cancelling job", json["error"]!.ToString());
+        _jobRegistry.Verify(p => p.CancelJob(jobId), Times.Once);
     }
 }

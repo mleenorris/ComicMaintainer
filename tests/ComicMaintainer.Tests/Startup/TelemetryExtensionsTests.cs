@@ -86,6 +86,21 @@ public sealed class TelemetryExtensionsTests
         Assert.True(filter(otherRequest));
     }
 
+    // A Discord or webhook URL carries its token, so those requests stay out of the traces.
+    [Fact]
+    public void WithAnOtlpEndpoint_LeavesNotificationRequestsOutOfTheTraces()
+    {
+        using var provider = Register(("OTEL_EXPORTER_OTLP_ENDPOINT", OtlpEndpoint)).BuildServiceProvider();
+        var filter = provider.GetRequiredService<IOptionsMonitor<HttpClientTraceInstrumentationOptions>>().CurrentValue.FilterHttpRequestMessage;
+        var url = new Uri("https://discord.example/api/webhooks/1/secret-token");
+        using var notification = ComicMaintainer.Core.Notifications.NotificationHttpClient.CreateRequest(HttpMethod.Post, url);
+        using var otherRequest = new HttpRequestMessage(HttpMethod.Post, url);
+
+        Assert.NotNull(filter);
+        Assert.False(filter(notification));
+        Assert.True(filter(otherRequest));
+    }
+
     [Theory]
     [InlineData("library-service", "library-service")]
     [InlineData(null, "ComicMaintainer")]

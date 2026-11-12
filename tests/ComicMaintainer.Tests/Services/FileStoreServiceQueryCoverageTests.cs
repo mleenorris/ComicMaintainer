@@ -192,14 +192,17 @@ public sealed class FileStoreServiceQueryCoverageTests : IAsyncLifetime
     {
         var monitor = new Mock<IOptionsMonitor<AppSettings>>();
         monitor.Setup(m => m.CurrentValue).Returns(default(AppSettings)!);
-        var service = new FileStoreService(monitor.Object, _logger, _factory, userContext: new TestUserContextAccessor(Reader));
+        var service = TestServices.CreateFileStore(monitor.Object, _logger, _factory, userContext: new TestUserContextAccessor(Reader));
 
-        var files = await service.GetFolderFilesAsync(Path.Join(_library, "A"));
+        // Folder keys always use '/', so on Windows the raw directories' backslashes become slashes.
+        static string Key(string directory) => directory.Replace('\\', '/');
+
+        var files = await service.GetFolderFilesAsync(Key(Path.Join(_library, "A")));
         var summaries = await service.GetFolderSummariesAsync();
 
         Assert.Equal("a,d", Names(files));
         Assert.Equal(
-            new[] { _library, Path.Join(_library, "A"), Path.Join(_library, "B") },
+            new[] { Key(_library), Key(Path.Join(_library, "A")), Key(Path.Join(_library, "B")) },
             summaries.Folders.Select(f => f.Path));
     }
 
@@ -363,7 +366,7 @@ public sealed class FileStoreServiceQueryCoverageTests : IAsyncLifetime
     // ---- helpers ------------------------------------------------------------------------
 
     private FileStoreService CreateService(IMemoryCache? cache = null) =>
-        new(
+        TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings
             {
                 WatchedDirectory = _library,

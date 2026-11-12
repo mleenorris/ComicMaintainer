@@ -1,10 +1,6 @@
-using System.Text;
 using System.Xml.Serialization;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
-using SharpCompress.Archives;
-using SharpCompress.Archives.Zip;
-using SharpCompress.Archives.Rar;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -17,7 +13,7 @@ namespace ComicMaintainer.Core.Services;
 public class ComicArchive : IDisposable
 {
     private readonly string _filePath;
-    private readonly IArchive _archive;
+    private readonly ComicArchiveReader _archive;
     private bool _disposed;
 
     public ComicArchive(string filePath)
@@ -29,27 +25,12 @@ public class ComicArchive : IDisposable
 
         _filePath = filePath;
         
-        // Validate and determine archive type
-        var extension = Path.GetExtension(filePath).ToLowerInvariant();
         if (!ComicFileExtensions.IsComicArchive(filePath))
         {
-            throw new NotSupportedException($"Unsupported comic format: {extension}");
+            throw new NotSupportedException($"Unsupported comic format: {Path.GetExtension(filePath)}");
         }
-        
-        // Open the appropriate archive type
-        var normalizedExt = ComicFileExtensions.NormalizeExtension(extension);
-        if (normalizedExt == ".cbz")
-        {
-            _archive = ZipArchive.OpenArchive(filePath);
-        }
-        else if (normalizedExt == ".cbr")
-        {
-            _archive = RarArchive.OpenArchive(filePath);
-        }
-        else
-        {
-            throw new NotSupportedException($"Unsupported comic format: {extension}");
-        }
+
+        _archive = ComicArchiveReader.Open(filePath);
     }
 
     /// <summary>
@@ -61,9 +42,7 @@ public class ComicArchive : IDisposable
     {
         try
         {
-            // Look for ComicInfo.xml in the archive
-            var comicInfoEntry = _archive.Entries
-                .FirstOrDefault(e => e.Key?.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase) == true);
+            var comicInfoEntry = _archive.FindComicInfoEntry();
 
             if (comicInfoEntry == null)
             {
@@ -72,13 +51,16 @@ public class ComicArchive : IDisposable
             }
 
             // Read and deserialize ComicInfo.xml
-            using var stream = comicInfoEntry.OpenEntryStream();
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            var xmlContent = reader.ReadToEnd();
+            var xmlContent = comicInfoEntry.ReadText();
 
             var serializer = new XmlSerializer(typeof(ComicInfo));
             using var stringReader = new StringReader(xmlContent);
             return serializer.Deserialize(stringReader) as ComicInfo;
+        }
+        catch (ArchiveLimitExceededException)
+        {
+            // Not a damaged file to treat as untagged: the caller decides what a refusal means.
+            throw;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

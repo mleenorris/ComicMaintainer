@@ -6,6 +6,7 @@ using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using ComicMaintainer.Tests.Helpers;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -24,7 +25,7 @@ public class SeriesNameResolverCoverageTests
     }
 
     private SeriesNameResolver CreateResolver(bool withCache = true, bool withExternal = true) =>
-        new(
+        TestServices.CreateSeriesNameResolver(
             _options.Object,
             _logger,
             withCache ? _cache.Object : null,
@@ -322,8 +323,8 @@ public class SeriesNameResolverCoverageTests
         _settings.DefaultPreferredLanguage = globalLanguage;
         SetupGetAsyncSequence(
             "kaiju",
-            () => null,
-            () => null,
+            () => throw new InvalidOperationException("transient 1"),
+            () => throw new InvalidOperationException("transient 2"),
             () => new SeriesMetadataCacheRecord
             {
                 NormalizedKey = "kaiju",
@@ -347,14 +348,15 @@ public class SeriesNameResolverCoverageTests
     [Fact]
     public async Task ResolveAsync_LocalizedBackrefOnPinnedFolderRecord_ReportsUserSelectedName()
     {
-        // The matched lookup for the folder misses; the user-selected lookup
-        // (the fallback of step 3) finds a pinned record whose localized titles
+        // The earlier steps cannot read the folder record (transient failures,
+        // the only way step 3 sees a record they missed) and neither can the
+        // matched lookup of step 3; its user-selected fallback finds a pinned record whose localized titles
         // contain the file's <Series>.
         SetupGetAsyncSequence(
             "kaiju",
-            () => null,
-            () => null,
-            () => null,
+            () => throw new InvalidOperationException("transient 1"),
+            () => throw new InvalidOperationException("transient 2"),
+            () => throw new InvalidOperationException("transient 3"),
             () => new SeriesMetadataCacheRecord
             {
                 NormalizedKey = "kaiju",
@@ -393,7 +395,7 @@ public class SeriesNameResolverCoverageTests
             "empty-list" => new List<LocalizedTitle>(),
             _ => new List<LocalizedTitle> { null!, new(" ", "ja"), new("Something Else", "en") }
         };
-        SetupGetAsyncSequence("kaiju", () => null, () => null, () => folderRecord);
+        SetupGetAsyncSequence("kaiju", () => throw new InvalidOperationException("transient 1"), () => throw new InvalidOperationException("transient 2"), () => folderRecord);
         var resolver = CreateResolver();
 
         var result = await resolver.ResolveAsync(
@@ -499,6 +501,27 @@ public class SeriesNameResolverCoverageTests
         Assert.Contains("under language '(none)'", result.Explanation);
     }
 
+    // A provider that cannot answer right now is not a defect: nothing is stored and a later file retries it.
+    [Fact]
+    public async Task ResolveAsync_ProviderUnavailable_KeepsTheExistingSeriesWithoutAWarning()
+    {
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                 .ThrowsAsync(new ExternalMetadataUnavailableException("AniList", ExternalMetadataFailureKind.RateLimited, "AniList is rate limited"));
+        var resolver = CreateResolver();
+
+        var result = await resolver.ResolveAsync(
+            "/library/Some Series/c1.cbz",
+            new ComicMetadata { Series = " Existing Name " },
+            mutateCache: true);
+
+        Assert.Equal(SeriesNameResolutionStep.ExistingMetadata, result.WinningStep);
+        Assert.Equal("Existing Name", result.ResolvedSeries);
+        Assert.Contains(_logger.Entries, e =>
+            e.Level == LogLevel.Information
+            && e.Message.Contains("External metadata unavailable for series Some Series", StringComparison.Ordinal));
+        Assert.DoesNotContain(_logger.Entries, e => e.Level >= LogLevel.Warning);
+    }
+
     [Fact]
     public async Task ResolveAsync_ExternalLookupThrows_LogsWarningAndPreservesExistingSeries()
     {
@@ -521,8 +544,6 @@ public class SeriesNameResolverCoverageTests
 
     [Theory]
     [InlineData("user-selected")]
-    [InlineData("matched")]
-    [InlineData("cleared-check")]
     [InlineData("external")]
     [InlineData("persist")]
     [InlineData("folder-alias")]
@@ -534,17 +555,12 @@ public class SeriesNameResolverCoverageTests
             cts.Cancel();
             throw new OperationCanceledException(cts.Token);
         }
-        // "kaibutsu" is read by the user-selected step, the matched step and then the cleared-status check.
+        // "kaibutsu" is read once per resolution (by the user-selected step); the
+        // matched step and the cleared-status check reuse that lookup.
         switch (cancelledAt)
         {
             case "user-selected":
                 SetupGetAsyncSequence("kaibutsu", Cancel);
-                break;
-            case "matched":
-                SetupGetAsyncSequence("kaibutsu", () => null, Cancel);
-                break;
-            case "cleared-check":
-                SetupGetAsyncSequence("kaibutsu", () => null, () => null, Cancel);
                 break;
             case "persist":
                 _cache.Setup(c => c.PersistExternalLookupAsync("Kaibutsu", It.IsAny<ExternalSeriesMetadata>(), It.IsAny<CancellationToken>()))
@@ -575,7 +591,7 @@ public class SeriesNameResolverCoverageTests
 
         Assert.DoesNotContain(_logger.Entries, e => e.Level == LogLevel.Warning);
         VerifyNoAliasWrites();
-        if (cancelledAt is "user-selected" or "matched" or "cleared-check")
+        if (cancelledAt == "user-selected")
         {
             _external.Verify(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         }
@@ -612,6 +628,31 @@ public class SeriesNameResolverCoverageTests
         Assert.Equal(SeriesNameResolutionStep.ExistingMetadata, fromMetadata.WinningStep);
         Assert.Equal("Other Series", fromMetadata.ResolvedSeries);
         Assert.Equal(new[] { "Some Series", "Other Series" }, fromMetadata.Candidates);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_LooksEachCandidateUpOncePerResolution()
+    {
+        // A file of an unmatched series falls through every step; each step
+        // consults the same two candidates, which used to cost a cache query
+        // (and a full title scan) per step.
+        _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        _cache.Setup(c => c.GetByTitleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(default(ExternalSeriesMetadata?));
+        var resolver = CreateResolver();
+
+        var result = await resolver.ResolveAsync(
+            "/library/Folder Series/c001.cbz",
+            new ComicMetadata { Series = "Tagged Series" },
+            mutateCache: false);
+
+        Assert.Equal(SeriesNameResolutionStep.ExistingMetadata, result.WinningStep);
+        _cache.Verify(c => c.GetByTitleAsync("Folder Series", It.IsAny<CancellationToken>()), Times.Once);
+        _cache.Verify(c => c.GetByTitleAsync("Tagged Series", It.IsAny<CancellationToken>()), Times.Once);
+        _cache.Verify(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     [Fact]

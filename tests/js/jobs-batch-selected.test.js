@@ -33,7 +33,7 @@ const SELECTED_ACTIONS = [
         started: n => `Started processing ${n} files in background`,
         tracked: 'Processing Selected Files...',
         failure: 'Failed to start processing: ',
-        serverFailure: 'Failed to start processing job'
+        serverFailure: 'Error starting job'
     },
     {
         // The non-async variant is not wired to the toolbar; the page exposes it as a global.
@@ -47,7 +47,7 @@ const SELECTED_ACTIONS = [
         started: n => `Started processing ${n} selected files in background`,
         tracked: 'Processing Selected Files...',
         failure: 'Failed to start processing: ',
-        serverFailure: 'Failed to start processing job'
+        serverFailure: 'Error starting job'
     },
     {
         name: 'Rename Selected',
@@ -62,7 +62,7 @@ const SELECTED_ACTIONS = [
         started: n => `Started renaming ${n} selected files in background`,
         tracked: 'Renaming Selected Files...',
         failure: 'Failed to start renaming: ',
-        serverFailure: 'Failed to start renaming job'
+        serverFailure: 'Error starting job'
     },
     {
         name: 'Normalize Selected',
@@ -77,7 +77,7 @@ const SELECTED_ACTIONS = [
         started: n => `Started normalizing ${n} selected files in background`,
         tracked: 'Normalizing Selected Files...',
         failure: 'Failed to start normalizing: ',
-        serverFailure: 'Failed to start normalizing job'
+        serverFailure: 'Error starting job'
     },
     {
         name: 'Remove Metadata Selected',
@@ -88,12 +88,12 @@ const SELECTED_ACTIONS = [
         confirm: n => `Remove embedded metadata (ComicInfo.xml) from ${n} selected file${plural(n)}?\n\n`
             + 'Each archive will be rewritten without its ComicInfo.xml and the files will be marked unprocessed so they can be re-processed.',
         path: '/api/jobs/remove-metadata-selected',
-        credentials: 'same-origin',
+        credentials: 'include',
         starting: 'Starting metadata removal...',
         started: n => `Started removing metadata from ${n} selected file${n === 1 ? '' : 's'} in background`,
         tracked: 'Removing Metadata from Selected Files...',
         failure: 'Failed to remove metadata: ',
-        serverFailure: 'Failed to start remove metadata job'
+        serverFailure: 'Error starting job'
     }
 ];
 
@@ -369,7 +369,7 @@ test('Clear Processed Status clears the flags of the selected issues', async (t)
     await page.settle();
     assert.deepEqual(h.takeConfirms(page), [clearStatusConfirm(2)]);
     assert.deepEqual(clears()[0].body, { Files: [ISSUE_A, ISSUE_B] });
-    assert.equal(clears()[0].init.credentials, 'same-origin');
+    assert.equal(clears()[0].init.credentials, 'include');
     assert.match(clears()[0].headers.authorization, /^Bearer /);
     assert.deepEqual(h.takeMessages(page), [{ type: 'error', text: 'Failed to clear processed status' }]);
 

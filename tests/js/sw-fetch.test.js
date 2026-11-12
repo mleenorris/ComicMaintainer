@@ -12,6 +12,7 @@ const {
     IMAGE_CACHE,
     OFFLINE_CACHE,
     OFFLINE_PAGE,
+    PRECACHED_READER_PAGE,
     absolute,
     reply,
     html,
@@ -127,9 +128,11 @@ test('error pages, foreign responses and non-GET navigations are passed through 
     assert.equal(await (await sw.respond(navigationRequest('/', { method: 'POST', body: 'a=1' }))).text(), '<h1>Posted</h1>');
 
     assert.equal(sw.network.calls[2].method, 'POST');
-    for (const path of ['/reader.html', '/index.html', '/']) {
+    for (const path of ['/index.html', '/']) {
         assert.equal(allCached(sw).includes(absolute(path)), false, path);
     }
+    // The reader install precached is kept, not replaced by the error page.
+    assert.equal(await sw.caches.text(VERSIONED_CACHE, '/reader.html'), PRECACHED_READER_PAGE);
 });
 
 test('offline, a document that was never stored falls back to the precached offline page', async () => {
@@ -582,10 +585,13 @@ test('the runtime entry bound never evicts what install precached, also in a wok
         const urls = sw.caches.urls(VERSIONED_CACHE);
         assert.deepEqual(urls.filter(url => precached.includes(url)).sort(), [...precached].sort(), label);
         assert.equal(await sw.caches.text(VERSIONED_CACHE, `/js/main.js?v=${APP_VERSION}`), '// main.js, refreshed', label);
+        // The reader document is precached too: its refreshed copy replaces
+        // the precached one instead of counting as a runtime entry.
+        assert.equal(await sw.caches.text(VERSIONED_CACHE, '/reader.html'), READER_PAGE, label);
         const runtime = urls.filter(url => !precached.includes(url));
         assert.equal(runtime.length, 120, label);
-        assert.equal(runtime[0], absolute('/icons/runtime-3.png'), label);
-        assert.deepEqual(runtime.slice(-3), [absolute('/css/theme.css'), absolute('/reader.html'), absolute('/icons/badge.png')], label);
+        assert.equal(runtime[0], absolute('/icons/runtime-2.png'), label);
+        assert.deepEqual(runtime.slice(-2), [absolute('/css/theme.css'), absolute('/icons/badge.png')], label);
 
         // An offline launch still finds the offline page and the reader's script.
         sw.network.offline = true;

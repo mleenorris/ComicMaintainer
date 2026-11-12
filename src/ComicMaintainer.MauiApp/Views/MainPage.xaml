@@ -2,6 +2,7 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:viewmodels="clr-namespace:ComicMaintainer.MauiApp.ViewModels"
+             xmlns:models="clr-namespace:ComicMaintainer.MauiApp.Models"
              x:Class="ComicMaintainer.MauiApp.Views.MainPage"
              x:DataType="viewmodels:FilesViewModel"
              Shell.NavBarIsVisible="False">
@@ -71,11 +72,11 @@
 
         <!-- Files List matching web interface -->
         <RefreshView Grid.Row="2"
-                     IsRefreshing="{Binding IsLoading}"
+                     IsRefreshing="{Binding IsRefreshing}"
                      Command="{Binding RefreshFilesCommand}">
             <CollectionView ItemsSource="{Binding Files}"
                            SelectionMode="Multiple"
-                           SelectedItems="{Binding SelectedFiles}">
+                           SelectedItems="{Binding SelectedFiles, Mode=TwoWay}">
                 <CollectionView.EmptyView>
                     <VerticalStackLayout HorizontalOptions="Center"
                                        VerticalOptions="Center"
@@ -93,7 +94,7 @@
                 </CollectionView.EmptyView>
 
                 <CollectionView.ItemTemplate>
-                    <DataTemplate>
+                    <DataTemplate x:DataType="models:ComicFile">
                         <SwipeView>
                             <SwipeView.RightItems>
                                 <SwipeItems>
@@ -191,6 +192,13 @@
             </CollectionView>
         </RefreshView>
 
+        <ActivityIndicator Grid.Row="2"
+                           IsRunning="{Binding ShowsLoadingIndicator}"
+                           IsVisible="{Binding ShowsLoadingIndicator}"
+                           HorizontalOptions="Center"
+                           VerticalOptions="Center"
+                           InputTransparent="True" />
+
         <!-- Action Bar at Bottom (matching web interface) -->
         <Grid Grid.Row="3" Padding="10" BackgroundColor="{AppThemeBinding Light=#f5f5f5, Dark=#1a1a1a}" ColumnDefinitions="Auto,Auto,*,Auto">
             <Button Grid.Column="0"
@@ -219,11 +227,22 @@
                    FontSize="12"
                    TextColor="{AppThemeBinding Light=#7f8c8d, Dark=#9ca3af}" />
             
-            <Label Grid.Column="3"
-                   Text="{Binding CurrentPage, StringFormat='Page {0}'}"
-                   VerticalOptions="Center"
-                   FontSize="12"
-                   TextColor="{AppThemeBinding Light=#7f8c8d, Dark=#9ca3af}" />
+            <HorizontalStackLayout Grid.Column="3" Spacing="5">
+                <Button Text="◀"
+                        Command="{Binding PreviousPageCommand}"
+                        IsEnabled="{Binding HasPreviousPage}"
+                        FontSize="12"
+                        Padding="10,5" />
+                <Label Text="{Binding PageText}"
+                       VerticalOptions="Center"
+                       FontSize="12"
+                       TextColor="{AppThemeBinding Light=#7f8c8d, Dark=#9ca3af}" />
+                <Button Text="▶"
+                        Command="{Binding NextPageCommand}"
+                        IsEnabled="{Binding HasNextPage}"
+                        FontSize="12"
+                        Padding="10,5" />
+            </HorizontalStackLayout>
         </Grid>
 
     </Grid>

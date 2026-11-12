@@ -4,7 +4,7 @@
   "description": "Unit tests for the web UI's JavaScript (node:test, with jsdom for page-level tests).",
   "scripts": {
     "test": "node --test \"tests/js/**/*.test.js\"",
-    "test:coverage": "node -e \"require('fs').mkdirSync('coverage', { recursive: true })\" && node --test --experimental-test-coverage --test-coverage-include=\"src/ComicMaintainer.WebApi/wwwroot/**/*.js\" --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info \"tests/js/**/*.test.js\""
+    "test:coverage": "node -e \"require('fs').mkdirSync('coverage', { recursive: true })\" && node --test --experimental-test-coverage --test-coverage-lines=99 --test-coverage-branches=97 --test-coverage-functions=99 --test-coverage-include=\"src/ComicMaintainer.WebApi/wwwroot/**/*.js\" --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info \"tests/js/**/*.test.js\""
   },
   "engines": {
     "node": "^22.22.2 || ^24.15.0 || >=26"

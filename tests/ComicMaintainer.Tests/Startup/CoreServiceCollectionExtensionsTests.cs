@@ -1,3 +1,4 @@
+using System.Net;
 using System.Reflection;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
@@ -11,6 +12,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 
@@ -33,6 +36,10 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
     private static readonly Func<IServiceCollection, IConfiguration, IServiceCollection> AddComicMaintainerData = ExtensionsType
         .GetMethod("AddComicMaintainerData", BindingFlags.Static | BindingFlags.Public)!
         .CreateDelegate<Func<IServiceCollection, IConfiguration, IServiceCollection>>();
+
+    private static readonly Func<IServiceCollection, IServiceCollection> AddComicMaintainerCore = ExtensionsType
+        .GetMethod("AddComicMaintainerCore", BindingFlags.Static | BindingFlags.Public)!
+        .CreateDelegate<Func<IServiceCollection, IServiceCollection>>();
 
     private static readonly Func<IServiceCollection, IServiceCollection> AddComicMaintainerHostedServices = ExtensionsType
         .GetMethod("AddComicMaintainerHostedServices", BindingFlags.Static | BindingFlags.Public)!
@@ -116,6 +123,30 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
     public void ResolveSqliteDatabasePath_ResolvesAFileUriToTheFileItNames(string connectionString, string expectedPath)
     {
         Assert.Equal(Path.GetFullPath(expectedPath), ResolveSqliteDatabasePath(connectionString));
+    }
+
+    // SEC-4: the series-image client must follow no redirects (SeriesImageStore checks each hop itself) and check
+    // the address it connects to (DNS rebinding).
+    [Fact]
+    public void SeriesImageClient_UsesThePublicNetworkGuardHandler()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        AddComicMaintainerCore(services);
+        using var provider = services.BuildServiceProvider();
+
+        using var handler = provider.GetRequiredService<IHttpMessageHandlerFactory>().CreateHandler(SeriesImageStore.HttpClientName);
+
+        HttpMessageHandler current = handler;
+        while (current is DelegatingHandler delegating)
+        {
+            current = delegating.InnerHandler!;
+        }
+
+        var primary = Assert.IsType<SocketsHttpHandler>(current);
+        Assert.False(primary.AllowAutoRedirect);
+        Assert.False(primary.UseProxy);
+        Assert.NotNull(primary.ConnectCallback);
     }
 
     [Fact]
@@ -264,6 +295,77 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
         Assert.Contains(services, d => d.ServiceType == typeof(IDatabaseBackupService));
     }
 
+    [Fact]
+    public void AddComicMaintainerCore_RegistersEveryNotificationTarget_AndTheClientFollowsNoRedirects()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions<ComicMaintainer.Core.Configuration.AppSettings>();
+        AddComicMaintainerCore(services);
+        using var provider = services.BuildServiceProvider();
+
+        var targets = provider.GetServices<ComicMaintainer.Core.Notifications.INotificationChannel>().Select(c => c.Target);
+        Assert.Equal(
+            ComicMaintainer.Core.Notifications.NotificationTarget.All.OrderBy(t => t, StringComparer.Ordinal),
+            targets.OrderBy(t => t, StringComparer.Ordinal));
+
+        var handler = provider.GetRequiredService<IHttpMessageHandlerFactory>()
+            .CreateHandler(ComicMaintainer.Core.Notifications.NotificationHttpClient.HttpClientName);
+        while (handler is DelegatingHandler delegating)
+        {
+            handler = delegating.InnerHandler!;
+        }
+
+        Assert.False(Assert.IsType<SocketsHttpHandler>(handler).AllowAutoRedirect);
+    }
+
+    // HttpClient's default logging records request URLs, and a Discord webhook's path is its token.
+    [Fact]
+    public async Task NotificationClient_LogsNothing_UnlikeAClientWithDefaultLogging()
+    {
+        var logged = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var services = new ServiceCollection();
+        services.AddLogging(logging => logging.SetMinimumLevel(LogLevel.Trace).AddProvider(new RecordingLoggerProvider(logged)));
+        services.AddOptions<ComicMaintainer.Core.Configuration.AppSettings>();
+        AddComicMaintainerCore(services);
+        services.AddHttpClient("control");
+        foreach (var name in new[] { ComicMaintainer.Core.Notifications.NotificationHttpClient.HttpClientName, "control" })
+        {
+            services.Configure<HttpClientFactoryOptions>(name, options => options.HttpMessageHandlerBuilderActions.Add(
+                builder => builder.PrimaryHandler = new ComicMaintainer.Tests.Notifications.StubHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.OK))));
+        }
+
+        using var provider = services.BuildServiceProvider();
+        var clients = provider.GetRequiredService<IHttpClientFactory>();
+
+        using var notification = await clients.CreateClient(ComicMaintainer.Core.Notifications.NotificationHttpClient.HttpClientName)
+            .GetAsync("https://discord.example/api/webhooks/1/secret-token");
+        using var control = await clients.CreateClient("control").GetAsync("https://discord.example/control");
+
+        Assert.Contains(logged, category => category.StartsWith("System.Net.Http.HttpClient.control", StringComparison.Ordinal));
+        Assert.DoesNotContain(logged, category => category.Contains(ComicMaintainer.Core.Notifications.NotificationHttpClient.HttpClientName, StringComparison.Ordinal));
+    }
+
+    private sealed class RecordingLoggerProvider(System.Collections.Concurrent.ConcurrentBag<string> logged) : ILoggerProvider
+    {
+        public ILogger CreateLogger(string categoryName) => new RecordingLogger(categoryName, logged);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class RecordingLogger(string category, System.Collections.Concurrent.ConcurrentBag<string> logged) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state)
+                where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+                logged.Add(category);
+        }
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -287,16 +389,23 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
 
         Assert.Contains(services, d => d.ServiceType == typeof(IScheduledJobService));
         Assert.Contains(services, d => d.ServiceType == typeof(ScheduledJobsHostedService));
+        Assert.Contains(services, d => d.ServiceType == typeof(ComicMaintainer.Core.Notifications.NotificationDispatcher));
+        Assert.Contains(services, d => d.ServiceType == typeof(IScheduledJobRunner));
         var hostedServiceTypes = services
             .Where(d => d.ServiceType == typeof(IHostedService))
             .Select(d => d.ImplementationType)
             .ToList();
         Assert.Contains(typeof(FileWatcherHostedService), hostedServiceTypes);
         Assert.Contains(typeof(DatabaseCleanupHostedService), hostedServiceTypes);
+        Assert.Contains(typeof(ArchiveMetadataScanHostedService), hostedServiceTypes);
         Assert.Contains(typeof(JobStateReconciliationHostedService), hostedServiceTypes);
         Assert.Contains(typeof(AutheliaHealthMonitor), hostedServiceTypes);
+        // The sweep for interrupted archive writes starts before the file watcher.
+        Assert.True(
+            hostedServiceTypes.IndexOf(typeof(ArchiveWriteRecoveryHostedService)) is >= 0 and var sweep &&
+            sweep < hostedServiceTypes.IndexOf(typeof(FileWatcherHostedService)));
         // The scheduled-jobs runner is registered through a factory so it is a single instance.
-        Assert.Equal(7, hostedServiceTypes.Count);
+        Assert.Equal(10, hostedServiceTypes.Count);
     }
 
     private static IConfiguration BuildConfiguration(params (string Key, string? Value)[] settings)

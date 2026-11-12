@@ -167,7 +167,7 @@ test('a failed load is shown in the modal and opening it again retries', async t
 
     openManageFolders(page);
     await page.settle();
-    assert.equal(emptyState(page), 'Failed to load folders: HTTP error! status: 404');
+    assert.equal(emptyState(page), 'Failed to load folders: Series not found');
     assert.equal(page.$('#seriesFoldersList').children.length, 0);
     assert.equal(mergeNote(page), null);
     assert.ok(page.$('#seriesFoldersMergeBtn').disabled);

@@ -1,7 +1,12 @@
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Services;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -10,6 +15,8 @@ namespace ComicMaintainer.Tests.Services;
 
 public class DatabaseCleanupHostedServiceTests : IDisposable
 {
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
+
     private readonly Mock<IFileStoreService> _mockFileStore;
     private readonly Mock<IOptionsMonitor<AppSettings>> _mockOptions;
     private readonly Mock<ILogger<DatabaseCleanupHostedService>> _mockLogger;
@@ -29,180 +36,272 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
             DatabaseCleanupIntervalHours = 12
         };
         _mockOptions.Setup(x => x.CurrentValue).Returns(appSettings);
+        SetupCleanup(Completed(0));
 
-        _service = new DatabaseCleanupHostedService(
-            _mockFileStore.Object,
-            _mockOptions.Object,
-            _mockLogger.Object);
+        _service = CreateService(_mockOptions.Object);
+    }
+
+    private DatabaseCleanupHostedService CreateService(IOptionsMonitor<AppSettings> options, TimeSpan? startupDelay = null) =>
+        TestServices.CreateDatabaseCleanup(_mockFileStore.Object, options, _mockLogger.Object, startupDelay: startupDelay ?? TimeSpan.Zero);
+
+    private static StaleCleanupResult Completed(int removed) =>
+        new() { Status = StaleCleanupStatus.Completed, RemovedCount = removed };
+
+    private void SetupCleanup(StaleCleanupResult result) =>
+        _mockFileStore
+            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(result);
+
+    /// <summary>Starts the service and waits for its start-up cleanup run.</summary>
+    private static async Task StartAndWaitForStartupRunAsync(DatabaseCleanupHostedService service, CancellationToken token)
+    {
+        await service.StartAsync(token);
+        await service.StartupRun.WaitAsync(Timeout);
+    }
+
+    private void VerifyLog(LogLevel level, string fragment, Times times) =>
+        _mockLogger.Verify(
+            x => x.Log(
+                level,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v!.ToString()!.Contains(fragment)),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            times);
+
+    [Fact]
+    public async Task StartAsync_RunsAScheduledCleanupShortlyAfterStartup()
+    {
+        // Act
+        await StartAndWaitForStartupRunAsync(_service, _cts.Token);
+
+        // Assert: the start-up run is a scheduled (guarded) run, never a manual one.
+        _mockFileStore.Verify(
+            x => x.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled, It.IsAny<CancellationToken>()),
+            Times.Once);
+        VerifyLog(LogLevel.Information, "Starting Database Cleanup", Times.Once());
     }
 
     [Fact]
-    public async Task StartAsync_RunsCleanupOnStartup()
+    public async Task StartAsync_ReturnsBeforeTheStartupCleanupRuns()
     {
-        // Arrange
-        _mockFileStore
-            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(5);
+        // A share that is still being mounted must not be swept while the host starts, and
+        // the start of the application must not wait for a sweep of the whole library.
+        using var service = CreateService(_mockOptions.Object, startupDelay: TimeSpan.FromHours(1));
 
-        // Act
-        await _service.StartAsync(_cts.Token);
+        await service.StartAsync(_cts.Token).WaitAsync(Timeout);
 
-        // Assert
+        Assert.False(service.StartupRun.IsCompleted);
         _mockFileStore.Verify(
-            x => x.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()),
-            Times.Once);
-        
-        _mockLogger.Verify(
-            x => x.Log(
-                LogLevel.Information,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Starting Database Cleanup")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+            x => x.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+
+        // Stopping during the delay ends the pending run without running it.
+        await service.StopAsync(CancellationToken.None).WaitAsync(Timeout);
+        Assert.True(service.StartupRun.IsCompleted);
+        _mockFileStore.Verify(
+            x => x.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
     public async Task StartAsync_WithIntervalGreaterThanZero_SchedulesPeriodicCleanup()
     {
         // Arrange
-        var appSettings = new AppSettings
-        {
-            DatabaseCleanupIntervalHours = 6
-        };
-        _mockOptions.Setup(x => x.CurrentValue).Returns(appSettings);
-        
-        _mockFileStore
-            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(0);
+        _mockOptions.Setup(x => x.CurrentValue).Returns(new AppSettings { DatabaseCleanupIntervalHours = 6 });
 
         // Act
-        await _service.StartAsync(_cts.Token);
+        await StartAndWaitForStartupRunAsync(_service, _cts.Token);
 
         // Assert - verify cleanup interval was logged
-        _mockLogger.Verify(
-            x => x.Log(
-                LogLevel.Information,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("every 6 hours")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+        VerifyLog(LogLevel.Information, "every 6 hours", Times.Once());
     }
 
     [Fact]
     public async Task StartAsync_WithIntervalZero_OnlyRunsOnStartup()
     {
         // Arrange
-        var appSettings = new AppSettings
-        {
-            DatabaseCleanupIntervalHours = 0
-        };
-        _mockOptions.Setup(x => x.CurrentValue).Returns(appSettings);
-        
-        _mockFileStore
-            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(0);
+        _mockOptions.Setup(x => x.CurrentValue).Returns(new AppSettings { DatabaseCleanupIntervalHours = 0 });
 
         // Act
-        await _service.StartAsync(_cts.Token);
+        await StartAndWaitForStartupRunAsync(_service, _cts.Token);
 
         // Assert - verify "run only on startup" was logged
-        _mockLogger.Verify(
-            x => x.Log(
-                LogLevel.Information,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("run only on startup")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+        VerifyLog(LogLevel.Information, "run only on startup", Times.Once());
     }
 
     [Fact]
     public async Task StartAsync_CleanupRemovesEntries_LogsCount()
     {
         // Arrange
-        _mockFileStore
-            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(10);
+        SetupCleanup(Completed(10));
 
         // Act
-        await _service.StartAsync(_cts.Token);
+        await StartAndWaitForStartupRunAsync(_service, _cts.Token);
 
         // Assert
-        _mockLogger.Verify(
-            x => x.Log(
-                LogLevel.Information,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("removed 10")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+        VerifyLog(LogLevel.Information, "removed 10", Times.Once());
+    }
+
+    [Theory]
+    [InlineData(StaleCleanupStatus.WatchedDirectoryUnavailable)]
+    [InlineData(StaleCleanupStatus.WatchedDirectoryEmpty)]
+    [InlineData(StaleCleanupStatus.SentinelMissing)]
+    [InlineData(StaleCleanupStatus.ThresholdExceeded)]
+    [InlineData(StaleCleanupStatus.Failed)]
+    public async Task StartAsync_GuardedCleanup_LogsAWarningInsteadOfACount(StaleCleanupStatus status)
+    {
+        // Arrange
+        SetupCleanup(new StaleCleanupResult { Status = status, Message = "the library looks unmounted" });
+
+        // Act
+        await StartAndWaitForStartupRunAsync(_service, _cts.Token);
+
+        // Assert
+        VerifyLog(LogLevel.Warning, $"Scheduled database cleanup removed nothing ({status}): the library looks unmounted", Times.Once());
+        VerifyLog(LogLevel.Information, "Database cleanup completed", Times.Never());
     }
 
     [Fact]
-    public async Task StartAsync_WithCancelledToken_LogsWarning()
+    public async Task StartAsync_CancelledCleanupResult_LogsCancellation()
+    {
+        // Arrange
+        SetupCleanup(new StaleCleanupResult { Status = StaleCleanupStatus.Cancelled });
+
+        // Act
+        await StartAndWaitForStartupRunAsync(_service, _cts.Token);
+
+        // Assert
+        VerifyLog(LogLevel.Information, "Database cleanup was cancelled", Times.Once());
+        VerifyLog(LogLevel.Warning, "removed nothing", Times.Never());
+    }
+
+    [Fact]
+    public async Task StartAsync_WithCancelledToken_LogsCancellation()
     {
         // Arrange
         _mockFileStore
-            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
+            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException());
 
         // Act
-        await _service.StartAsync(_cts.Token);
+        await StartAndWaitForStartupRunAsync(_service, _cts.Token);
 
-        // Assert - should log warning about cancellation
-        _mockLogger.Verify(
-            x => x.Log(
-                LogLevel.Information,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("cancelled")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+        // Assert - should log the cancellation
+        VerifyLog(LogLevel.Information, "cancelled", Times.Once());
     }
 
     [Fact]
     public async Task StartAsync_WithException_LogsError()
     {
         // Arrange
-        var testException = new InvalidOperationException("Test error");
         _mockFileStore
-            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
-            .ThrowsAsync(testException);
+            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Test error"));
 
         // Act
-        await _service.StartAsync(_cts.Token);
+        await StartAndWaitForStartupRunAsync(_service, _cts.Token);
 
         // Assert - should log error but not throw
-        _mockLogger.Verify(
-            x => x.Log(
-                LogLevel.Error,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Error")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+        VerifyLog(LogLevel.Error, "Error", Times.Once());
+    }
+
+    [Fact]
+    public async Task ScheduledRun_PrunesProcessingHistoryToTheRetentionSettings()
+    {
+        _mockOptions.Setup(x => x.CurrentValue).Returns(new AppSettings
+        {
+            DatabaseCleanupIntervalHours = 12,
+            ProcessingHistoryRetentionDays = 30,
+            ProcessingHistoryMaxEntries = 1000,
+        });
+        var history = new Mock<IProcessingHistoryService>();
+        history.Setup(h => h.PruneAsync(30, 1000, It.IsAny<CancellationToken>())).ReturnsAsync(250);
+        using var service = TestServices.CreateDatabaseCleanup(
+            _mockFileStore.Object, _mockOptions.Object, _mockLogger.Object,
+            startupDelay: TimeSpan.Zero, historyService: history.Object);
+
+        await StartAndWaitForStartupRunAsync(service, _cts.Token);
+
+        history.Verify(h => h.PruneAsync(30, 1000, It.IsAny<CancellationToken>()), Times.Once);
+        VerifyLog(LogLevel.Information, "Pruned 250 processing history entries", Times.Once());
+    }
+
+    [Fact]
+    public async Task ScheduledRun_PrunesHistoryEvenWhenTheStaleCleanupWasGuarded()
+    {
+        SetupCleanup(new StaleCleanupResult { Status = StaleCleanupStatus.WatchedDirectoryEmpty, Message = "unmounted" });
+        var history = new Mock<IProcessingHistoryService>();
+        using var service = TestServices.CreateDatabaseCleanup(
+            _mockFileStore.Object, _mockOptions.Object, _mockLogger.Object,
+            startupDelay: TimeSpan.Zero, historyService: history.Object);
+
+        await StartAndWaitForStartupRunAsync(service, _cts.Token);
+
+        history.Verify(h => h.PruneAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ScheduledRun_HistoryPruneFailure_IsLoggedAndDoesNotFailTheRun()
+    {
+        var history = new Mock<IProcessingHistoryService>();
+        history.Setup(h => h.PruneAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        using var service = TestServices.CreateDatabaseCleanup(
+            _mockFileStore.Object, _mockOptions.Object, _mockLogger.Object,
+            startupDelay: TimeSpan.Zero, historyService: history.Object);
+
+        await StartAndWaitForStartupRunAsync(service, _cts.Token);
+
+        VerifyLog(LogLevel.Warning, "Failed to prune processing history", Times.Once());
+        VerifyLog(LogLevel.Error, "Error during scheduled database cleanup", Times.Never());
+    }
+
+    [Fact]
+    public async Task ScheduledRun_RefreshesTheSqlitePlannerStatistics()
+    {
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync();
+        var services = new ServiceCollection();
+        services.AddDbContextFactory<ComicMaintainerDbContext>(o => o.UseSqlite(connection));
+        await using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            await db.Database.EnsureCreatedAsync();
+            db.ComicFiles.AddRange(Enumerable.Range(1, 20).Select(i => new ComicFileEntity
+            {
+                FilePath = $"/library/Saga/Saga {i:000}.cbz",
+                FileName = $"Saga {i:000}.cbz",
+                Directory = "/library/Saga",
+                FileSize = i,
+                LastModified = DateTime.UtcNow.AddMinutes(-i),
+            }));
+            await db.SaveChangesAsync();
+        }
+        using var service = TestServices.CreateDatabaseCleanup(
+            _mockFileStore.Object, _mockOptions.Object, _mockLogger.Object,
+            dbContextFactory: factory, startupDelay: TimeSpan.Zero);
+
+        await StartAndWaitForStartupRunAsync(service, _cts.Token);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_stat1 WHERE tbl = 'ComicFiles'";
+        Assert.True(Convert.ToInt64(await command.ExecuteScalarAsync()) > 0);
+        VerifyLog(LogLevel.Warning, "Failed to refresh SQLite query-planner statistics", Times.Never());
     }
 
     [Fact]
     public async Task StopAsync_LogsStoppingMessage()
     {
         // Arrange
-        await _service.StartAsync(_cts.Token);
+        await StartAndWaitForStartupRunAsync(_service, _cts.Token);
 
         // Act
         await _service.StopAsync(_cts.Token);
 
         // Assert
-        _mockLogger.Verify(
-            x => x.Log(
-                LogLevel.Information,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Stopping Database Cleanup")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+        VerifyLog(LogLevel.Information, "Stopping Database Cleanup", Times.Once());
     }
 
     [Fact]
@@ -223,7 +322,7 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
     public async Task Dispose_AfterStart_DisposesResourcesSafely()
     {
         // Arrange
-        await _service.StartAsync(_cts.Token);
+        await StartAndWaitForStartupRunAsync(_service, _cts.Token);
 
         // Act & Assert - should not throw
         _service.Dispose();
@@ -233,40 +332,21 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
     public async Task StartAsync_WithNegativeInterval_OnlyRunsOnStartup()
     {
         // Arrange
-        var appSettings = new AppSettings
-        {
-            DatabaseCleanupIntervalHours = -1
-        };
-        _mockOptions.Setup(x => x.CurrentValue).Returns(appSettings);
-        
-        using var service = new DatabaseCleanupHostedService(
-            _mockFileStore.Object,
-            _mockOptions.Object,
-            _mockLogger.Object);
-
-        _mockFileStore
-            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(0);
+        _mockOptions.Setup(x => x.CurrentValue).Returns(new AppSettings { DatabaseCleanupIntervalHours = -1 });
+        using var service = CreateService(_mockOptions.Object);
 
         // Act
-        await service.StartAsync(_cts.Token);
+        await StartAndWaitForStartupRunAsync(service, _cts.Token);
 
         // Assert - should log "run only on startup"
-        _mockLogger.Verify(
-            x => x.Log(
-                LogLevel.Information,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("run only on startup")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+        VerifyLog(LogLevel.Information, "run only on startup", Times.Once());
     }
 
     [Fact]
     public async Task StopAsync_MultipleTimes_DoesNotThrow()
     {
         // Arrange
-        await _service.StartAsync(_cts.Token);
+        await StartAndWaitForStartupRunAsync(_service, _cts.Token);
         await _service.StopAsync(_cts.Token);
 
         // Act & Assert - calling StopAsync multiple times should not throw
@@ -277,23 +357,11 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
     [Fact]
     public async Task StartAsync_LogsScheduledCleanupMessage()
     {
-        // Arrange
-        _mockFileStore
-            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(0);
-
         // Act
-        await _service.StartAsync(_cts.Token);
+        await StartAndWaitForStartupRunAsync(_service, _cts.Token);
 
         // Assert - should log starting message
-        _mockLogger.Verify(
-            x => x.Log(
-                LogLevel.Information,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Starting scheduled database cleanup")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+        VerifyLog(LogLevel.Information, "Starting scheduled database cleanup", Times.Once());
     }
 
     [Fact]
@@ -305,16 +373,9 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
             DatabaseCleanupIntervalHours = 0
         });
 
-        _mockFileStore
-            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(0);
+        using var service = CreateService(monitor);
 
-        using var service = new DatabaseCleanupHostedService(
-            _mockFileStore.Object,
-            monitor,
-            _mockLogger.Object);
-
-        await service.StartAsync(_cts.Token);
+        await StartAndWaitForStartupRunAsync(service, _cts.Token);
 
         // Reset call history so we can verify the post-change log
         _mockLogger.Invocations.Clear();
@@ -326,14 +387,7 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
         });
 
         // Assert — timer reconfiguration should be logged without restarting the service
-        _mockLogger.Verify(
-            x => x.Log(
-                LogLevel.Information,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("every 6 hours")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+        VerifyLog(LogLevel.Information, "every 6 hours", Times.Once());
     }
 
     [Fact]
@@ -345,16 +399,9 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
             DatabaseCleanupIntervalHours = 6
         });
 
-        _mockFileStore
-            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(0);
+        using var service = CreateService(monitor);
 
-        using var service = new DatabaseCleanupHostedService(
-            _mockFileStore.Object,
-            monitor,
-            _mockLogger.Object);
-
-        await service.StartAsync(_cts.Token);
+        await StartAndWaitForStartupRunAsync(service, _cts.Token);
 
         _mockLogger.Invocations.Clear();
 
@@ -365,14 +412,7 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
         });
 
         // Assert — should log "run only on startup" without restarting
-        _mockLogger.Verify(
-            x => x.Log(
-                LogLevel.Information,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("run only on startup")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+        VerifyLog(LogLevel.Information, "run only on startup", Times.Once());
     }
 
     public void Dispose()

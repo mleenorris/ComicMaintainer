@@ -33,57 +33,6 @@ public class ComicFileProcessorTests
     }
 
     [Theory]
-    [InlineData("Chapter 12", "12")]
-    [InlineData("ch 5", "5")]
-    [InlineData("ch.10", "10")]
-    [InlineData("Ch-3.5", "3.5")]
-    [InlineData("Batman - Ch 0004.5", "4.5")]
-    [InlineData("Series - Chapter 0042", "42")]
-    [InlineData("Series - Chapter 0000", "0")]
-    public void ParseChapterNumber_WithChapterKeyword_ReturnsNumber(string filename, string expected)
-    {
-        // Act
-        var result = ComicFileProcessor.ParseChapterNumber(filename);
-
-        // Assert
-        Assert.Equal(expected, result);
-    }
-
-    [Theory]
-    [InlineData("Series Name 042", "42")]
-    [InlineData("Test 12.5 Extra", "12.5")]
-    [InlineData("Series Name 0004.5", "4.5")]
-    public void ParseChapterNumber_WithoutKeyword_FindsNumber(string filename, string expected)
-    {
-        // Act
-        var result = ComicFileProcessor.ParseChapterNumber(filename);
-
-        // Assert
-        Assert.Equal(expected, result);
-    }
-
-    [Theory]
-    [InlineData("Test [v1]", null)]
-    [InlineData("No Numbers Here", null)]
-    public void ParseChapterNumber_NumbersInBrackets_ReturnsNull(string filename, string? expected)
-    {
-        // Act
-        var result = ComicFileProcessor.ParseChapterNumber(filename);
-
-        // Assert
-        Assert.Equal(expected, result);
-    }
-
-    [Fact]
-    public void ParseChapterNumber_NumbersInParentheses_FindsNumberBeforeParentheses()
-    {
-        // The regex finds "02" in "Name 02023" before the parentheses
-        // This is expected behavior
-        var result = ComicFileProcessor.ParseChapterNumber("Series Name (2023)");
-        Assert.NotNull(result);
-    }
-
-    [Theory]
     [InlineData("{series} - Chapter {issue}", "Batman", "5", "Batman - Chapter 0005.cbz")]
     [InlineData("{series} #{issue}", "Superman", "12", "Superman #0012.cbz")]
     [InlineData("{series} v{volume} #{issue} - {title}", "Spiderman", "1", "Spiderman v1 #0001 - Test.cbz")]
@@ -249,37 +198,5 @@ public class ComicFileProcessorTests
         // Assert
         Assert.NotNull(result);
         Assert.EndsWith(".cbz", result);
-    }
-
-    [Theory]
-    [InlineData("Series - Chapter 5", "5")]
-    [InlineData("Series Ch.10", "10")]
-    [InlineData("Series ch_3.5", "3.5")]
-    [InlineData("Batman - Ch 0004.5", "4.5")]
-    [InlineData("Series Ch 0042", "42")]
-    [InlineData("Series Vol 2", null)]
-    [InlineData("Series 042", null)]
-    [InlineData("Series Name (2023)", null)]
-    public void ParseChapterKeyword_ReturnsKeywordMatchedNumberOnly(string filename, string? expected)
-    {
-        var result = ComicFileProcessor.ParseChapterKeyword(filename);
-        Assert.Equal(expected, result);
-    }
-
-    [Theory]
-    [InlineData("1", "1", true)]
-    [InlineData("1", "0001", true)]
-    [InlineData("0001", "0001.0", true)]
-    [InlineData("12.5", "0012.5", true)]
-    [InlineData("1", "2", false)]
-    [InlineData("1.0", "1.5", false)]
-    [InlineData("", "", true)]
-    [InlineData("", "1", false)]
-    [InlineData("abc", "abc", true)]
-    [InlineData("abc", "def", false)]
-    public void ChapterNumbersEquivalent_ComparesNumericValues(string? a, string? b, bool expected)
-    {
-        var result = ComicFileProcessor.ChapterNumbersEquivalent(a, b);
-        Assert.Equal(expected, result);
     }
 }

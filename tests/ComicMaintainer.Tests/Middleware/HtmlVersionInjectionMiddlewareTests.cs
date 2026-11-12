@@ -1,7 +1,9 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.WebApi.Middleware;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace ComicMaintainer.Tests.Middleware;
@@ -51,7 +53,7 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
             "<link href=\"/css/main.css?v=__APP_VERSION__\"><script src=\"/js/main.js?v=__APP_VERSION__\"></script>");
 
         var nextCalled = false;
-        var mw = new HtmlVersionInjectionMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, _env.Object, _logger.Object);
+        var mw = new HtmlVersionInjectionMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, _env.Object, _logger.Object, Options.Create(new AppSettings()));
         var ctx = CreateContext("/");
 
         await mw.InvokeAsync(ctx);
@@ -72,7 +74,7 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
             Path.Join(_tempRoot, "reader.html"),
             "<link href=\"/css/main.css?v=__APP_VERSION__\">");
 
-        var mw = new HtmlVersionInjectionMiddleware(_ => Task.CompletedTask, _env.Object, _logger.Object);
+        var mw = new HtmlVersionInjectionMiddleware(_ => Task.CompletedTask, _env.Object, _logger.Object, Options.Create(new AppSettings()));
         var ctx = CreateContext("/reader.html");
 
         await mw.InvokeAsync(ctx);
@@ -88,7 +90,7 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
         File.WriteAllText(Path.Join(_tempRoot, "index.html"), "<html>__APP_VERSION__</html>");
 
         var nextCalled = false;
-        var mw = new HtmlVersionInjectionMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, _env.Object, _logger.Object);
+        var mw = new HtmlVersionInjectionMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, _env.Object, _logger.Object, Options.Create(new AppSettings()));
         var ctx = CreateContext("/api/version");
 
         await mw.InvokeAsync(ctx);
@@ -104,7 +106,7 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
         foreach (var path in new[] { "/sw.js", "/manifest.json" })
         {
             var nextCalled = false;
-            var localMw = new HtmlVersionInjectionMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, _env.Object, _logger.Object);
+            var localMw = new HtmlVersionInjectionMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, _env.Object, _logger.Object, Options.Create(new AppSettings()));
             var ctx = CreateContext(path);
 
             await localMw.InvokeAsync(ctx);
@@ -117,7 +119,7 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
     public async Task NonHtmlPath_IsPassedThroughToNext()
     {
         var nextCalled = false;
-        var mw = new HtmlVersionInjectionMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, _env.Object, _logger.Object);
+        var mw = new HtmlVersionInjectionMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, _env.Object, _logger.Object, Options.Create(new AppSettings()));
         var ctx = CreateContext("/css/main.css");
 
         await mw.InvokeAsync(ctx);
@@ -130,7 +132,7 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
     {
         // Don't create the file.
         var nextCalled = false;
-        var mw = new HtmlVersionInjectionMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, _env.Object, _logger.Object);
+        var mw = new HtmlVersionInjectionMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, _env.Object, _logger.Object, Options.Create(new AppSettings()));
         var ctx = CreateContext("/missing.html");
 
         await mw.InvokeAsync(ctx);
@@ -143,12 +145,43 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
     {
         // Try to escape the web root.
         var nextCalled = false;
-        var mw = new HtmlVersionInjectionMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, _env.Object, _logger.Object);
+        var mw = new HtmlVersionInjectionMiddleware(_ => { nextCalled = true; return Task.CompletedTask; }, _env.Object, _logger.Object, Options.Create(new AppSettings()));
         var ctx = CreateContext("/../etc/passwd.html");
 
         await mw.InvokeAsync(ctx);
 
         // Should fall through to next() because the path is outside the web root.
         Assert.True(nextCalled);
+    }
+
+    [Theory]
+    [InlineData(null, "")]
+    [InlineData("/comics", "/comics")]
+    [InlineData("comics/", "/comics")]
+    public async Task HtmlPage_GetsTheBasePathInjected(string? configured, string expected)
+    {
+        File.WriteAllText(
+            Path.Join(_tempRoot, "login.html"),
+            "<html data-base-path=\"__BASE_PATH__\"><script src=\"__BASE_PATH__/js/x.js?v=__APP_VERSION__\"></script></html>");
+
+        var settings = Options.Create(new AppSettings { BasePath = configured });
+        var mw = new HtmlVersionInjectionMiddleware(_ => Task.CompletedTask, _env.Object, _logger.Object, settings);
+        var ctx = CreateContext("/login.html");
+
+        await mw.InvokeAsync(ctx);
+
+        var body = await ReadBodyAsync(ctx);
+        Assert.Contains($"data-base-path=\"{expected}\"", body);
+        Assert.Contains($"src=\"{expected}/js/x.js?v=", body);
+        Assert.DoesNotContain("__BASE_PATH__", body);
+    }
+
+    [Fact]
+    public void InjectPlaceholders_FillsTheVersionAndBasePath()
+    {
+        var html = HtmlVersionInjectionMiddleware.InjectPlaceholders(
+            "__BASE_PATH__/js/x.js?v=__APP_VERSION__", "1.2.3.4", "/comics/");
+
+        Assert.Equal("/comics/js/x.js?v=1.2.3.4", html);
     }
 }

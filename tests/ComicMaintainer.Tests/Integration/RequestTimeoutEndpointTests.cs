@@ -102,18 +102,6 @@ public class RequestTimeoutEndpointTests : IClassFixture<WebApplicationFactory<P
     }
 
     [Fact]
-    public void TheProgressHubIsNotSubjectToTheDefaultTimeout()
-    {
-        var hub = _factory.Services
-            .GetRequiredService<EndpointDataSource>()
-            .Endpoints
-            .FirstOrDefault(e => e.DisplayName?.Contains("/hubs/progress", StringComparison.Ordinal) == true);
-
-        Assert.NotNull(hub);
-        Assert.NotNull(hub!.Metadata.GetMetadata<DisableRequestTimeoutAttribute>());
-    }
-
-    [Fact]
     public async Task TimeoutMiddlewareHonorsRoutedEndpointMetadata()
     {
         using var factory = _factory.WithWebHostBuilder(builder =>
@@ -139,7 +127,12 @@ public class RequestTimeoutEndpointTests : IClassFixture<WebApplicationFactory<P
     {
         public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
         {
-            await Task.Delay(200, context.HttpContext.RequestAborted);
+            // The request that must time out waits far longer than the 50 ms timeout, so a machine too busy to run
+            // that timer on time cannot finish the action first. The one that opted out only has to outlast it.
+            var delay = context.HttpContext.Request.Path.StartsWithSegments("/api/version")
+                ? TimeSpan.FromSeconds(30)
+                : TimeSpan.FromMilliseconds(200);
+            await Task.Delay(delay, context.HttpContext.RequestAborted);
             context.Result = new OkResult();
         }
     }

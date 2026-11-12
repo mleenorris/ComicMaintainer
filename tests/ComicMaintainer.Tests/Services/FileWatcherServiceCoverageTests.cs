@@ -520,7 +520,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
     {
         var service = await StartWatchingAsync();
         var hookFailures = new ConcurrentQueue<Exception>();
-        var (trigger, _) = ArmWatcherFailure("trigger.cbz", failure: new InternalBufferOverflowException("simulated overflow"), alsoOnLog: entry =>
+        var (trigger, overflow) = ArmWatcherFailure("trigger.cbz", failure: new InternalBufferOverflowException("simulated overflow"), alsoOnLog: entry =>
         {
             // Runs on the FileSystemWatcher's thread, before the recovery is queued; an exception
             // escaping here would take down the test host, so failures are recorded instead.
@@ -533,7 +533,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
             {
                 if (cause == Unavailability.DirectoryDeleted)
                 {
-                    Directory.Delete(_library, recursive: true);
+                    DeleteLibrary();
                 }
                 else
                 {
@@ -547,7 +547,14 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
         await _logger.WaitForAsync(LogLevel.Warning, "Recovery rescan skipped: watched directory is unavailable");
         Assert.Empty(hookFailures);
         AssertNotLogged("Starting recovery rescan");
-        AssertNotLogged("may have stopped");
+        // The overflow never restarts the watcher. Windows also reports the deletion of the watched folder as an
+        // error of its own, which does (the watcher stops there), so only the overflow's entries are checked.
+        Assert.Contains(
+            _logger.Entries.Snapshot(),
+            entry => entry.Message.Contains("may have been lost", StringComparison.Ordinal) && ReferenceEquals(entry.Exception, overflow));
+        Assert.DoesNotContain(
+            _logger.Entries.Snapshot(),
+            entry => entry.Message.Contains("may have stopped", StringComparison.Ordinal) && ReferenceEquals(entry.Exception, overflow));
         Assert.DoesNotContain(trigger, _added.Snapshot());
     }
 
@@ -836,7 +843,7 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
 
     private FileWatcherService CreateService(IOptionsMonitor<AppSettings> monitor, IEventBroadcaster? broadcaster = null)
     {
-        var service = new FileWatcherService(monitor, _logger, _store.Object, _processor.Object, broadcaster, _time);
+        var service = TestServices.CreateFileWatcher(monitor, _logger, _store.Object, _processor.Object, broadcaster, _time);
         _services.Add(service);
         return service;
     }
@@ -913,11 +920,27 @@ public sealed class FileWatcherServiceCoverageTests : IDisposable
 
         try
         {
-            Directory.Delete(_library, recursive: true);
+            DeleteLibrary();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             hookFailures.Enqueue(ex);
+        }
+    }
+
+    /// <summary>
+    /// Deletes the library. On Windows the watcher reports an error of its own once the folder it watches is deleted,
+    /// so a hook that deletes the library on an error runs again after it is gone; that is not a failure.
+    /// </summary>
+    private void DeleteLibrary()
+    {
+        try
+        {
+            Directory.Delete(_library, recursive: true);
+        }
+        catch (DirectoryNotFoundException) when (!Directory.Exists(_library))
+        {
+            // Already deleted.
         }
     }
 

@@ -2,7 +2,6 @@ using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 
@@ -24,8 +23,7 @@ public sealed class LogsControllerCoverageTests : IDisposable
         Directory.CreateDirectory(_logDir);
         _settings = new AppSettings { ConfigDirectory = _logDir };
         _controller = new LogsController(
-            Mock.Of<IOptionsMonitor<AppSettings>>(m => m.CurrentValue == _settings),
-            Mock.Of<ILogger<LogsController>>());
+            Mock.Of<IOptionsMonitor<AppSettings>>(m => m.CurrentValue == _settings));
     }
 
     public void Dispose()
@@ -120,18 +118,15 @@ public sealed class LogsControllerCoverageTests : IDisposable
     {
         _settings.ConfigDirectory = null!;
 
-        var result = _controller.GetLogFiles();
-
         if (Directory.Exists("/Config"))
         {
-            var json = OkJson(result);
+            var json = OkJson(_controller.GetLogFiles());
             Assert.Equal(Directory.GetFiles("/Config", "debug*.log").Length, json.GetProperty("count").GetInt32());
         }
         else
         {
-            var error = Assert.IsType<ObjectResult>(result.Result);
-            Assert.Equal(500, error.StatusCode);
-            Assert.Contains("/Config", JsonSerializer.SerializeToElement(error.Value).GetProperty("error").GetString());
+            // Without a /Config folder the failure reaches the global handler.
+            Assert.Throws<DirectoryNotFoundException>(() => _controller.GetLogFiles());
         }
     }
 

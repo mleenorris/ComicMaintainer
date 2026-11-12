@@ -3,12 +3,40 @@ using ComicMaintainer.Core.Data;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.EntityFrameworkCore;
 
 namespace ComicMaintainer.Core.Services;
 
 public partial class FileStoreService
 {
+    /// <summary>
+    /// The file filters <see cref="GetFilteredFilesAsync"/> understands, keyed by lowercase
+    /// name. Any other value selects every file.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, Func<ComicFile, bool>> FileFilters =
+        new Dictionary<string, Func<ComicFile, bool>>(StringComparer.Ordinal)
+        {
+            ["processed"] = f => f.IsProcessed,
+            ["unprocessed"] = f => !f.IsProcessed && !f.IsDuplicate,
+            ["duplicates"] = f => f.IsDuplicate,
+            ["renamed"] = f => f.IsRenamed,
+            ["normalized"] = f => f.IsNormalized,
+            ["read"] = f => f.IsRead,
+            ["unread"] = f => !f.IsRead,
+        };
+
+    /// <summary>
+    /// The canonical form of a file filter, or <c>null</c> when it selects every file
+    /// (blank or not a known filter), so callers caching per filter do not keep a separate
+    /// entry for each value a client happens to send.
+    /// </summary>
+    public static string? NormalizeFileFilter(string? filter)
+    {
+        var normalized = filter?.Trim().ToLowerInvariant();
+        return normalized is not null && FileFilters.ContainsKey(normalized) ? normalized : null;
+    }
+
     public async Task<IEnumerable<ComicFile>> GetAllFilesAsync(CancellationToken cancellationToken = default)
     {
         var files = _files.Values.Select(f => f.ShallowCopy()).ToList();
@@ -35,18 +63,8 @@ public partial class FileStoreService
             var filterLower = filter.ToLower();
             _logger.LogDebug("GetFilteredFilesAsync: Applying filter: '{Filter}'", filterLower);
             
-            files = filterLower switch
-            {
-                "processed" => files.Where(f => f.IsProcessed),
-                "unprocessed" => files.Where(f => !f.IsProcessed && !f.IsDuplicate),
-                "duplicates" => files.Where(f => f.IsDuplicate),
-                "renamed" => files.Where(f => f.IsRenamed),
-                "normalized" => files.Where(f => f.IsNormalized),
-                "read" => files.Where(f => f.IsRead),
-                "unread" => files.Where(f => !f.IsRead),
-                _ => files
-            };
-            
+            files = FileFilters.TryGetValue(filterLower, out var predicate) ? files.Where(predicate) : files;
+
             var filteredList = files.ToList();
             _logger.LogDebug("GetFilteredFilesAsync: Filter '{Filter}' resulted in {FilteredCount} files (reduced from {TotalFiles})", 
                 filterLower, filteredList.Count, totalFileCount);
@@ -69,15 +87,39 @@ public partial class FileStoreService
         return allFiles;
     }
 
-    public Task<(int total, int processed, int unprocessed, int duplicates)> GetFileCountsAsync(CancellationToken cancellationToken = default)
+    /// <summary>Counts all files, the processed and unprocessed ones, and the duplicates.</summary>
+    /// <remarks>
+    /// Counted in SQL with the same predicates as <see cref="GetUnmarkedCountAsync"/> and the
+    /// file-list filters, so <c>/api/files/counts</c>, the list's <c>unmarked_count</c> and the
+    /// filtered pages always agree. Cached against <see cref="ChangeVersion"/> like the
+    /// unmarked count, so polling the counts does not re-scan the table.
+    /// </remarks>
+    public async Task<(int total, int processed, int unprocessed, int duplicates)> GetFileCountsAsync(CancellationToken cancellationToken = default)
     {
-        var files = _files.Values.ToList();
-        var total = files.Count;
-        var processed = files.Count(f => f.IsProcessed);
-        var duplicates = files.Count(f => f.IsDuplicate);
-        var unprocessed = files.Count(f => !f.IsProcessed && !f.IsDuplicate);
+        var cacheKey = $"FileStore.FileCounts.{ChangeVersion}";
+        if (_memoryCache.TryGetValue(cacheKey, out (int, int, int, int) cached))
+        {
+            return cached;
+        }
 
-        return Task.FromResult((total, processed, unprocessed, duplicates));
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var counts = await dbContext.ComicFiles
+            .AsNoTracking()
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                Total = g.Count(),
+                Processed = g.Count(f => f.IsRenamed && f.IsNormalized),
+                Unprocessed = g.Count(f => !(f.IsRenamed && f.IsNormalized) && !f.IsDuplicate),
+                Duplicates = g.Count(f => f.IsDuplicate),
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var result = counts is null
+            ? (0, 0, 0, 0)
+            : (counts.Total, counts.Processed, counts.Unprocessed, counts.Duplicates);
+        _memoryCache.Set(cacheKey, result, UnmarkedCountCacheTtl);
+        return result;
     }
 
     public Task<bool> IsFileProcessedAsync(string filePath, CancellationToken cancellationToken = default)

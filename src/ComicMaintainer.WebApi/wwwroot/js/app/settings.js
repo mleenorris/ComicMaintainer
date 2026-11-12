@@ -16,31 +16,6 @@
             await setPreferences({ theme: selectedTheme });
         }
 
-        // Update default library view from settings modal
-        async function updateDefaultLibraryViewFromSettings() {
-            const select = document.getElementById('defaultLibraryViewSelect');
-            if (!select) return;
-            const selectedView = select.value === 'series' ? 'series' : 'files';
-            try {
-                const response = await fetch(apiUrl('/api/settings/default-library-view'), {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ view: selectedView })
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                showMessage(`Default library view set to ${selectedView === 'series' ? 'Series' : 'Files (folder view)'}`, 'success');
-            } catch (error) {
-                console.error('Failed to update default library view:', error);
-                showMessage('Failed to update default library view: ' + error.message, 'error');
-            }
-        }
-
         // Update the global default preferred series-name language. Posting
         // an empty string clears the default and reverts to the canonical
         // title for any series that doesn't have its own override.
@@ -49,27 +24,17 @@
             if (!select) return;
             const value = select.value || null;
             try {
-                const response = await fetch(apiUrl('/api/settings/default-preferred-language'), {
+                await apiFetch('/api/settings/default-preferred-language', {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ language: value })
+                    body: { language: value }
                 });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    let msg = `HTTP error! status: ${response.status}`;
-                    try { const j = await response.json(); if (j && j.error) msg = j.error; } catch {}
-                    throw new Error(msg);
-                }
-                showMessage('Default preferred language updated', 'success');
+showMessage('Default preferred language updated', 'success');
                 if (typeof loadSeriesLibrary === 'function') {
                     loadSeriesLibrary(1, true);
                 }
             } catch (error) {
                 console.error('Failed to update default preferred language:', error);
-                showMessage('Failed to update default preferred language: ' + error.message, 'error');
+                showMessage('Failed to update default preferred language: ' + error.message, 'error', { reference: error });
             }
         }
         
@@ -80,28 +45,15 @@
             const enabled = document.getElementById('watcherEnableRenameCheckbox').checked;
             
             try {
-                const response = await fetch(apiUrl('/api/settings/watcher-enable-rename'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ enabled: enabled })
+                await apiFetch('/api/settings/watcher-enable-rename', {
+                    method: 'PUT',
+                    body: { enabled: enabled }
                 });
-                
-                if (handleAuthError(response)) {
-                    document.getElementById('watcherEnableRenameCheckbox').checked = !enabled;
-                    return;
-                }
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
                 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`File rename ${statusText} successfully!`, 'success');
             } catch (error) {
-                showMessage('Failed to update rename setting: ' + error.message, 'error');
+                showMessage('Failed to update rename setting: ' + error.message, 'error', { reference: error });
                 document.getElementById('watcherEnableRenameCheckbox').checked = !enabled;
             }
         }
@@ -110,58 +62,49 @@
             const enabled = document.getElementById('watcherEnableNormalizeCheckbox').checked;
             
             try {
-                const response = await fetch(apiUrl('/api/settings/watcher-enable-normalize'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ enabled: enabled })
+                await apiFetch('/api/settings/watcher-enable-normalize', {
+                    method: 'PUT',
+                    body: { enabled: enabled }
                 });
-                
-                if (handleAuthError(response)) {
-                    document.getElementById('watcherEnableNormalizeCheckbox').checked = !enabled;
-                    return;
-                }
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
                 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`Metadata normalize ${statusText} successfully!`, 'success');
             } catch (error) {
-                showMessage('Failed to update normalize setting: ' + error.message, 'error');
+                showMessage('Failed to update normalize setting: ' + error.message, 'error', { reference: error });
                 document.getElementById('watcherEnableNormalizeCheckbox').checked = !enabled;
             }
         }
-        
+
+        async function updateConvertRarToCbzOnWrite() {
+            const enabled = document.getElementById('convertRarToCbzOnWriteCheckbox').checked;
+
+            try {
+                await apiFetch('/api/settings/convert-rar-to-cbz-on-write', {
+                    method: 'PUT',
+                    body: { enabled: enabled }
+                });
+
+                const statusText = enabled ? 'enabled' : 'disabled';
+                showMessage(`Convert CBR/RAR to CBZ when writing tags ${statusText} successfully!`, 'success');
+            } catch (error) {
+                showMessage('Failed to update CBR/RAR conversion setting: ' + error.message, 'error', { reference: error });
+                document.getElementById('convertRarToCbzOnWriteCheckbox').checked = !enabled;
+            }
+        }
+
         async function updateWriteCoverToFirstArchive() {
             const enabled = document.getElementById('writeCoverToFirstArchiveCheckbox').checked;
             
             try {
-                const response = await fetch(apiUrl('/api/settings/write-cover-to-first-archive'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ enabled: enabled })
+                await apiFetch('/api/settings/write-cover-to-first-archive', {
+                    method: 'PUT',
+                    body: { enabled: enabled }
                 });
-                
-                if (handleAuthError(response)) {
-                    document.getElementById('writeCoverToFirstArchiveCheckbox').checked = !enabled;
-                    return;
-                }
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
                 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`Embed cover into first issue archive ${statusText} successfully!`, 'success');
             } catch (error) {
-                showMessage('Failed to update cover embed setting: ' + error.message, 'error');
+                showMessage('Failed to update cover embed setting: ' + error.message, 'error', { reference: error });
                 document.getElementById('writeCoverToFirstArchiveCheckbox').checked = !enabled;
             }
         }
@@ -170,88 +113,32 @@
             const enabled = document.getElementById('writeCoverToSeriesFolderCheckbox').checked;
             
             try {
-                const response = await fetch(apiUrl('/api/settings/write-cover-to-series-folder'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ enabled: enabled })
+                await apiFetch('/api/settings/write-cover-to-series-folder', {
+                    method: 'PUT',
+                    body: { enabled: enabled }
                 });
-                
-                if (handleAuthError(response)) {
-                    document.getElementById('writeCoverToSeriesFolderCheckbox').checked = !enabled;
-                    return;
-                }
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
                 
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`Write cover into series folder ${statusText} successfully!`, 'success');
             } catch (error) {
-                showMessage('Failed to update cover folder setting: ' + error.message, 'error');
+                showMessage('Failed to update cover folder setting: ' + error.message, 'error', { reference: error });
                 document.getElementById('writeCoverToSeriesFolderCheckbox').checked = !enabled;
             }
         }
         
-        async function updateAllowRegistration() {
-            const checkbox = document.getElementById('allowRegistrationCheckbox');
-            const enabled = checkbox.checked;
-
-            try {
-                const response = await fetch(apiUrl('/api/settings/allow-registration'), {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ enabled: enabled })
-                });
-
-                if (handleAuthError(response)) {
-                    checkbox.checked = !enabled;
-                    return;
-                }
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                showMessage(`Self-service registration ${enabled ? 'enabled' : 'disabled'} successfully!`, 'success');
-            } catch (error) {
-                checkbox.checked = !enabled;
-                showMessage('Failed to update registration setting: ' + error.message, 'error');
-            }
-        }
-
         async function updateDownloadExternalSeriesImages() {
             const enabled = document.getElementById('downloadExternalSeriesImagesCheckbox').checked;
             
             try {
-                const response = await fetch(apiUrl('/api/settings/download-external-series-images'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ enabled: enabled })
+                await apiFetch('/api/settings/download-external-series-images', {
+                    method: 'PUT',
+                    body: { enabled: enabled }
                 });
-                
-                if (handleAuthError(response)) {
-                    document.getElementById('downloadExternalSeriesImagesCheckbox').checked = !enabled;
-                    return;
-                }
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
+
                 const statusText = enabled ? 'enabled' : 'disabled';
                 showMessage(`Download external series images ${statusText} successfully!`, 'success');
             } catch (error) {
-                showMessage('Failed to update series image download setting: ' + error.message, 'error');
+                showMessage('Failed to update series image download setting: ' + error.message, 'error', { reference: error });
                 document.getElementById('downloadExternalSeriesImagesCheckbox').checked = !enabled;
             }
         }
@@ -272,7 +159,121 @@
             if (retryButton) retryButton.hidden = state !== 'error';
         }
 
-        async function loadSettings() {
+        // The settings an environment variable pins, as last reported by
+        // GET /api/settings: field name → variable name.
+        let settingsEnvLocks = new Map();
+
+        // The inputs of each GET /api/settings field the environment can pin.
+        // The server's override table (AppSettingsEnvironmentOverrides) is the
+        // other half of this list; a test keeps the two in step.
+        const SETTINGS_ENV_LOCK_INPUTS = Object.freeze({
+            stale_cleanup_max_removal_percent: ['staleCleanupMaxRemovalPercent'],
+            stale_cleanup_missing_grace_hours: ['staleCleanupMissingGraceHours'],
+            stale_cleanup_sentinel_file: ['staleCleanupSentinelFile'],
+            processing_history_retention_days: ['processingHistoryRetentionDays'],
+            processing_history_max_entries: ['processingHistoryMaxEntries'],
+            enable_external_series_metadata: ['enableExternalSeriesMetadata'],
+            comicvine_api_key_set: ['comicVineApiKey', 'comicVineClearApiKeyCheckbox'],
+            comicvine_base_url: ['comicVineBaseUrl'],
+            enable_mangadex_metadata: ['enableMangaDexMetadata'],
+            mangadex_base_url: ['mangaDexBaseUrl'],
+            enable_anilist_metadata: ['enableAniListMetadata'],
+            anilist_base_url: ['aniListBaseUrl'],
+            fill_comicinfo_from_providers: ['fillComicInfoFromProvidersCheckbox'],
+            enable_suwayomi: ['enableSuwayomiCheckbox'],
+            suwayomi_base_url: ['suwayomiBaseUrl'],
+            suwayomi_username: ['suwayomiUsername'],
+            suwayomi_password_set: ['suwayomiPassword', 'suwayomiClearPasswordCheckbox'],
+            suwayomi_downloads_directory: ['suwayomiDownloadsDirectory'],
+            suwayomi_import_directory: ['suwayomiImportDirectory'],
+            download_external_series_images: ['downloadExternalSeriesImagesCheckbox'],
+            series_image_max_bytes: ['seriesImageMaxMB'],
+            series_image_max_download_bytes: ['seriesImageMaxDownloadMB'],
+            series_image_max_dimension: ['seriesImageMaxDimension'],
+            smtp_host: ['smtpHost'],
+            smtp_port: ['smtpPort'],
+            smtp_username: ['smtpUsername'],
+            smtp_password_set: ['smtpPassword', 'smtpClearPasswordCheckbox'],
+            smtp_use_ssl: ['smtpUseSslCheckbox'],
+            smtp_allow_insecure: ['smtpAllowInsecureCheckbox'],
+            email_from_address: ['emailFromAddress'],
+            email_from_name: ['emailFromName'],
+            email_max_attachment_mb: ['emailMaxAttachmentMb'],
+            email_max_sends_per_hour: ['emailMaxSendsPerHour'],
+            email_max_sends_per_day: ['emailMaxSendsPerDay'],
+            email_min_seconds_between_sends: ['emailMinSecondsBetweenSends'],
+            error_reporting_enabled: ['errorReportingEnabledCheckbox'],
+            error_reporting_github_token_set: ['errorReportingToken', 'errorReportingClearTokenCheckbox'],
+            error_reporting_assignee: ['errorReportingAssignee'],
+            error_reporting_max_issues_per_day: ['errorReportingMaxPerDay'],
+            error_reporting_dedupe_window_hours: ['errorReportingDedupeHours'],
+            error_reporting_comment_on_recurrence: ['errorReportingCommentCheckbox'],
+            notify_ntfy_enabled: ['notifyNtfyEnabledCheckbox'],
+            notify_ntfy_url: ['notifyNtfyUrl'],
+            notify_ntfy_topic: ['notifyNtfyTopic'],
+            notify_ntfy_token_set: ['notifyNtfyToken', 'notifyNtfyClearTokenCheckbox'],
+            notify_ntfy_events: ['notifyNtfyEventNewChapters', 'notifyNtfyEventSuwayomi', 'notifyNtfyEventJobFailed', 'notifyNtfyEventJobFindings'],
+            notify_gotify_enabled: ['notifyGotifyEnabledCheckbox'],
+            notify_gotify_url: ['notifyGotifyUrl'],
+            notify_gotify_token_set: ['notifyGotifyToken', 'notifyGotifyClearTokenCheckbox'],
+            notify_gotify_events: ['notifyGotifyEventNewChapters', 'notifyGotifyEventSuwayomi', 'notifyGotifyEventJobFailed', 'notifyGotifyEventJobFindings'],
+            notify_discord_enabled: ['notifyDiscordEnabledCheckbox'],
+            notify_discord_webhook_url_set: ['notifyDiscordUrl', 'notifyDiscordClearUrlCheckbox'],
+            notify_discord_events: ['notifyDiscordEventNewChapters', 'notifyDiscordEventSuwayomi', 'notifyDiscordEventJobFailed', 'notifyDiscordEventJobFindings'],
+            notify_webhook_enabled: ['notifyWebhookEnabledCheckbox'],
+            notify_webhook_url_set: ['notifyWebhookUrl', 'notifyWebhookClearUrlCheckbox'],
+            notify_webhook_events: ['notifyWebhookEventNewChapters', 'notifyWebhookEventSuwayomi', 'notifyWebhookEventJobFailed', 'notifyWebhookEventJobFindings'],
+            notify_komga_enabled: ['notifyKomgaEnabledCheckbox'],
+            notify_komga_url: ['notifyKomgaUrl'],
+            notify_komga_api_key_set: ['notifyKomgaToken', 'notifyKomgaClearTokenCheckbox'],
+            notify_komga_library_id: ['notifyKomgaLibraryId'],
+            notify_komga_events: ['notifyKomgaEventNewChapters', 'notifyKomgaEventLibraryChanged'],
+            notify_kavita_enabled: ['notifyKavitaEnabledCheckbox'],
+            notify_kavita_url: ['notifyKavitaUrl'],
+            notify_kavita_api_key_set: ['notifyKavitaToken', 'notifyKavitaClearTokenCheckbox'],
+            notify_kavita_library_id: ['notifyKavitaLibraryId'],
+            notify_kavita_events: ['notifyKavitaEventNewChapters', 'notifyKavitaEventLibraryChanged'],
+            opds_enabled: ['opdsEnabledCheckbox']
+        });
+
+        /**
+         * Marks the inputs of the settings the environment pins: applyCapabilities
+         * keeps them disabled, and a hint under each says which variable pins it.
+         */
+        function applySettingsEnvLocks(locked) {
+            settingsEnvLocks = new Map((Array.isArray(locked) ? locked : []).map(entry => [entry.field, entry.variable]));
+            for (const [field, inputIds] of Object.entries(SETTINGS_ENV_LOCK_INPUTS)) {
+                const variable = settingsEnvLocks.get(field);
+                for (const inputId of inputIds) {
+                    const input = document.getElementById(inputId);
+                    if (!input) continue;
+                    if (variable) {
+                        input.setAttribute('data-env-locked', variable);
+                    } else {
+                        input.removeAttribute('data-env-locked');
+                    }
+                }
+                setSettingsEnvLockHint(field, inputIds[0], variable);
+            }
+        }
+
+        function setSettingsEnvLockHint(field, inputId, variable) {
+            document.querySelector(`[data-env-lock-hint="${field}"]`)?.remove();
+            const input = document.getElementById(inputId);
+            if (!variable || !input) return;
+            const hint = document.createElement('small');
+            hint.className = 'form-hint';
+            hint.dataset.envLockHint = field;
+            hint.textContent = `Set by the ${variable} environment variable, so it cannot be changed here.`;
+            (input.closest('label') || input).after(hint);
+        }
+
+/**
+         * Fills the settings page from the server. Resolves to false when it told
+         * the user the load failed (or the session expired); `afterSave` words that
+         * failure for the save that came before it.
+         */
+        async function loadSettings(afterSave = false) {
             const loadRequest = ++settingsLoadRequest;
             settingsLoaded = false;
             setSettingsLoadStatus('loading', 'Loading settings…');
@@ -280,27 +281,10 @@
             loadBackups();
             try {
                 // Load all settings
-                const settingsUrl = apiUrl('/api/settings');
-                console.log('[SETTINGS] Fetching settings from URL:', settingsUrl);
-                
-                const settingsResponse = await fetch(settingsUrl, {
-                    headers: getAuthHeaders()
-                });
+                const settingsData = await apiFetch('/api/settings');
+                if (loadRequest !== settingsLoadRequest) return undefined;
+                apiDebugLog('Settings loaded', settingsData);
 
-                console.log('[SETTINGS] Response status:', settingsResponse.status, 'OK:', settingsResponse.ok, 'URL:', settingsResponse.url);
-
-                if (handleAuthError(settingsResponse)) return;
-
-                if (!settingsResponse.ok) {
-                    const errorText = await settingsResponse.text();
-                    console.error('[SETTINGS] Failed to load settings. Status:', settingsResponse.status, 'Response:', errorText);
-                    throw new Error(`HTTP error! status: ${settingsResponse.status} - ${errorText}`);
-                }
-                
-                const settingsData = await settingsResponse.json();
-                if (loadRequest !== settingsLoadRequest) return;
-                console.log('[SETTINGS] Settings data loaded:', settingsData);
-                
                 document.getElementById('filenameFormat').value = settingsData.filename_format || '';
                 document.getElementById('currentFormat').textContent = settingsData.filename_format || '{series} - Chapter {issue}';
                 
@@ -313,7 +297,13 @@
                 
                 // Load watcher enable normalize status
                 document.getElementById('watcherEnableNormalizeCheckbox').checked = settingsData.watcher_enable_normalize;
-                
+
+                // Load CBR/RAR to CBZ conversion status (on unless the server says otherwise)
+                const convertRarCheckbox = document.getElementById('convertRarToCbzOnWriteCheckbox');
+                if (convertRarCheckbox) {
+                    convertRarCheckbox.checked = settingsData.convert_rar_to_cbz_on_write !== false;
+                }
+
                 // Load series cover embed status
                 const writeCoverCheckbox = document.getElementById('writeCoverToFirstArchiveCheckbox');
                 if (writeCoverCheckbox) {
@@ -324,12 +314,6 @@
                 const writeCoverFolderCheckbox = document.getElementById('writeCoverToSeriesFolderCheckbox');
                 if (writeCoverFolderCheckbox) {
                     writeCoverFolderCheckbox.checked = !!settingsData.write_cover_to_series_folder;
-                }
-
-                // Load self-service registration status
-                const allowRegistrationCheckbox = document.getElementById('allowRegistrationCheckbox');
-                if (allowRegistrationCheckbox) {
-                    allowRegistrationCheckbox.checked = !!settingsData.allow_registration;
                 }
 
                 // Load external series image download status
@@ -364,6 +348,11 @@
                 
                 // Load database cleanup interval
                 document.getElementById('dbCleanupInterval').value = settingsData.database_cleanup_interval_hours;
+                document.getElementById('staleCleanupMaxRemovalPercent').value = settingsData.stale_cleanup_max_removal_percent ?? 10;
+                document.getElementById('staleCleanupMissingGraceHours').value = settingsData.stale_cleanup_missing_grace_hours ?? 6;
+                document.getElementById('staleCleanupSentinelFile').value = settingsData.stale_cleanup_sentinel_file || '';
+                document.getElementById('processingHistoryRetentionDays').value = settingsData.processing_history_retention_days ?? 90;
+                document.getElementById('processingHistoryMaxEntries').value = settingsData.processing_history_max_entries ?? 50000;
 
                 // Load external metadata settings
                 document.getElementById('enableExternalSeriesMetadata').checked = !!settingsData.enable_external_series_metadata;
@@ -378,6 +367,7 @@
                 document.getElementById('mangaDexBaseUrl').value = settingsData.mangadex_base_url || 'https://api.mangadex.org';
                 document.getElementById('enableAniListMetadata').checked = !!settingsData.enable_anilist_metadata;
                 document.getElementById('aniListBaseUrl').value = settingsData.anilist_base_url || 'https://graphql.anilist.co';
+                document.getElementById('fillComicInfoFromProvidersCheckbox').checked = !!settingsData.fill_comicinfo_from_providers;
 
                 // Load Suwayomi download-server settings
                 const enableSuwayomi = document.getElementById('enableSuwayomiCheckbox');
@@ -396,17 +386,15 @@
                         : 'Enter a password only if your Suwayomi server requires one.';
                 }
                 if (suwayomiClearPassword) suwayomiClearPassword.checked = false;
+
+                // The OPDS catalog: the feed URL is this page's own origin and base path, so it matches what the browser sees.
+                document.getElementById('opdsEnabledCheckbox').checked = !!settingsData.opds_enabled;
+                document.getElementById('opdsFeedUrl').value = window.location.origin + apiUrl('/opds/v1.2/catalog');
+                loadOpdsApiKeyStatus(afterSave);
                 const suwayomiDownloadsDirectory = document.getElementById('suwayomiDownloadsDirectory');
                 const suwayomiImportDirectory = document.getElementById('suwayomiImportDirectory');
                 if (suwayomiDownloadsDirectory) suwayomiDownloadsDirectory.value = settingsData.suwayomi_downloads_directory || '';
                 if (suwayomiImportDirectory) suwayomiImportDirectory.value = settingsData.suwayomi_import_directory || '';
-
-                // Load default library view
-                const defaultLibraryViewSelect = document.getElementById('defaultLibraryViewSelect');
-                if (defaultLibraryViewSelect) {
-                    const defaultView = settingsData.default_library_view === 'series' ? 'series' : 'files';
-                    defaultLibraryViewSelect.value = defaultView;
-                }
 
                 // Load default preferred-language fallback. Server returns
                 // null/empty when no global default is configured.
@@ -479,18 +467,27 @@
                 if (errorReportingMaxPerDay) errorReportingMaxPerDay.value = settingsData.error_reporting_max_issues_per_day ?? 10;
                 if (errorReportingDedupeHours) errorReportingDedupeHours.value = settingsData.error_reporting_dedupe_window_hours ?? 24;
                 if (errorReportingComment) errorReportingComment.checked = settingsData.error_reporting_comment_on_recurrence !== false;
-                 
+
+                loadNotificationSettings(settingsData);
+
                 console.log('[SETTINGS] All settings loaded successfully');
                 updateSettingsNavActive();
                 settingsLoaded = true;
                 setSettingsLoadStatus('loaded');
+                applySettingsEnvLocks(settingsData.env_locked);
                 applyCapabilities();
+                return true;
             } catch (error) {
-                if (loadRequest !== settingsLoadRequest) return;
+                if (error.authHandled) return false;
+                if (loadRequest !== settingsLoadRequest) return undefined;
                 console.error('[SETTINGS] Error in loadSettings():', error);
                 setSettingsLoadStatus('error', 'Settings could not be loaded. Retry before making changes.');
-                showMessage('Failed to load settings: ' + error.message, 'error');
-            }
+                showMessage(
+                    (afterSave ? 'Settings were saved, but the page could not be reloaded: ' : 'Failed to load settings: ') + error.message,
+                    afterSave ? 'warning' : 'error',
+                    { reference: error });
+                return false;
+}
         }
         
         function closeSettings() {
@@ -572,25 +569,9 @@
                 // Show a loading message
                 showMessage('Resetting database... This may take a moment.', 'info');
                 
-                const response = await fetch(apiUrl('/api/settings/reset'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    }
-                });
-                
-                if (handleAuthError(response)) return;
-                
-                if (!response.ok) {
-                    // A proxy's error page (e.g. a 502/504) or an empty body is not JSON.
-                    const errorData = await response.json().catch(() => null);
-                    throw new Error((errorData && errorData.error) || `HTTP error! status: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                
-                if (result.success) {
+                const result = await apiFetch('/api/settings/reset', { method: 'POST' });
+
+if (result.success) {
                     showMessage('Database reset completed successfully', 'success');
                     // Clear in-memory selection state — the file list is now empty.
                     if (typeof selectedFiles !== 'undefined' && selectedFiles && typeof selectedFiles.clear === 'function') {
@@ -611,11 +592,14 @@
                     showMessage(result.error || 'Failed to reset database', 'error');
                 }
             } catch (error) {
-                showMessage('Failed to reset database: ' + error.message, 'error');
+                showMessage('Failed to reset database: ' + error.message, 'error', { reference: error });
             }
         }
         
         async function openLogsModal() {
+            // The logs API is administrator-only; its entry points are hidden
+            // for everyone else (see applyCapabilities in shell.js).
+            if (!userCapabilities.canAdminister) return;
             document.getElementById('logsModal').classList.add('active');
             await loadLogFiles();
         }
@@ -646,17 +630,7 @@
                 clearChildren(contentDiv);
                 
                 const offset = (historyCurrentPage - 1) * historyPerPage;
-                const response = await fetch(apiUrl(`/api/processing-history?limit=${historyPerPage}&offset=${offset}`), {
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) return;
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
+                const data = await apiFetch(`/api/processing-history?limit=${historyPerPage}&offset=${offset}`);
                 historyTotal = data.total;
                 const totalPages = Math.ceil(historyTotal / historyPerPage);
                 
@@ -683,6 +657,7 @@
                 nextBtn.disabled = historyCurrentPage >= totalPages;
                 
             } catch (error) {
+                if (error.authHandled) return;
                 loadingIndicator.style.display = 'none';
                 renderHtml(contentDiv, html`<div style="padding: 20px; color: red;">Error loading history: ${error.message}</div>`);
             }
@@ -794,14 +769,7 @@
         async function openAboutModal() {
             try {
                 // Load version
-                const response = await fetch(apiUrl('/api/version'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
+                const data = await apiFetch('/api/version');
                 const aboutVersionElement = document.getElementById('aboutVersion');
                 if (aboutVersionElement && data.version) {
                     aboutVersionElement.textContent = `v${data.version}`;
@@ -848,21 +816,16 @@
             renderHtml(container, html`<div class="loading"><div class="spinner"></div><p>Loading diagnostics...</p></div>`);
 
             try {
-                const response = await fetch(apiUrl('/api/diagnostics'), { headers: getAuthHeaders() });
-                if (handleAuthError(response)) return;
-                if (response.status === 403) {
-                    lastDiagnostics = null;
+                lastDiagnostics = await apiFetch('/api/diagnostics');
+                renderDiagnostics(lastDiagnostics);
+            } catch (error) {
+                if (error.authHandled) return;
+                lastDiagnostics = null;
+                if (error.status === 403) {
                     renderHtml(container, html`<p class="empty-state">System diagnostics are available to administrators only.</p>`);
                     return;
                 }
-                if (!response.ok) {
-                    throw apiResponseError(response);
-                }
-                lastDiagnostics = await response.json();
-                renderDiagnostics(lastDiagnostics);
-            } catch (error) {
-                lastDiagnostics = null;
-                // Rendered inline rather than as a toast: the panel is the only
+// Rendered inline rather than as a toast: the panel is the only
                 // thing on screen the user is looking at. It still carries the
                 // correlation reference so a failed snapshot is itself traceable.
                 renderHtml(container, html`<p class="empty-state">${withApiFailureReference('Could not load diagnostics: ' + error.message, error)}</p>`);
@@ -1042,6 +1005,65 @@
             }
         }
         
+        // The signed-in user's API key, which comic apps can send as the password (with Authelia, the only
+        // one they can send). The server shows a new key once, so it stays on this page only until the page is left.
+        let opdsHasApiKey = false;
+
+        function showCreatedApiKey(apiKey) {
+            document.getElementById('opdsApiKeyValue').value = apiKey;
+            document.getElementById('opdsApiKeyResult').hidden = !apiKey;
+        }
+
+        async function loadOpdsApiKeyStatus(keepCreatedKey) {
+            if (!keepCreatedKey) showCreatedApiKey('');
+            // An Authelia session has no password of its own here, and the server does not ask it for one.
+            document.getElementById('opdsApiKeyPasswordGroup').hidden = isAutheliaAuthenticated();
+            const status = document.getElementById('opdsApiKeyStatus');
+            try {
+                const key = await apiFetch('/api/auth/api-key');
+                opdsHasApiKey = !!key.hasApiKey;
+                document.getElementById('opdsApiKeyButton').textContent = opdsHasApiKey ? 'Replace API key' : 'Create API key';
+                if (opdsHasApiKey) {
+                    const used = key.lastUsedAt ? `last used ${new Date(key.lastUsedAt).toLocaleString()}` : 'not used yet';
+                    status.textContent = `You have an API key, created ${new Date(key.createdAt).toLocaleString()}, ${used}.`;
+                } else {
+                    status.textContent = 'You have no API key yet.';
+                }
+            } catch (error) {
+                console.warn('Could not read the API key status:', error);
+                status.textContent = 'Could not check whether you have an API key.';
+            }
+        }
+
+        async function createOpdsApiKey() {
+            const passwordInput = document.getElementById('opdsApiKeyPassword');
+            const body = {};
+            if (!isAutheliaAuthenticated()) {
+                if (!passwordInput.value) {
+                    showMessage('Enter your current password to create an API key.', 'error');
+                    passwordInput.focus();
+                    return;
+                }
+                body.currentPassword = passwordInput.value;
+            }
+            if (opdsHasApiKey && !confirm('Replace your API key?\n\nComic apps and scripts using the current key stop working until they have the new one.')) return;
+
+            const button = document.getElementById('opdsApiKeyButton');
+            button.disabled = true;
+            try {
+                const created = await apiFetch('/api/auth/api-key', { method: 'POST', body });
+                passwordInput.value = '';
+                showCreatedApiKey(created.apiKey);
+                showMessage('API key created. Copy it now: it is not shown again.', 'success');
+                await loadOpdsApiKeyStatus(true);
+            } catch (error) {
+                if (error.authHandled) return;
+                showMessage('Could not create the API key: ' + error.message, 'error', { reference: error });
+            } finally {
+                button.disabled = false;
+            }
+        }
+
         function openChangePasswordModal() {
             const modal = document.getElementById('changePasswordModal');
             const form = document.getElementById('changePasswordForm');
@@ -1106,26 +1128,26 @@
             btn.textContent = 'Changing...';
             
             try {
-                const response = await fetch(apiUrl('/api/auth/change-password'), {
+                const response = await apiFetch('/api/auth/change-password', {
                     method: 'POST',
-                    headers: getAuthHeaders(),
-                    body: JSON.stringify({
+                    json: false,
+                    body: {
                         currentPassword: currentPassword,
                         newPassword: newPassword
-                    })
+                    }
                 });
-                
-                if (handleAuthError(response)) {
-                    resetButtonState();
-                    return;
-                }
-                
+
                 const data = await response.json();
-                
+
                 if (response.ok) {
+                    // Changing the password signed every session out, this one included;
+                    // carry on with the new session token the server returned.
+                    if (data.token) {
+                        localStorage.setItem('jwt_token', data.token);
+                    }
                     successEl.textContent = 'Password changed successfully!';
                     successEl.classList.add('show');
-                    
+
                     // Clear form
                     document.getElementById('changePasswordForm').reset();
                     
@@ -1138,8 +1160,9 @@
                     errorEl.classList.add('show');
                 }
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Error changing password:', error);
-                errorEl.textContent = 'An error occurred. Please try again.';
+errorEl.textContent = 'An error occurred. Please try again.';
                 errorEl.classList.add('show');
             } finally {
                 // Re-enable button
@@ -1154,17 +1177,8 @@
             try {
                 renderHtml(logFileSelect, html`<option value="">Loading...</option>`);
                 
-                const response = await fetch(apiUrl(`/api/logs/files?type=${logType}`), {
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) return;
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                
+                const data = await apiFetch(`/api/logs/files?type=${logType}`);
+
                 // Clear and populate the dropdown
                 clearChildren(logFileSelect);
                 
@@ -1192,6 +1206,7 @@
                 // Load logs for the selected file (most recent by default)
                 await loadLogs();
             } catch (error) {
+                if (error.authHandled) return;
                 renderHtml(logFileSelect, html`<option value="">Error loading files</option>`);
                 console.error('Failed to load log files:', error);
             }
@@ -1219,17 +1234,8 @@
                     url += `&filename=${encodeURIComponent(logFile)}`;
                 }
                 
-                const response = await fetch(apiUrl(url), {
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) return;
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                
+                const data = await apiFetch(url);
+
                 if (data.error) {
                     logsContent.textContent = 'Error: ' + data.error;
                 } else {
@@ -1238,6 +1244,7 @@
                     logStats.textContent = `Showing ${data.shown_lines} of ${data.total_lines} total lines${fileInfo}`;
                 }
             } catch (error) {
+                if (error.authHandled) return;
                 logsContent.textContent = 'Failed to load logs: ' + error.message;
             } finally {
                 logsLoadingIndicator.style.display = 'none';
@@ -1245,31 +1252,18 @@
         }
 
         /**
-         * Save one Save Settings group; throws an Error carrying the server's
-         * reason on failure, flagged `authHandled` after a 401 (already
-         * redirecting to login).
+         * Sends one Save Settings request. Throws apiFetch's error on failure, with
+         * `authHandled` after a 401 (already redirecting to login), and flagged
+         * `nothingSaved` when the server refused the save (a 4xx). A 5xx says nothing
+         * about that: the file may already be replaced when a later step fails, and a
+         * proxy's 502/504 never saw the outcome. Nor does a request that got no answer.
          */
-        async function saveSettingsGroup(method, path, body) {
-            const response = await fetch(apiUrl(path), {
-                method,
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...getAuthHeaders()
-                },
-                body: JSON.stringify(body)
-            });
-            if (handleAuthError(response)) {
-                const error = new Error('Authentication required');
-                error.authHandled = true;
+        async function saveAllSettings(body) {
+            try {
+                await apiFetch('/api/settings', { method: 'PUT', body });
+            } catch (error) {
+                error.nothingSaved = error.status < 500;
                 throw error;
-            }
-            // A proxy's error page or an empty body is not JSON.
-            const result = await response.json().catch(() => null);
-            if (!response.ok) {
-                throw new Error((result && (result.error || result.message)) || `HTTP error! status: ${response.status}`);
-            }
-            if (result && result.success === false) {
-                throw new Error(result.error || '');
             }
         }
 
@@ -1279,8 +1273,25 @@
             logMaxSizeMB: 2047,
             emailMaxAttachmentMB: 200,
             errorReportingMaxPerDay: 100,
-            errorReportingDedupeHours: 720
+            errorReportingDedupeHours: 720,
+            staleCleanupMaxRemovalPercent: 100,
+            staleCleanupMissingGraceHours: 720,
+            processingHistoryRetentionDays: 3650,
+            processingHistoryMaxEntries: 10000000
         });
+
+        /** A whole number from a settings input, or NaN when it is blank or not a whole number. */
+        function parseWholeNumberInput(id) {
+            const value = (document.getElementById(id)?.value ?? '').trim();
+            if (!value) return NaN;
+            const number = Number(value);
+            return Number.isInteger(number) ? number : NaN;
+        }
+
+        /** Whether `value` is a whole number from 0 to `max`. */
+        function isWholeNumberInRange(value, max) {
+            return Number.isInteger(value) && value >= 0 && value <= max;
+        }
 
         /**
          * A whole number from an email rate-limit input. Blank means 0 (no
@@ -1299,6 +1310,11 @@
             const logMaxSize = parseFloat(document.getElementById('logMaxSize').value);
             const issueNumberPadding = document.getElementById('issueNumberPadding').valueAsNumber;
             const dbCleanupInterval = parseInt(document.getElementById('dbCleanupInterval').value);
+            const staleCleanupMaxRemovalPercent = parseWholeNumberInput('staleCleanupMaxRemovalPercent');
+            const staleCleanupMissingGraceHours = parseWholeNumberInput('staleCleanupMissingGraceHours');
+            const staleCleanupSentinelFile = document.getElementById('staleCleanupSentinelFile').value.trim();
+            const processingHistoryRetentionDays = parseWholeNumberInput('processingHistoryRetentionDays');
+            const processingHistoryMaxEntries = parseWholeNumberInput('processingHistoryMaxEntries');
             const enableExternalSeriesMetadata = document.getElementById('enableExternalSeriesMetadata').checked;
             const comicVineApiKey = document.getElementById('comicVineApiKey').value.trim();
             const comicVineClearApiKey = document.getElementById('comicVineClearApiKeyCheckbox').checked;
@@ -1307,6 +1323,7 @@
             const mangaDexBaseUrl = document.getElementById('mangaDexBaseUrl').value.trim();
             const enableAniListMetadata = document.getElementById('enableAniListMetadata').checked;
             const aniListBaseUrl = document.getElementById('aniListBaseUrl').value.trim();
+            const fillComicInfoFromProviders = document.getElementById('fillComicInfoFromProvidersCheckbox').checked;
             const seriesImageMaxMB = parseFloat(document.getElementById('seriesImageMaxMB').value);
             const seriesImageMaxDownloadMB = parseFloat(document.getElementById('seriesImageMaxDownloadMB').value);
             const seriesImageMaxDimension = parseInt(document.getElementById('seriesImageMaxDimension').value);
@@ -1337,162 +1354,109 @@
                 }
                 : null;
             
-            // Check everything the server would reject before sending anything:
-            // the groups are saved one by one, so a rejected group leaves the
-            // ones before it saved.
-            if (!format) {
-                showMessage('Filename format cannot be empty', 'error');
-                return;
-            }
-            
-            if (isNaN(logMaxSize) || logMaxSize <= 0) {
-                showMessage('Log max size must be a positive number', 'error');
-                return;
-            }
+            // A setting the environment pins is left out of the save, which keeps it,
+            // and its value (which may be outside what this form accepts) is not checked.
+            const pinned = field => settingsEnvLocks.has(field);
+            const unlessPinned = (field, value) => (pinned(field) ? undefined : value);
 
-            // The server keeps the size in bytes as a 32-bit integer.
-            if (logMaxSize > SETTINGS_SERVER_LIMITS.logMaxSizeMB) {
-                showMessage(`Log max size must be ${SETTINGS_SERVER_LIMITS.logMaxSizeMB} MB or less`, 'error');
-                return;
-            }
-            
-            if (!Number.isInteger(issueNumberPadding) || issueNumberPadding < 0 || issueNumberPadding > 10) {
-                showMessage('Issue number padding must be between 0 and 10', 'error');
-                return;
-            }
-            
-            if (isNaN(dbCleanupInterval) || dbCleanupInterval < 0) {
-                showMessage('Database cleanup interval must be 0 or greater', 'error');
-                return;
-            }
-            
-            if (isNaN(seriesImageMaxMB) || seriesImageMaxMB <= 0) {
-                showMessage('Max stored cover size must be a positive number', 'error');
-                return;
-            }
-            
-            if (isNaN(seriesImageMaxDownloadMB) || seriesImageMaxDownloadMB <= 0) {
-                showMessage('Max download size must be a positive number', 'error');
-                return;
-            }
-            
-            if (seriesImageMaxDownloadMB < seriesImageMaxMB) {
-                showMessage('Max download size must be greater than or equal to max stored cover size', 'error');
-                return;
-            }
-            
-            if (isNaN(seriesImageMaxDimension) || seriesImageMaxDimension <= 0) {
-                showMessage('Max cover dimension must be a positive number', 'error');
-                return;
-            }
-
-            if (smtpPortValue && (isNaN(smtpPort) || smtpPort < 1 || smtpPort > 65535)) {
-                showMessage('SMTP port must be between 1 and 65535', 'error');
-                return;
-            }
-
-            if (emailMaxAttachmentValue && (isNaN(emailMaxAttachmentMb) || emailMaxAttachmentMb <= 0)) {
-                showMessage('Max email attachment size must be a positive number', 'error');
-                return;
-            }
-
-            if (emailRateLimit) {
-                const limits = [
-                    [emailRateLimit.maxSendsPerHour, 'Max emails per hour', 10000],
-                    [emailRateLimit.maxSendsPerDay, 'Max emails per day', 100000],
-                    [emailRateLimit.minSecondsBetweenSends, 'Minimum seconds between emails', 86400]
-                ];
-                for (const [value, label, max] of limits) {
-                    if (!(value >= 0 && value <= max)) {
-                        showMessage(`${label} must be a whole number from 0 to ${max}`, 'error');
-                        return;
-                    }
-                }
-            }
-            if (emailMaxAttachmentMb > SETTINGS_SERVER_LIMITS.emailMaxAttachmentMB) {
-                showMessage(`Max email attachment size must be ${SETTINGS_SERVER_LIMITS.emailMaxAttachmentMB} MB or less`, 'error');
-                return;
-            }
-
-            if (errorReportingMaxPerDay < 0 || errorReportingMaxPerDay > SETTINGS_SERVER_LIMITS.errorReportingMaxPerDay) {
-                showMessage(`Maximum issues per day must be between 0 and ${SETTINGS_SERVER_LIMITS.errorReportingMaxPerDay}`, 'error');
-                return;
-            }
-
-            if (errorReportingDedupeHours < 1 || errorReportingDedupeHours > SETTINGS_SERVER_LIMITS.errorReportingDedupeHours) {
-                showMessage(`Recurrence comment interval must be between 1 and ${SETTINGS_SERVER_LIMITS.errorReportingDedupeHours} hours`, 'error');
-                return;
-            }
-
-            // Saved in this order; `saved` runs once the server has accepted the group.
-            const groups = [
-                {
-                    name: 'filename format',
-                    method: 'POST',
-                    path: '/api/settings/filename-format',
-                    body: { format: format },
-                    // The next rename already uses it, even if a later group fails.
-                    saved: () => {
-                        const currentFormat = document.getElementById('currentFormat');
-                        if (currentFormat) currentFormat.textContent = format;
-                    }
-                },
-                { name: 'log max size', method: 'POST', path: '/api/settings/log-max-bytes', body: { maxMB: logMaxSize } },
-                { name: 'issue number padding', method: 'POST', path: '/api/settings/issue-number-padding', body: { padding: issueNumberPadding } },
-                { name: 'database cleanup interval', method: 'POST', path: '/api/settings/database-cleanup-interval-hours', body: { hours: dbCleanupInterval } },
-                {
-                    name: 'external metadata settings',
-                    method: 'POST',
-                    path: '/api/settings/external-series-metadata',
-                    body: {
-                        enabled: enableExternalSeriesMetadata,
-                        // null keeps the stored key; '' clears it.
-                        comicVineApiKey: comicVineClearApiKey ? '' : (comicVineApiKey || null),
-                        comicVineBaseUrl: comicVineBaseUrl || 'https://comicvine.gamespot.com/api',
-                        enableMangaDex: enableMangaDexMetadata,
-                        mangaDexBaseUrl: mangaDexBaseUrl || 'https://api.mangadex.org',
-                        enableAniList: enableAniListMetadata,
-                        aniListBaseUrl: aniListBaseUrl || 'https://graphql.anilist.co'
-                    }
-                },
-                {
-                    name: 'series image limits',
-                    method: 'POST',
-                    path: '/api/settings/series-image-limits',
-                    body: {
-                        maxMB: seriesImageMaxMB,
-                        maxDownloadMB: seriesImageMaxDownloadMB,
-                        maxDimension: seriesImageMaxDimension
-                    }
-                },
-                {
-                    name: 'email settings',
-                    method: 'PUT',
-                    path: '/api/settings/email',
-                    body: {
-                        smtpHost: smtpHost || null,
-                        smtpPort: smtpPort,
-                        smtpUsername: smtpUsername || null,
-                        smtpPassword: smtpClearPassword ? '' : (smtpPasswordInput ? smtpPasswordInput : null),
-                        smtpUseSsl,
-                        smtpAllowInsecure,
-                        emailFromAddress: emailFromAddress || null,
-                        emailFromName: emailFromName || null,
-                        emailMaxAttachmentMb: emailMaxAttachmentMb
-                    },
-                    saved: () => {
-                        emailStatusCache = null;
-                    }
-                }
+            // Check what the server would reject before sending anything, so the
+            // user is told which field to fix.
+            const checks = [
+                [!format, 'Filename format cannot be empty'],
+                [isNaN(logMaxSize) || logMaxSize <= 0, 'Log max size must be a positive number'],
+                // The server keeps the size in bytes as a 32-bit integer.
+                [logMaxSize > SETTINGS_SERVER_LIMITS.logMaxSizeMB, `Log max size must be ${SETTINGS_SERVER_LIMITS.logMaxSizeMB} MB or less`],
+                [!Number.isInteger(issueNumberPadding) || issueNumberPadding < 0 || issueNumberPadding > 10, 'Issue number padding must be between 0 and 10'],
+                [isNaN(dbCleanupInterval) || dbCleanupInterval < 0, 'Database cleanup interval must be 0 or greater'],
+                [!pinned('stale_cleanup_max_removal_percent') && !isWholeNumberInRange(staleCleanupMaxRemovalPercent, SETTINGS_SERVER_LIMITS.staleCleanupMaxRemovalPercent),
+                    `Largest share removed without confirmation must be a whole number from 0 to ${SETTINGS_SERVER_LIMITS.staleCleanupMaxRemovalPercent}`],
+                [!pinned('stale_cleanup_missing_grace_hours') && !isWholeNumberInRange(staleCleanupMissingGraceHours, SETTINGS_SERVER_LIMITS.staleCleanupMissingGraceHours),
+                    `Remove missing files after must be a whole number of hours from 0 to ${SETTINGS_SERVER_LIMITS.staleCleanupMissingGraceHours}`],
+                [!pinned('processing_history_retention_days') && !isWholeNumberInRange(processingHistoryRetentionDays, SETTINGS_SERVER_LIMITS.processingHistoryRetentionDays),
+                    `Processing history retention must be a whole number of days from 0 to ${SETTINGS_SERVER_LIMITS.processingHistoryRetentionDays}`],
+                [!pinned('processing_history_max_entries') && !isWholeNumberInRange(processingHistoryMaxEntries, SETTINGS_SERVER_LIMITS.processingHistoryMaxEntries),
+                    `Maximum processing history entries must be a whole number from 0 to ${SETTINGS_SERVER_LIMITS.processingHistoryMaxEntries}`],
+                [!pinned('series_image_max_bytes') && (isNaN(seriesImageMaxMB) || seriesImageMaxMB <= 0), 'Max stored cover size must be a positive number'],
+                [!pinned('series_image_max_download_bytes') && (isNaN(seriesImageMaxDownloadMB) || seriesImageMaxDownloadMB <= 0), 'Max download size must be a positive number'],
+                [!pinned('series_image_max_bytes') && !pinned('series_image_max_download_bytes') && seriesImageMaxDownloadMB < seriesImageMaxMB,
+                    'Max download size must be greater than or equal to max stored cover size'],
+                [!pinned('series_image_max_dimension') && (isNaN(seriesImageMaxDimension) || seriesImageMaxDimension <= 0), 'Max cover dimension must be a positive number'],
+                [!pinned('smtp_port') && smtpPortValue && (isNaN(smtpPort) || smtpPort < 1 || smtpPort > 65535), 'SMTP port must be between 1 and 65535'],
+                [!pinned('email_max_attachment_mb') && emailMaxAttachmentValue && (isNaN(emailMaxAttachmentMb) || emailMaxAttachmentMb <= 0),
+                    'Max email attachment size must be a positive number'],
+                ...(emailRateLimit
+                    ? [
+                        ['email_max_sends_per_hour', emailRateLimit.maxSendsPerHour, 'Max emails per hour', 10000],
+                        ['email_max_sends_per_day', emailRateLimit.maxSendsPerDay, 'Max emails per day', 100000],
+                        ['email_min_seconds_between_sends', emailRateLimit.minSecondsBetweenSends, 'Minimum seconds between emails', 86400]
+                    ].map(([field, value, label, max]) => [
+                        !pinned(field) && !(value >= 0 && value <= max),
+                        `${label} must be a whole number from 0 to ${max}`
+                    ])
+                    : []),
+                [!pinned('email_max_attachment_mb') && emailMaxAttachmentMb > SETTINGS_SERVER_LIMITS.emailMaxAttachmentMB,
+                    `Max email attachment size must be ${SETTINGS_SERVER_LIMITS.emailMaxAttachmentMB} MB or less`],
+                [!pinned('error_reporting_max_issues_per_day') && (errorReportingMaxPerDay < 0 || errorReportingMaxPerDay > SETTINGS_SERVER_LIMITS.errorReportingMaxPerDay),
+                    `Maximum issues per day must be between 0 and ${SETTINGS_SERVER_LIMITS.errorReportingMaxPerDay}`],
+                [!pinned('error_reporting_dedupe_window_hours') && (errorReportingDedupeHours < 1 || errorReportingDedupeHours > SETTINGS_SERVER_LIMITS.errorReportingDedupeHours),
+                    `Recurrence comment interval must be between 1 and ${SETTINGS_SERVER_LIMITS.errorReportingDedupeHours} hours`]
             ];
+            const failedCheck = checks.find(([invalid]) => invalid);
+            if (failedCheck) {
+                showMessage(failedCheck[1], 'error');
+                return;
+            }
+
+            // One request for every group: the server applies all of it or none
+            // of it. In each group a field left out or sent as null keeps its
+            // value and a text field sent empty is cleared.
+            const settingsUpdate = {
+                filenameFormat: format,
+                logMaxMB: logMaxSize,
+                issueNumberPadding,
+                databaseCleanup: {
+                    intervalHours: dbCleanupInterval,
+                    staleCleanupMaxRemovalPercent: unlessPinned('stale_cleanup_max_removal_percent', staleCleanupMaxRemovalPercent),
+                    staleCleanupMissingGraceHours: unlessPinned('stale_cleanup_missing_grace_hours', staleCleanupMissingGraceHours),
+                    staleCleanupSentinelFile: unlessPinned('stale_cleanup_sentinel_file', staleCleanupSentinelFile),
+                    processingHistoryRetentionDays: unlessPinned('processing_history_retention_days', processingHistoryRetentionDays),
+                    processingHistoryMaxEntries: unlessPinned('processing_history_max_entries', processingHistoryMaxEntries)
+                },
+                externalSeriesMetadata: {
+                    enabled: unlessPinned('enable_external_series_metadata', enableExternalSeriesMetadata),
+                    // null keeps the stored key; '' clears it.
+                    comicVineApiKey: unlessPinned('comicvine_api_key_set', comicVineClearApiKey ? '' : (comicVineApiKey || null)),
+                    comicVineBaseUrl: unlessPinned('comicvine_base_url', comicVineBaseUrl || 'https://comicvine.gamespot.com/api'),
+                    enableMangaDex: unlessPinned('enable_mangadex_metadata', enableMangaDexMetadata),
+                    mangaDexBaseUrl: unlessPinned('mangadex_base_url', mangaDexBaseUrl || 'https://api.mangadex.org'),
+                    enableAniList: unlessPinned('enable_anilist_metadata', enableAniListMetadata),
+                    aniListBaseUrl: unlessPinned('anilist_base_url', aniListBaseUrl || 'https://graphql.anilist.co'),
+                    fillComicInfoFromProviders: unlessPinned('fill_comicinfo_from_providers', fillComicInfoFromProviders)
+                },
+                seriesImageLimits: {
+                    maxMB: unlessPinned('series_image_max_bytes', seriesImageMaxMB),
+                    maxDownloadMB: unlessPinned('series_image_max_download_bytes', seriesImageMaxDownloadMB),
+                    maxDimension: unlessPinned('series_image_max_dimension', seriesImageMaxDimension)
+                },
+                email: {
+                    smtpHost: unlessPinned('smtp_host', smtpHost),
+                    smtpPort: unlessPinned('smtp_port', smtpPort),
+                    smtpUsername: unlessPinned('smtp_username', smtpUsername),
+                    smtpPassword: unlessPinned('smtp_password_set', smtpClearPassword ? '' : (smtpPasswordInput || null)),
+                    smtpUseSsl: unlessPinned('smtp_use_ssl', smtpUseSsl),
+                    smtpAllowInsecure: unlessPinned('smtp_allow_insecure', smtpAllowInsecure),
+                    emailFromAddress: unlessPinned('email_from_address', emailFromAddress),
+                    emailFromName: unlessPinned('email_from_name', emailFromName),
+                    emailMaxAttachmentMb: unlessPinned('email_max_attachment_mb', emailMaxAttachmentMb)
+                }
+            };
 
             if (emailRateLimit) {
-                groups.push({
-                    name: 'email rate limit',
-                    method: 'PUT',
-                    path: '/api/settings/email-rate-limit',
-                    body: emailRateLimit
-                });
+                settingsUpdate.emailRateLimit = {
+                    maxSendsPerHour: unlessPinned('email_max_sends_per_hour', emailRateLimit.maxSendsPerHour),
+                    maxSendsPerDay: unlessPinned('email_max_sends_per_day', emailRateLimit.maxSendsPerDay),
+                    minSecondsBetweenSends: unlessPinned('email_min_seconds_between_sends', emailRateLimit.minSecondsBetweenSends)
+                };
             }
 
             const suwayomiEnabledEl = document.getElementById('enableSuwayomiCheckbox');
@@ -1501,80 +1465,68 @@
                 const suwayomiClearPasswordChecked = document.getElementById('suwayomiClearPasswordCheckbox').checked;
                 const suwayomiDownloadsDirectoryEl = document.getElementById('suwayomiDownloadsDirectory');
                 const suwayomiImportDirectoryEl = document.getElementById('suwayomiImportDirectory');
-                const suwayomiBody = {
-                    enabled: suwayomiEnabledEl.checked,
-                    baseUrl: document.getElementById('suwayomiBaseUrl').value.trim() || null,
-                    username: document.getElementById('suwayomiUsername').value.trim() || null,
+                settingsUpdate.suwayomi = {
+                    enabled: unlessPinned('enable_suwayomi', suwayomiEnabledEl.checked),
+                    baseUrl: unlessPinned('suwayomi_base_url', document.getElementById('suwayomiBaseUrl').value.trim()),
+                    username: unlessPinned('suwayomi_username', document.getElementById('suwayomiUsername').value.trim()),
                     // null keeps the stored password; '' clears it.
-                    password: suwayomiClearPasswordChecked ? '' : (suwayomiPasswordInput || null),
+                    password: unlessPinned('suwayomi_password_set', suwayomiClearPasswordChecked ? '' : (suwayomiPasswordInput || null)),
                     // Import folders: '' clears (the downloads folder turns importing off).
-                    downloadsDirectory: suwayomiDownloadsDirectoryEl ? suwayomiDownloadsDirectoryEl.value.trim() : null,
-                    importDirectory: suwayomiImportDirectoryEl ? suwayomiImportDirectoryEl.value.trim() : null
+                    downloadsDirectory: unlessPinned('suwayomi_downloads_directory', suwayomiDownloadsDirectoryEl ? suwayomiDownloadsDirectoryEl.value.trim() : null),
+                    importDirectory: unlessPinned('suwayomi_import_directory', suwayomiImportDirectoryEl ? suwayomiImportDirectoryEl.value.trim() : null)
                 };
-                groups.push({
-                    name: 'Suwayomi settings',
-                    method: 'PUT',
-                    path: '/api/settings/suwayomi',
-                    body: suwayomiBody,
-                    saved: async () => {
-                        suwayomiStatusPromise = null;
-                        await refreshSuwayomiAvailability();
-                    }
-                });
             }
 
             const errorReportingEnabledEl = document.getElementById('errorReportingEnabledCheckbox');
             if (errorReportingEnabledEl) {
                 const errorReportingTokenInput = document.getElementById('errorReportingToken').value;
                 const errorReportingClearTokenChecked = document.getElementById('errorReportingClearTokenCheckbox').checked;
-                groups.push({
-                    name: 'error reporting settings',
-                    method: 'PUT',
-                    path: '/api/settings/error-reporting',
-                    body: {
-                        enabled: errorReportingEnabledEl.checked,
-                        // null keeps the stored token; '' clears it.
-                        gitHubToken: errorReportingClearTokenChecked ? '' : (errorReportingTokenInput || null),
-                        assignee: document.getElementById('errorReportingAssignee').value.trim() || null,
-                        maxIssuesPerDay: errorReportingMaxPerDay,
-                        dedupeWindowHours: errorReportingDedupeHours,
-                        commentOnRecurrence: document.getElementById('errorReportingCommentCheckbox').checked
-                    }
-                });
+                settingsUpdate.errorReporting = {
+                    enabled: unlessPinned('error_reporting_enabled', errorReportingEnabledEl.checked),
+                    // null keeps the stored token; '' clears it.
+                    gitHubToken: unlessPinned('error_reporting_github_token_set', errorReportingClearTokenChecked ? '' : (errorReportingTokenInput || null)),
+                    assignee: unlessPinned('error_reporting_assignee', document.getElementById('errorReportingAssignee').value.trim()),
+                    maxIssuesPerDay: unlessPinned('error_reporting_max_issues_per_day', errorReportingMaxPerDay),
+                    dedupeWindowHours: unlessPinned('error_reporting_dedupe_window_hours', errorReportingDedupeHours),
+                    commentOnRecurrence: unlessPinned('error_reporting_comment_on_recurrence', document.getElementById('errorReportingCommentCheckbox').checked)
+                };
             }
 
-            const savedGroups = [];
-            for (const group of groups) {
-                try {
-                    await saveSettingsGroup(group.method, group.path, group.body);
-                } catch (error) {
-                    if (error?.authHandled) return;
-                    // Nothing is rolled back and the form keeps the edits for a
-                    // retry, so say which groups did take effect.
-                    const reason = String(error?.message || '').trim();
-                    let message = reason ? `Failed to save ${group.name}: ${reason}` : `Failed to save ${group.name}`;
-                    if (!/[.!?]$/.test(message)) message += '.';
-                    message += savedGroups.length
-                        ? ` Only these settings were saved: ${savedGroups.join(', ')}.`
-                        : ' No other settings were saved.';
-                    showMessage(message, 'error');
-                    return;
-                }
-                savedGroups.push(group.name);
-                if (group.saved) await group.saved();
+            const notifications = collectNotificationSettings(unlessPinned);
+            if (notifications) {
+                settingsUpdate.notifications = notifications;
             }
 
-            showMessage('Settings saved successfully! Changes to log rotation, external metadata, and database cleanup will take effect on restart.', 'success');
-            loadSettings();
+            settingsUpdate.opds = { enabled: unlessPinned('opds_enabled', document.getElementById('opdsEnabledCheckbox').checked) };
+
+            try {
+                await saveAllSettings(settingsUpdate);
+            } catch (error) {
+                if (error.authHandled) return;
+                let message = `Failed to save settings: ${error.message}`;
+                if (!/[.!?]$/.test(message)) message += '.';
+                // A refused save is all or nothing, and the form keeps the edits for a retry.
+                if (error.nothingSaved) message += ' No settings were saved.';
+                showMessage(message, 'error', { reference: error });
+                return;
+            }
+
+            // The new values are in effect once the request returns, so a status
+            // read from here on sees them.
+            emailStatusCache = null;
+            if (settingsUpdate.suwayomi) {
+                suwayomiStatusPromise = null;
+                await refreshSuwayomiAvailability();
+            }
+
+            if (await loadSettings(true) !== false) {
+                showMessage('Settings saved. Changes to log rotation take effect after a restart.', 'success');
+            }
         }
-        
+
         async function sendErrorReportingTest() {
             try {
-                const response = await fetch(apiUrl('/api/error-reports/test'), {
-                    method: 'POST',
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
+                const response = await apiFetch('/api/error-reports/test', { method: 'POST', json: false });
                 const result = await response.json().catch(() => null);
                 if (!response.ok) {
                     showMessage((result && result.error) || `Test report failed (HTTP ${response.status})`, 'error');
@@ -1586,17 +1538,126 @@
             }
         }
 
+        // =================================================================
+        // Notifications and media-server rescans
+        // =================================================================
+
+        // One entry per target. `prefix` is the start of its element ids and
+        // of its GET /api/settings fields; `secret` names the write-only
+        // field (a token, API key or a webhook URL that carries a token).
+        const NOTIFICATION_TARGETS = Object.freeze([
+            { key: 'ntfy', prefix: 'notifyNtfy', field: 'notify_ntfy', secret: 'token', secretSet: 'token_set', topic: true,
+              noSecretHint: 'Optional: only needed when the topic requires a token.', events: 'push' },
+            { key: 'gotify', prefix: 'notifyGotify', field: 'notify_gotify', secret: 'token', secretSet: 'token_set',
+              noSecretHint: 'Required: the token of a Gotify application.', events: 'push' },
+            { key: 'discord', prefix: 'notifyDiscord', field: 'notify_discord', secret: 'url', secretSet: 'webhook_url_set',
+              noSecretHint: 'Paste the webhook URL. It is stored on this instance and never shown again.', events: 'push' },
+            { key: 'webhook', prefix: 'notifyWebhook', field: 'notify_webhook', secret: 'url', secretSet: 'url_set',
+              noSecretHint: 'Paste the URL. It is stored on this instance and never shown again.', events: 'push' },
+            { key: 'komga', prefix: 'notifyKomga', field: 'notify_komga', secret: 'token', secretSet: 'api_key_set', library: true,
+              noSecretHint: 'Required: an API key from an administrator account.', events: 'rescan' },
+            { key: 'kavita', prefix: 'notifyKavita', field: 'notify_kavita', secret: 'token', secretSet: 'api_key_set', library: true,
+              noSecretHint: 'Required: an Auth Key from an administrator account.', events: 'rescan' }
+        ]);
+
+        // Checkbox id suffix to event name, per kind of target.
+        const NOTIFICATION_EVENTS = Object.freeze({
+            push: Object.freeze({
+                NewChapters: 'new-chapters',
+                Suwayomi: 'suwayomi-import-failed',
+                JobFailed: 'job-failed',
+                JobFindings: 'job-findings'
+            }),
+            rescan: Object.freeze({
+                NewChapters: 'new-chapters',
+                LibraryChanged: 'library-changed'
+            })
+        });
+
+        function loadNotificationSettings(settingsData) {
+            for (const target of NOTIFICATION_TARGETS) {
+                const element = suffix => document.getElementById(target.prefix + suffix);
+                if (!element('EnabledCheckbox')) continue;
+
+                element('EnabledCheckbox').checked = !!settingsData[`${target.field}_enabled`];
+                if (target.secret === 'token') {
+                    element('Url').value = settingsData[`${target.field}_url`] || '';
+                }
+                if (target.topic) element('Topic').value = settingsData[`${target.field}_topic`] || '';
+                if (target.library) element('LibraryId').value = settingsData[`${target.field}_library_id`] || '';
+
+                // A secret is never returned by the API; only whether one is stored.
+                const stored = !!settingsData[`${target.field}_${target.secretSet}`];
+                const secretName = target.secret === 'url' ? 'Url' : 'Token';
+                element(secretName).value = '';
+                element(`Clear${secretName}Checkbox`).checked = false;
+                element(`${secretName}Hint`).textContent = stored ? 'Leave blank to keep the stored value.' : target.noSecretHint;
+
+                const chosen = new Set(String(settingsData[`${target.field}_events`] || '').split(','));
+                for (const [suffix, event] of Object.entries(NOTIFICATION_EVENTS[target.events])) {
+                    element(`Event${suffix}`).checked = chosen.has(event);
+                }
+            }
+        }
+
+        /** The "notifications" group of a Save Settings request; null when the section is not on the page. */
+        function collectNotificationSettings(unlessPinned) {
+            if (!document.getElementById('notifyNtfyEnabledCheckbox')) return null;
+
+            const group = {};
+            for (const target of NOTIFICATION_TARGETS) {
+                const element = suffix => document.getElementById(target.prefix + suffix);
+                const value = suffix => element(suffix).value.trim();
+                const pinnedOr = (suffix, resolved) => unlessPinned(`${target.field}_${suffix}`, resolved);
+
+                // Blank keeps the stored secret; clearing it is a separate choice.
+                const secretName = target.secret === 'url' ? 'Url' : 'Token';
+                const secretValue = element(secretName).value;
+                const secret = element(`Clear${secretName}Checkbox`).checked ? '' : (secretValue || null);
+
+                const update = {
+                    enabled: pinnedOr('enabled', element('EnabledCheckbox').checked),
+                    url: target.secret === 'url' ? pinnedOr(target.secretSet, secret) : pinnedOr('url', value('Url')),
+                    events: pinnedOr('events', Object.entries(NOTIFICATION_EVENTS[target.events])
+                        .filter(([suffix]) => element(`Event${suffix}`).checked)
+                        .map(([, event]) => event)
+                        .join(','))
+                };
+                if (target.secret === 'token') update.token = pinnedOr(target.secretSet, secret);
+                if (target.topic) update.topic = pinnedOr('topic', value('Topic'));
+                if (target.library) update.libraryId = pinnedOr('library_id', value('LibraryId'));
+                group[target.key] = update;
+            }
+            return group;
+        }
+
+        /** Sends a target's test notification with its saved settings and shows the answer next to its button. */
+        async function sendNotificationTest(key) {
+            const target = NOTIFICATION_TARGETS.find(entry => entry.key === key);
+            const result = document.getElementById(`${target.prefix}TestResult`);
+            result.textContent = 'Sending…';
+            try {
+                const response = await apiFetch(`/api/notifications/${key}/test`, { method: 'POST', json: false });
+                const body = await response.json().catch(() => null);
+                if (response.ok) {
+                    result.textContent = body?.message || 'Test sent.';
+                    showMessage(result.textContent, 'success');
+                    return;
+                }
+                // The target's own error, in words that are safe to show.
+                result.textContent = body?.error || `Test failed (HTTP ${response.status}).`;
+                showMessage(result.textContent, 'error');
+            } catch (error) {
+                if (error.authHandled) return;
+                result.textContent = `Could not send the test: ${error.message}`;
+                showMessage(result.textContent, 'error', { reference: error });
+            }
+        }
+
         async function resetFilenameFormat() {
             if (!settingsLoaded || !userCapabilities.canAdminister) return;
             try {
-                const response = await fetch(apiUrl('/api/settings/filename-format'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
+                const data = await apiFetch('/api/settings/filename-format');
                 if (!data.default) {
                     throw new Error('No default format was returned');
                 }
@@ -1604,33 +1665,52 @@
                 document.getElementById('filenameFormat').value = data.default;
                 showMessage('Reset to default format', 'info');
             } catch (error) {
-                showMessage('Failed to reset format: ' + error.message, 'error');
+                showMessage('Failed to reset format: ' + error.message, 'error', { reference: error });
             }
         }
         
+        /**
+         * "Clean Database Now". The server refuses (409) while the library looks
+         * unmounted, and asks for confirmation (409 with requiresConfirmation)
+         * before removing more than the configured share of the library, files
+         * that have not stayed missing for the grace period, or when the watched
+         * folder holds no comics; the request is then repeated with ?confirm=true
+         * only if the administrator agrees.
+         */
         async function cleanupDatabaseNow() {
             try {
                 showMessage('Starting database cleanup...', 'info');
-                
-                const response = await fetch(apiUrl('/api/settings/cleanup-database'), {
-                    method: 'POST',
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+
+                const post = confirmed => apiFetch(
+                    '/api/settings/cleanup-database' + (confirmed ? '?confirm=true' : ''),
+                    { method: 'POST', json: false });
+
+                let response = await post(false);
+                let result = await response.json().catch(() => ({}));
+
+                if (response.status === 409 && result.requiresConfirmation) {
+                    if (!confirm(`${result.message}\n\nRemove these entries anyway?`)) {
+                        showMessage('Database cleanup cancelled. No entries were removed.', 'info');
+                        return;
+                    }
+                    response = await post(true);
+                    result = await response.json().catch(() => ({}));
                 }
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    showMessage(`Database cleanup completed. Removed ${result.removedCount} stale entries.`, 'success');
+
+                if (response.ok) {
+                    if (result.success) {
+                        showMessage(result.message || `Database cleanup completed. Removed ${result.removedCount} stale entries.`, 'success');
+                    } else {
+                        showMessage(result.error || 'Failed to cleanup database', 'error');
+                    }
+                } else if (response.status === 409) {
+                    // Refused (the library looks unmounted); nothing was removed.
+                    showMessage(result.message || 'Database cleanup was skipped. No entries were removed.', 'warning');
                 } else {
-                    showMessage(result.error || 'Failed to cleanup database', 'error');
+                    throw apiResponseError(response, result.error || undefined);
                 }
             } catch (error) {
-                showMessage('Failed to cleanup database: ' + error.message, 'error');
+                showMessage('Failed to cleanup database: ' + error.message, 'error', { reference: error });
             }
         }
 
@@ -1657,24 +1737,10 @@
 
         /** Fetch a /api/backups endpoint; throws an Error carrying `status` (and the response's `correlationId`) on failure. */
         async function fetchBackupsApi(path, options = {}) {
-            const response = await fetch(apiUrl(path), {
-                credentials: 'include',
-                ...options,
-                headers: options.headers || getAuthHeaders()
-            });
-            if (handleAuthError(response)) {
-                const error = new Error('Authentication required');
-                error.status = response.status;
-                error.authHandled = true;
-                throw error;
-            }
+            // The caller reads the body: a download is a blob, not JSON.
+            const response = await apiFetch(path, { ...options, json: false });
             if (!response.ok) {
-                let message = `HTTP error! status: ${response.status}`;
-                try {
-                    const body = await response.json();
-                    if (body && (body.error || body.message)) message = body.error || body.message;
-                } catch (_) { /* non-JSON error body */ }
-                throw apiResponseError(response, message);
+                throw apiResponseError(response, await apiErrorMessage(response));
             }
             return response;
         }
@@ -1844,16 +1910,11 @@
 
             const formData = new FormData();
             formData.append('file', file);
-            // Let the browser set the multipart Content-Type (with boundary);
-            // getAuthHeaders() defaults it to JSON.
-            const headers = getAuthHeaders();
-            delete headers['Content-Type'];
             try {
                 showMessage('Uploading and validating backup...', 'info');
                 const response = await fetchBackupsApi('/api/backups/upload-restore', {
                     method: 'POST',
-                    body: formData,
-                    headers
+                    body: formData
                 });
                 reportRestoreStaged(await response.json());
             } catch (error) {

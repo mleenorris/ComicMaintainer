@@ -22,7 +22,8 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     private readonly Mock<ISeriesLibraryService> _library = new();
     private readonly Mock<ISeriesImageStore> _imageStore = new();
     private readonly Mock<IExternalSeriesMetadataService> _external = new();
-    private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<ISeriesCoverArtifactWriter> _coverArtifacts = new();
+    private readonly Mock<IBatchJobRegistry> _jobRegistry = new();
     private readonly string _dir;
     private readonly CancellationTokenSource _cts = new();
 
@@ -67,7 +68,8 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
             _library.Object,
             _imageStore.Object,
             _external.Object,
-            _processor.Object,
+            _coverArtifacts.Object,
+            _jobRegistry.Object,
             NullLogger<SeriesImagesController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = http }
@@ -120,7 +122,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     private JobCapture CaptureJob(Guid jobId)
     {
         var capture = new JobCapture();
-        _processor.Setup(p => p.RunCustomBatchJobAsync(
+        _jobRegistry.Setup(p => p.RunCustomBatchJobAsync(
                 It.IsAny<string>(),
                 It.IsAny<IEnumerable<string>>(),
                 It.IsAny<Func<string, CancellationToken, Task<bool>>>(),
@@ -598,17 +600,13 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task Upload_UnexpectedFailure_Returns500()
+    public async Task Upload_UnexpectedFailure_Escapes()
     {
         _cache.Setup(c => c.SetUserImageAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("disk full"));
 
         using var png = new MemoryStream(PngSignature);
-        var result = await CreateController().Upload("Batman", PngUpload(png), CancellationToken.None);
-
-        var obj = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(500, obj.StatusCode);
-        Assert.Equal("Error saving series image", obj.Value);
+        await Assert.ThrowsAsync<IOException>(() => CreateController().Upload("Batman", PngUpload(png), CancellationToken.None));
     }
 
     [Fact]
@@ -694,16 +692,26 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchCandidates_ProviderFailure_Returns500()
+    public async Task SearchCandidates_ProviderFailure_Escapes()
     {
         _external.Setup(e => e.SearchSeriesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("provider down"));
 
+        await Assert.ThrowsAsync<HttpRequestException>(() => CreateController().SearchCandidates("Batman", 10, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SearchCandidates_ProvidersUnavailable_Returns503WithTheReason()
+    {
+        _external.Setup(e => e.SearchSeriesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ExternalMetadataUnavailableException(
+                "MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex request timed out: api.internal:443"));
+
         var result = await CreateController().SearchCandidates("Batman", 10, CancellationToken.None);
 
         var obj = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(500, obj.StatusCode);
-        Assert.Equal("Error searching provider image candidates", obj.Value);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, obj.StatusCode);
+        Assert.Equal("MangaDex did not answer in time", obj.Value);
     }
 
     [Fact]
@@ -718,16 +726,12 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchCandidates_CancellationTheCallerDidNotAskFor_Returns500()
+    public async Task SearchCandidates_CancellationTheCallerDidNotAskFor_Escapes()
     {
         _external.Setup(e => e.SearchSeriesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TaskCanceledException("timed out"));
 
-        var result = await CreateController().SearchCandidates("Batman", 10, _cts.Token);
-
-        var obj = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(500, obj.StatusCode);
-        Assert.Equal("Error searching provider image candidates", obj.Value);
+        await Assert.ThrowsAsync<TaskCanceledException>(() => CreateController().SearchCandidates("Batman", 10, _cts.Token));
     }
 
     // ---- ApplyFromProvider --------------------------------------------------------------
@@ -805,17 +809,13 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task ApplyFromProvider_UnexpectedFailure_Returns500()
+    public async Task ApplyFromProvider_UnexpectedFailure_Escapes()
     {
         _cache.Setup(c => c.ApplyExternalImageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("timeout"));
 
-        var result = await CreateController().ApplyFromProvider(
-            "Batman", new SeriesImagesController.ApplyFromProviderRequest { ImageUrl = "https://img/a.jpg" }, CancellationToken.None);
-
-        var obj = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(500, obj.StatusCode);
-        Assert.Equal("Error applying provider image", obj.Value);
+        await Assert.ThrowsAsync<HttpRequestException>(() => CreateController().ApplyFromProvider(
+            "Batman", new SeriesImagesController.ApplyFromProviderRequest { ImageUrl = "https://img/a.jpg" }, CancellationToken.None));
     }
 
     [Fact]
@@ -830,17 +830,13 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task ApplyFromProvider_CancellationTheCallerDidNotAskFor_Returns500()
+    public async Task ApplyFromProvider_CancellationTheCallerDidNotAskFor_Escapes()
     {
         _cache.Setup(c => c.ApplyExternalImageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TaskCanceledException("timed out"));
 
-        var result = await CreateController().ApplyFromProvider(
-            "Batman", new SeriesImagesController.ApplyFromProviderRequest { ImageUrl = "https://img/a.jpg" }, _cts.Token);
-
-        var obj = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(500, obj.StatusCode);
-        Assert.Equal("Error applying provider image", obj.Value);
+        await Assert.ThrowsAsync<TaskCanceledException>(() => CreateController().ApplyFromProvider(
+            "Batman", new SeriesImagesController.ApplyFromProviderRequest { ImageUrl = "https://img/a.jpg" }, _cts.Token));
     }
 
     // ---- ApplyCurrentToAll / ApplyCurrentToSelected -------------------------------------
@@ -856,7 +852,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
             new SeriesLibraryDto { Title = "Flash", CanonicalTitle = "Flash", HasExternalImage = false });
         var jobId = Guid.NewGuid();
         var job = CaptureJob(jobId);
-        _cache.Setup(c => c.ReapplyImageArtifactsAsync("Saga", true, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _coverArtifacts.Setup(c => c.ReapplyAsync("Saga", It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         var result = await CreateController().ApplyCurrentToAll(_cts.Token);
 
@@ -874,22 +870,18 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         // the job's progress tracks real work.
         using var itemCts = new CancellationTokenSource();
         Assert.True(await job.ItemOperation!("Saga", itemCts.Token));
-        _cache.Verify(c => c.ReapplyImageArtifactsAsync("Saga", true, itemCts.Token), Times.Once);
+        _coverArtifacts.Verify(c => c.ReapplyAsync("Saga", itemCts.Token), Times.Once);
     }
 
     [Fact]
-    public async Task ApplyCurrentToAll_LibraryFailure_Returns500()
+    public async Task ApplyCurrentToAll_LibraryFailure_Escapes()
     {
         _library.Setup(l => l.GetSeriesAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(),
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("db down"));
 
-        var result = await CreateController().ApplyCurrentToAll(CancellationToken.None);
-
-        var obj = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(500, obj.StatusCode);
-        Assert.Equal("Error updating series covers", obj.Value);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController().ApplyCurrentToAll(CancellationToken.None));
     }
 
     [Fact]
@@ -955,19 +947,15 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task ApplyCurrentToSelected_LibraryFailure_Returns500()
+    public async Task ApplyCurrentToSelected_LibraryFailure_Escapes()
     {
         _library.Setup(l => l.GetSeriesAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(),
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("db down"));
 
-        var result = await CreateController().ApplyCurrentToSelected(
-            new SeriesImagesController.ApplyCurrentSelectedRequest { Series = new() { "Batman" } }, CancellationToken.None);
-
-        var obj = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(500, obj.StatusCode);
-        Assert.Equal("Error updating series covers", obj.Value);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController().ApplyCurrentToSelected(
+            new SeriesImagesController.ApplyCurrentSelectedRequest { Series = new() { "Batman" } }, CancellationToken.None));
     }
 
     // ---- Clear --------------------------------------------------------------------------
@@ -1006,15 +994,11 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task Clear_UnexpectedFailure_Returns500()
+    public async Task Clear_UnexpectedFailure_Escapes()
     {
         _cache.Setup(c => c.ClearImageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("locked"));
 
-        var result = await CreateController().Clear("batman", CancellationToken.None);
-
-        var obj = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(500, obj.StatusCode);
-        Assert.Equal("Error clearing series image", obj.Value);
+        await Assert.ThrowsAsync<IOException>(() => CreateController().Clear("batman", CancellationToken.None));
     }
 }

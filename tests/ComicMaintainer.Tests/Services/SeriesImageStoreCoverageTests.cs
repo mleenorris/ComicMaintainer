@@ -4,6 +4,8 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Tests.Helpers;
+using ComicMaintainer.Core.Utilities;
 using ImageMagick;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -145,11 +147,8 @@ public class SeriesImageStoreCoverageTests : IDisposable
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             store.DownloadAsync("series-a", url, previousFile: null));
 
-        // Without OS IPv6 support the resolver narrows lookups to IPv4, so an
-        // IPv6 literal resolves to no address and is rejected for that reason.
-        Assert.Contains(
-            Socket.OSSupportsIPv6 ? "non-public address" : "Image host did not resolve to any address",
-            ex.Message);
+        // IP literals are checked as they are, without a DNS lookup.
+        Assert.Contains("non-public address", ex.Message);
         Assert.Equal(0, handler.RequestCount);
     }
 
@@ -177,36 +176,146 @@ public class SeriesImageStoreCoverageTests : IDisposable
     [Theory]
     [InlineData("https://[2001:4860:4860::8888]/x.png")]
     [InlineData("http://[::ffff:8.8.8.8]/x.png")]
-    public async Task DownloadAsync_PublicIpv6Address_IsOnlyRejectedWithoutIpv6Support(string url)
+    public async Task DownloadAsync_PublicIpv6Address_PassesGuardAndIssuesRequest(string url)
     {
         var (store, handler) = CreateStore(respond: _ => NotFound());
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             store.DownloadAsync("series-a", url, previousFile: null));
 
-        if (Socket.OSSupportsIPv6)
-        {
-            Assert.Equal("Image download failed: HTTP 404 Not Found", ex.Message);
-            Assert.Equal(1, handler.RequestCount);
-        }
-        else
-        {
-            Assert.Equal("Image host did not resolve to any address", ex.Message);
-            Assert.Equal(0, handler.RequestCount);
-        }
+        Assert.Equal("Image download failed: HTTP 404 Not Found", ex.Message);
+        Assert.Equal(1, handler.RequestCount);
     }
 
-    [Fact]
-    public async Task DownloadAsync_UnspecifiedAddress_IsReportedAsUnresolvable()
+    [Theory]
+    [InlineData("http://0.0.0.0/x.png")]
+    [InlineData("http://[::]/x.png")]
+    public async Task DownloadAsync_UnspecifiedAddress_IsRejectedBeforeAnyRequest(string url)
     {
         var (store, handler) = CreateStore();
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            store.DownloadAsync("series-a", "http://0.0.0.0/x.png", previousFile: null));
+            store.DownloadAsync("series-a", url, previousFile: null));
 
-        Assert.StartsWith("Cannot resolve image host:", ex.Message);
-        Assert.NotNull(ex.InnerException);
+        // Connecting to the unspecified address reaches the host itself on Linux.
+        Assert.Contains("non-public address", ex.Message);
         Assert.Equal(0, handler.RequestCount);
+    }
+
+    // ---- redirects ---------------------------------------------------------
+    // The client follows no redirects (PublicNetworkGuard.CreateHandler); the store follows them itself so that a
+    // public URL cannot bounce the request to the LAN, the Docker network or a metadata endpoint.
+
+    [Theory]
+    [InlineData("http://169.254.169.254/latest/meta-data/")]
+    [InlineData("http://192.168.1.1/admin")]
+    [InlineData("http://127.0.0.1:4567/api/graphql")]
+    [InlineData("http://[::ffff:10.0.0.1]/x.png")]
+    [InlineData("http://localhost/x.png")]
+    public async Task DownloadAsync_RedirectToANonPublicAddress_IsRejectedWithoutFollowingIt(string target)
+    {
+        var (store, handler) = CreateStore(respond: _ => Redirect(HttpStatusCode.Found, target));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.DownloadAsync("series-a", "http://8.8.8.8/x.png", previousFile: null));
+
+        Assert.Contains("non-public address", ex.Message);
+        Assert.Equal(1, handler.RequestCount);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.MovedPermanently)]
+    [InlineData(HttpStatusCode.Found)]
+    [InlineData(HttpStatusCode.SeeOther)]
+    [InlineData(HttpStatusCode.TemporaryRedirect)]
+    [InlineData(HttpStatusCode.PermanentRedirect)]
+    public async Task DownloadAsync_RedirectToAPublicAddress_IsFollowed(HttpStatusCode status)
+    {
+        var png = CreatePng();
+        var requested = new List<string>();
+        var (store, handler) = CreateStore(respond: request =>
+        {
+            requested.Add(request.RequestUri!.ToString());
+            return request.RequestUri!.Host == "8.8.8.8"
+                ? Redirect(status, "https://8.8.4.4/covers/x.png")
+                : ImageResponse(png, "image/png");
+        });
+
+        var result = await store.DownloadAsync("series-a", "http://8.8.8.8/x.png", previousFile: null);
+
+        Assert.Equal("image/png", result.ContentType);
+        Assert.Equal(["http://8.8.8.8/x.png", "https://8.8.4.4/covers/x.png"], requested);
+        Assert.Equal(2, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task DownloadAsync_RelativeRedirect_IsResolvedAgainstTheCurrentUrl()
+    {
+        var png = CreatePng();
+        var requested = new List<string>();
+        var (store, _) = CreateStore(respond: request =>
+        {
+            requested.Add(request.RequestUri!.ToString());
+            return request.RequestUri!.AbsolutePath == "/a/x.png"
+                ? Redirect(HttpStatusCode.Found, "../b/y.png", absolute: false)
+                : ImageResponse(png, "image/png");
+        });
+
+        await store.DownloadAsync("series-a", "http://8.8.8.8/a/x.png", previousFile: null);
+
+        Assert.Equal(["http://8.8.8.8/a/x.png", "http://8.8.8.8/b/y.png"], requested);
+    }
+
+    [Fact]
+    public async Task DownloadAsync_MoreThanThreeRedirects_AreRefused()
+    {
+        var hop = 0;
+        var (store, handler) = CreateStore(respond: _ => Redirect(HttpStatusCode.Found, $"http://8.8.8.8/hop{++hop}.png"));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.DownloadAsync("series-a", "http://8.8.8.8/x.png", previousFile: null));
+
+        Assert.Equal("Image download failed: more than 3 redirects", ex.Message);
+        Assert.Equal(4, handler.RequestCount);
+    }
+
+    [Theory]
+    [InlineData("http://8.8.4.4/x.png", "Image download failed: an https URL redirected to http")]
+    [InlineData("file:///etc/passwd", "Unsupported image URL scheme: 'file'")]
+    public async Task DownloadAsync_RedirectToADowngradeOrAnotherScheme_IsRefused(string target, string expected)
+    {
+        var (store, handler) = CreateStore(respond: _ => Redirect(HttpStatusCode.Found, target));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.DownloadAsync("series-a", "https://8.8.8.8/x.png", previousFile: null));
+
+        Assert.Equal(expected, ex.Message);
+        Assert.Equal(1, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task DownloadAsync_RedirectWithoutLocation_FailsTheDownload()
+    {
+        var (store, _) = CreateStore(respond: _ => new HttpResponseMessage(HttpStatusCode.Found));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.DownloadAsync("series-a", "http://8.8.8.8/x.png", previousFile: null));
+
+        Assert.Equal("Image download failed: HTTP 302 redirect without a Location", ex.Message);
+    }
+
+    // The host resolved to a public address for the check and to another when the handler connected (DNS rebinding).
+    [Fact]
+    public async Task DownloadAsync_ConnectionRefusedByTheGuard_IsReportedAsANonPublicAddress()
+    {
+        var (store, _) = CreateStore(respond: _ => throw new HttpRequestException(
+            "Connection failed", new NonPublicAddressException("Host 'rebind.example' resolves to a non-public address")));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.DownloadAsync("series-a", "http://8.8.8.8/x.png", previousFile: null));
+
+        Assert.Equal("Image host '8.8.8.8' resolves to a non-public address", ex.Message);
+        Assert.IsType<NonPublicAddressException>(ex.InnerException);
     }
 
     [Fact]
@@ -479,7 +588,7 @@ public class SeriesImageStoreCoverageTests : IDisposable
         Directory.CreateDirectory(Path.Join(_cacheDir, fileName));
         await using var stream = new MemoryStream(JpegMagic);
 
-        await Assert.ThrowsAnyAsync<IOException>(() =>
+        await TestIO.AssertFileSystemErrorAsync(() =>
             store.SaveUserImageAsync("series-a", stream, "image/jpeg", previousFile: null));
 
         Assert.False(File.Exists(Path.Join(_cacheDir, fileName + ".tmp")));
@@ -600,6 +709,13 @@ public class SeriesImageStoreCoverageTests : IDisposable
 
     private static HttpResponseMessage NotFound()
         => new(HttpStatusCode.NotFound) { ReasonPhrase = "Not Found" };
+
+    private static HttpResponseMessage Redirect(HttpStatusCode status, string location, bool absolute = true)
+    {
+        var response = new HttpResponseMessage(status);
+        response.Headers.Location = new Uri(location, absolute ? UriKind.Absolute : UriKind.Relative);
+        return response;
+    }
 
     private static HttpResponseMessage ImageResponse(byte[] payload, string? contentType)
     {

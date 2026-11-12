@@ -1,6 +1,8 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Tests.Helpers;
+using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -33,7 +35,9 @@ public sealed class FilesControllerBrowseTests
             _history.Object,
             _seriesLibrary.Object,
             NullLogger<FilesController>.Instance,
-            _settings.Object);
+            _settings.Object,
+            TestFolderCombineService.Create(_fileStore.Object, _processor.Object, Mock.Of<IBatchJobRegistry>(), _history.Object, _seriesLibrary.Object, _settings.Object),
+            Mock.Of<IEventBroadcaster>(), Mock.Of<ISeriesNameResolver>(), Mock.Of<IScheduledJobRunner>(), new FileOperationLock(), Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
     }
 
     private static object? Prop(object? value, string name) => value?.GetType().GetProperty(name)?.GetValue(value);
@@ -64,7 +68,7 @@ public sealed class FilesControllerBrowseTests
         using var cts = new CancellationTokenSource();
         _fileStore.Setup(f => f.GetUnmarkedCountAsync(cts.Token)).ReturnsAsync(4);
         _seriesLibrary
-            .Setup(s => s.GetSeriesSummariesAsync(null, null, 1, 100, "name", "asc", 0, 5, cts.Token))
+            .Setup(s => s.GetSeriesSummariesAsync(null, null, 1, 100, "name", "asc", 0, 5, null, cts.Token))
             .ReturnsAsync(new SeriesSummaryResult { Page = 1, TotalPages = 3, TotalSeries = 12, Offset = 0 });
 
         var result = await _controller.GetSeries(limit: 5, cancellationToken: cts.Token);
@@ -75,14 +79,69 @@ public sealed class FilesControllerBrowseTests
         Assert.Equal(12, Prop(ok.Value, "total_series"));
         Assert.Equal(3, Prop(ok.Value, "total_pages"));
         Assert.Equal(4, Prop(ok.Value, "unmarked_count"));
-        _seriesLibrary.Verify(s => s.GetSeriesSummariesAsync(null, null, 1, 100, "name", "asc", 0, 5, cts.Token), Times.Once);
+        _seriesLibrary.Verify(s => s.GetSeriesSummariesAsync(null, null, 1, 100, "name", "asc", 0, 5, null, cts.Token), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetSeries_PassesTheGenreAndStatusFilters()
+    {
+        var expected = new SeriesFacetFilter("Action", "completed");
+        _seriesLibrary
+            .Setup(s => s.GetSeriesSummariesAsync(null, null, 1, 100, "name", "asc", 0, 5, expected, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesSummaryResult { TotalSeries = 2 });
+
+        var result = await _controller.GetSeries(limit: 5, genre: " Action ", status: "completed");
+
+        Assert.Equal(2, Prop(Assert.IsType<OkObjectResult>(result.Result).Value, "total_series"));
+    }
+
+    [Fact]
+    public async Task GetSeries_WithIssues_PassesTheFiltersToo()
+    {
+        var expected = new SeriesFacetFilter(null, "none");
+        _seriesLibrary
+            .Setup(s => s.GetSeriesAsync(null, null, 1, 100, "name", "asc", expected, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesLibraryResult { TotalSeries = 3 });
+
+        var result = await _controller.GetSeries(include_issues: true, status: "none");
+
+        Assert.Equal(3, Prop(Assert.IsType<OkObjectResult>(result.Result).Value, "total_series"));
+    }
+
+    [Fact]
+    public async Task GetSeriesFacets_ReturnsWhatTheLibraryReports()
+    {
+        var facets = new SeriesFacetsResult { SeriesWithoutGenres = 4 };
+        _seriesLibrary.Setup(s => s.GetSeriesFacetsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(facets);
+
+        var result = await _controller.GetSeriesFacets();
+
+        Assert.Same(facets, Assert.IsType<OkObjectResult>(result.Result).Value);
+    }
+
+    [Fact]
+    public async Task GetSeriesFacets_LetsAFailureReachTheGlobalHandler()
+    {
+        _seriesLibrary.Setup(s => s.GetSeriesFacetsAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("snapshot missing"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.GetSeriesFacets());
+    }
+
+    [Fact]
+    public void GetSeriesFacets_RouteIsAFixedPathWithAnETag()
+    {
+        var method = typeof(ComicMaintainer.WebApi.Controllers.FilesController).GetMethod(nameof(ComicMaintainer.WebApi.Controllers.FilesController.GetSeriesFacets))!;
+
+        Assert.Equal("series/facets", ((Microsoft.AspNetCore.Mvc.HttpGetAttribute)method.GetCustomAttributes(typeof(Microsoft.AspNetCore.Mvc.HttpGetAttribute), false).Single()).Template);
+        Assert.NotEmpty(method.GetCustomAttributes(typeof(ComicMaintainer.WebApi.Infrastructure.LibraryETagAttribute), false));
     }
 
     [Fact]
     public async Task GetSeries_ExplicitOffsetAndLimit_ArePassedThrough()
     {
         _seriesLibrary
-            .Setup(s => s.GetSeriesSummariesAsync("processed", "bat", 1, 100, "name", "desc", 10, 5, It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetSeriesSummariesAsync("processed", "bat", 1, 100, "name", "desc", 10, 5, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesSummaryResult { Offset = 10, TotalSeries = 40 });
 
         var result = await _controller.GetSeries(filter: "marked", search: "bat", direction: "desc", offset: 10, limit: 5);
@@ -99,7 +158,7 @@ public sealed class FilesControllerBrowseTests
     public async Task GetSeries_NonPositiveLimit_UsesPageMode(int limit)
     {
         _seriesLibrary
-            .Setup(s => s.GetSeriesSummariesAsync(null, null, 2, 25, "name", "asc", null, null, It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetSeriesSummariesAsync(null, null, 2, 25, "name", "asc", null, null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesSummaryResult { Page = 2, TotalPages = 2, TotalSeries = 30 });
 
         var result = await _controller.GetSeries(page: 2, per_page: 25, offset: 50, limit: limit);
@@ -108,35 +167,31 @@ public sealed class FilesControllerBrowseTests
         Assert.Equal(2, Prop(ok.Value, "page"));
         Assert.False(HasProp(ok.Value, "offset"));
         Assert.False(HasProp(ok.Value, "limit"));
-        _seriesLibrary.Verify(s => s.GetSeriesSummariesAsync(null, null, 2, 25, "name", "asc", null, null, It.IsAny<CancellationToken>()), Times.Once);
+        _seriesLibrary.Verify(s => s.GetSeriesSummariesAsync(null, null, 2, 25, "name", "asc", null, null, null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task GetSeries_LibraryThrows_Returns500()
+    public async Task GetSeries_LibraryThrows_Escapes()
     {
         _seriesLibrary
             .Setup(s => s.GetSeriesSummariesAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(),
-                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<SeriesFacetFilter?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("snapshot missing"));
 
-        var result = await _controller.GetSeries();
-
-        AssertStatus(result.Result, 500, "Error retrieving series library");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.GetSeries());
     }
 
     // ------------------------------------------------------------------ GetFolders
 
     [Fact]
-    public async Task GetFolders_StoreThrows_Returns500()
+    public async Task GetFolders_StoreThrows_Escapes()
     {
         _fileStore
             .Setup(f => f.GetFolderSummariesAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("db locked"));
 
-        var result = await _controller.GetFolders();
-
-        AssertStatus(result.Result, 500, "Error retrieving folders");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.GetFolders());
     }
 
     // -------------------------------------------------------------- GetFolderFiles
@@ -171,16 +226,14 @@ public sealed class FilesControllerBrowseTests
     }
 
     [Fact]
-    public async Task GetFolderFiles_StoreThrows_Returns500()
+    public async Task GetFolderFiles_StoreThrows_Escapes()
     {
         _fileStore
             .Setup(f => f.GetFolderFilesAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("db locked"));
 
-        var result = await _controller.GetFolderFiles("Zm9v");
-
-        AssertStatus(result.Result, 500, "Error retrieving folder files");
+        await Assert.ThrowsAsync<IOException>(() => _controller.GetFolderFiles("Zm9v"));
     }
 
     // --------------------------------------------------------- GetRootFolderFiles
@@ -201,30 +254,51 @@ public sealed class FilesControllerBrowseTests
     }
 
     [Fact]
-    public async Task GetRootFolderFiles_StoreThrows_Returns500()
+    public async Task GetRootFolderFiles_StoreThrows_Escapes()
     {
         _fileStore
             .Setup(f => f.GetFolderFilesAsync("", It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("db locked"));
 
-        var result = await _controller.GetRootFolderFiles();
-
-        AssertStatus(result.Result, 500, "Error retrieving folder files");
+        await Assert.ThrowsAsync<IOException>(() => _controller.GetRootFolderFiles());
     }
 
     // ------------------------------------------------------------- GetSeriesIssues
 
     [Fact]
-    public async Task GetSeriesIssues_LibraryThrows_Returns500()
+    public async Task GetSeriesIssues_LibraryThrows_Escapes()
     {
         _seriesLibrary
             .Setup(s => s.GetSeriesIssuesAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("snapshot missing"));
 
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.GetSeriesIssues("saga"));
+    }
+
+    [Fact]
+    public async Task GetSeriesIssues_CarriesTheProviderDetails()
+    {
+        // The series page is built from this answer when the series is not on a loaded page.
+        _seriesLibrary
+            .Setup(s => s.GetSeriesIssuesAsync("saga", It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesIssuesResult
+            {
+                Id = "saga",
+                Synopsis = "A space opera.",
+                Genres = new List<string> { "Drama" },
+                PublicationStatus = SeriesPublicationStatus.Ongoing,
+                SiteUrl = "https://anilist.co/manga/1"
+            });
+
         var result = await _controller.GetSeriesIssues("saga");
 
-        AssertStatus(result.Result, 500, "Error retrieving series issues");
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        object? Field(string name) => ok.Value!.GetType().GetProperty(name)!.GetValue(ok.Value);
+        Assert.Equal("A space opera.", Field("synopsis"));
+        Assert.Equal(new[] { "Drama" }, (List<string>)Field("genres")!);
+        Assert.Equal(SeriesPublicationStatus.Ongoing, Field("publication_status"));
+        Assert.Equal("https://anilist.co/manga/1", Field("site_url"));
     }
 
     // ------------------------------------------------------------ GetSeriesFolders
@@ -243,15 +317,13 @@ public sealed class FilesControllerBrowseTests
     }
 
     [Fact]
-    public async Task GetSeriesFolders_LibraryThrows_Returns500()
+    public async Task GetSeriesFolders_LibraryThrows_Escapes()
     {
         _seriesLibrary
             .Setup(s => s.GetFoldersForSeriesIdAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("snapshot missing"));
 
-        var result = await _controller.GetSeriesFolders("saga");
-
-        AssertStatus(result.Result, 500, "Error retrieving series folders");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.GetSeriesFolders("saga"));
     }
 
     [Fact]
@@ -336,14 +408,12 @@ public sealed class FilesControllerBrowseTests
     }
 
     [Fact]
-    public async Task GetFileCounts_CombinableCountFailsWithUnexpectedError_Returns500()
+    public async Task GetFileCounts_CombinableCountFailsWithUnexpectedError_Escapes()
     {
         _fileStore.Setup(f => f.GetFileCountsAsync(It.IsAny<CancellationToken>())).ReturnsAsync((10, 6, 4, 1));
         _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new NotSupportedException("nope"));
 
-        var result = await _controller.GetFileCounts();
-
-        AssertStatus(result.Result, 500, "Error retrieving file counts");
+        await Assert.ThrowsAsync<NotSupportedException>(() => _controller.GetFileCounts());
     }
 
     [Fact]
@@ -371,13 +441,11 @@ public sealed class FilesControllerBrowseTests
     }
 
     [Fact]
-    public async Task GetFileCounts_CountQueryThrows_Returns500()
+    public async Task GetFileCounts_CountQueryThrows_Escapes()
     {
         _fileStore.Setup(f => f.GetFileCountsAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new NotSupportedException("nope"));
 
-        var result = await _controller.GetFileCounts();
-
-        AssertStatus(result.Result, 500, "Error retrieving file counts");
+        await Assert.ThrowsAsync<NotSupportedException>(() => _controller.GetFileCounts());
     }
 
     // ------------------------------------------------------------------- MapFilter

@@ -1,11 +1,16 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services;
-using ComicMaintainer.WebApi.Hubs;
+using ComicMaintainer.Core.Services.Auth;
+using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Middleware;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Startup;
 
@@ -26,13 +31,20 @@ internal static class WebApplicationExtensions
             // A restore staged through /api/backups is swapped in here, before anything
             // has opened the database and before migrations bring it up to date.
             var databasePath = CoreServiceCollectionExtensions.ResolveSqliteDatabasePath(db.Database.GetConnectionString());
+            IDatabaseBackupService? backups = null;
             if (databasePath is not null)
             {
                 DatabaseBackupService.ApplyPendingRestore(databasePath, logger);
+
+                // An upgrade's migrations cannot be undone, so the database is backed up before they run.
+                backups = scope.ServiceProvider.GetService<IDatabaseBackupService>();
+                await PreMigrationBackup.CreateIfMigrationsPendingAsync(db.Database, databasePath, backups, logger);
             }
 
             db.Database.Migrate();
-            
+            // Reached only when the migrations succeeded: until then a restart retries the upgrade with the same backup.
+            backups?.MarkMigrationsApplied();
+
             // Seed roles
             var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
             var roles = new[] { "Admin", "User", "ReadOnly" };
@@ -42,33 +54,141 @@ internal static class WebApplicationExtensions
                 await EnsureRoleExistsAsync(roleManager, db, roleName);
             }
             
-            // Check if admin user should be seeded from environment variables (for backward compatibility).
-            // ADMIN_PASSWORD_FILE can name a file holding the password instead, such as a Docker secret.
             var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-            var adminUsername = Environment.GetEnvironmentVariable("ADMIN_USERNAME");
-            var adminPassword = SecretEnvironmentVariable.Read("ADMIN_PASSWORD", out _);
-            
-            // Only create default admin if both ADMIN_USERNAME and ADMIN_PASSWORD are explicitly set
-            if (!string.IsNullOrEmpty(adminUsername) && !string.IsNullOrEmpty(adminPassword)
-                && await userManager.FindByNameAsync(adminUsername) == null)
-            {
-                var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL") ?? $"{adminUsername}@comicmaintainer.local";
-                var adminUser = new ApplicationUser
-                {
-                    UserName = adminUsername,
-                    Email = adminEmail,
-                    FullName = "Administrator",
-                    IsActive = true,
-                    EmailConfirmed = true
-                };
+            await SeedAdminFromEnvironmentAsync(userManager, logger);
 
-                var result = await userManager.CreateAsync(adminUser, adminPassword);
-                if (result.Succeeded)
-                {
-                    await userManager.AddToRoleAsync(adminUser, "Admin");
-                    logger.LogInformation("Admin user '{Username}' created from environment variables", adminUsername);
-                }
+            var autheliaSettings = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ComicMaintainer.Core.Configuration.AutheliaSettings>>().Value;
+            if (await FirstRunSetup.IsAvailableAsync(userManager, autheliaSettings))
+            {
+                LogFirstRunSetupCode(scope.ServiceProvider.GetRequiredService<ISetupTokenProvider>(), logger);
             }
+        }
+    }
+
+    // First-run setup requires a one-time code, so that whoever reaches a fresh, exposed instance first cannot claim
+    // it: only someone who can read this log (docker logs) or set SETUP_TOKEN can create the first administrator.
+    private static void LogFirstRunSetupCode(ISetupTokenProvider setupToken, Microsoft.Extensions.Logging.ILogger logger)
+    {
+        if (setupToken.IsConfigured)
+        {
+            logger.LogWarning(
+                "No account exists yet. Open ComicMaintainer in a browser and enter the setup code set in SETUP_TOKEN " +
+                "to create the first administrator.");
+        }
+        else
+        {
+            logger.LogWarning(
+                "No account exists yet. Open ComicMaintainer in a browser and enter the setup code {SetupCode} to create " +
+                "the first administrator. A new code is generated on every start until then; set SETUP_TOKEN to choose your own.",
+                setupToken.Token);
+        }
+    }
+
+    /// <summary>
+    /// Creates the administrator named by <c>ADMIN_USERNAME</c> with the password in <c>ADMIN_PASSWORD</c> (or the
+    /// file <c>ADMIN_PASSWORD_FILE</c> names, such as a Docker secret) when both are set and no account has that name.
+    /// A password published with ComicMaintainer (see <see cref="PublishedPasswords"/>) is refused, so that the
+    /// first-run setup runs instead. An existing account with that name is left alone, unless it still has a
+    /// published password: that is replaced by <c>ADMIN_PASSWORD</c> when it is a password of the operator's own.
+    /// </summary>
+    private static async Task SeedAdminFromEnvironmentAsync(UserManager<ApplicationUser> userManager, Microsoft.Extensions.Logging.ILogger logger)
+    {
+        var adminUsername = Environment.GetEnvironmentVariable("ADMIN_USERNAME");
+        var adminPassword = SecretEnvironmentVariable.Read("ADMIN_PASSWORD", out var credentialSetting);
+        if (string.IsNullOrEmpty(adminUsername))
+        {
+            return;
+        }
+
+        // Everything logged below is about the operator's ADMIN_* settings: they need to see it, but it is not a
+        // defect to file an issue for.
+        using var errorReportExclusion = logger.BeginScope(ErrorReportLogProperties.Exclude("operator configuration: admin account settings"));
+
+        var safeUsername = LoggingHelper.SanitizeForLog(adminUsername);
+        var existing = await userManager.FindByNameAsync(adminUsername);
+        if (existing is not null)
+        {
+            await ReplacePublishedAdminPasswordAsync(userManager, existing, adminPassword, credentialSetting, safeUsername, logger);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(adminPassword))
+        {
+            return;
+        }
+
+        if (PublishedPasswords.IsPublished(adminPassword))
+        {
+            logger.LogError(
+                "Not creating the administrator '{Username}': {PasswordSource} is set to a password that was published " +
+                "with ComicMaintainer, so anyone could sign in with it. Open the web UI to create the first administrator " +
+                "with first-run setup, or set {PasswordSource} to a password of your own and restart.",
+                safeUsername, credentialSetting, credentialSetting);
+            return;
+        }
+
+        var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL") ?? $"{adminUsername}@comicmaintainer.local";
+        var adminUser = new ApplicationUser
+        {
+            UserName = adminUsername,
+            Email = adminEmail,
+            FullName = "Administrator",
+            IsActive = true,
+            EmailConfirmed = true
+        };
+
+        var result = await userManager.CreateAsync(adminUser, adminPassword);
+        if (!result.Succeeded)
+        {
+            logger.LogError(
+                "Not creating the administrator '{Username}' from {PasswordSource}: {Errors}",
+                safeUsername, credentialSetting, string.Join(" ", result.Errors.Select(e => e.Description)));
+            return;
+        }
+
+        await userManager.AddToRoleAsync(adminUser, "Admin");
+        logger.LogInformation("Admin user '{Username}' created from environment variables", safeUsername);
+    }
+
+    // Before 3.0.0 the shipped docker-compose.dotnet.yml and .env.example seeded admin / Admin123!. Sign-in with a
+    // published password is refused (AuthService), so give the operator a way back in: setting ADMIN_PASSWORD to a
+    // password of their own replaces it on the next start.
+    private static async Task ReplacePublishedAdminPasswordAsync(
+        UserManager<ApplicationUser> userManager,
+        ApplicationUser admin,
+        string? adminPassword,
+        string? credentialSetting,
+        string safeUsername,
+        Microsoft.Extensions.Logging.ILogger logger)
+    {
+        if (!PublishedPasswords.MatchesUser(userManager.PasswordHasher, admin))
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(adminPassword) || PublishedPasswords.IsPublished(adminPassword))
+        {
+            logger.LogError(
+                "The account '{Username}' still has a password that was published with ComicMaintainer, so signing in " +
+                "with it is refused. Set ADMIN_PASSWORD (or ADMIN_PASSWORD_FILE) to a password of your own and restart " +
+                "to replace it.",
+                safeUsername);
+            return;
+        }
+
+        var resetToken = await userManager.GeneratePasswordResetTokenAsync(admin);
+        var result = await userManager.ResetPasswordAsync(admin, resetToken, adminPassword);
+        if (result.Succeeded)
+        {
+            logger.LogWarning(
+                "Replaced the published password of the account '{Username}' with the one in {PasswordSource}",
+                safeUsername, credentialSetting);
+        }
+        else
+        {
+            logger.LogError(
+                "Could not replace the published password of the account '{Username}' with the one in {PasswordSource}: {Errors}",
+                safeUsername, credentialSetting, string.Join(" ", result.Errors.Select(e => e.Description)));
         }
     }
 
@@ -105,6 +225,24 @@ internal static class WebApplicationExtensions
 
     public static WebApplication UseComicMaintainerPipeline(this WebApplication app)
     {
+        // BASE_PATH deployments. A reverse proxy either forwards the prefix (/comics/js/x.js, as
+        // docs/swag-configs/comicmaintainer.subfolder.conf does) or strips it (/js/x.js); this
+        // moves a forwarded prefix into PathBase and leaves a stripped request alone, so the rest
+        // of the pipeline sees the same path either way. It must run before UseRouting.
+        var configuredBasePath = app.Services.GetRequiredService<IOptions<AppSettings>>().Value.BasePath;
+        var basePath = AppBasePath.Normalize(configuredBasePath);
+        if (AppBasePath.IsInvalid(configuredBasePath))
+        {
+            app.Logger.LogError(
+                "Ignoring BASE_PATH '{BasePath}': use a path such as /comics, with only letters, digits, '.', '_', '~' and '-' in each segment. Serving the app at the domain root.",
+                LoggingHelper.SanitizeForLog(configuredBasePath));
+        }
+        if (basePath.Length > 0)
+        {
+            app.UsePathBase(basePath);
+            app.Logger.LogInformation("Serving the app under the base path {BasePath}", basePath);
+        }
+
         // Configure the HTTP request pipeline
         //
         // The correlation middleware runs first so that *everything* downstream —
@@ -120,9 +258,6 @@ internal static class WebApplicationExtensions
 
         // Use response compression
         app.UseResponseCompression();
-
-        // Use output caching
-        app.UseOutputCache();
 
         // Add security headers middleware
         app.Use(async (context, next) =>
@@ -144,13 +279,16 @@ internal static class WebApplicationExtensions
             // <style> blocks and style attributes, so script-src and style-src must
             // allow 'unsafe-inline' until those are removed as well. The
             // remaining directives still provide meaningful protection: injected
-            // markup cannot load an attacker-hosted script, exfiltrate data to a
-            // third-party origin, embed plugins, rewrite <base>, or post forms
-            // off-origin.
+            // markup cannot load an attacker-hosted script, open a fetch, XHR,
+            // EventSource or WebSocket connection to another origin (connect-src
+            // is same-origin only; the app's only stream is the same-origin SSE
+            // endpoint), embed plugins, rewrite <base>, or post forms off-origin.
             //
-            // img-src allows https: because series covers may be fetched directly from
-            // external metadata providers, and blob:/data: because covers and comic
-            // pages are rendered from object URLs.
+            // img-src allows https: because series cover candidates are previewed
+            // straight from external metadata providers, and blob:/data: because
+            // covers and comic pages are rendered from object URLs. That means an
+            // injected script could still leak data in the URL of an image request,
+            // so the CSP limits the damage of an XSS but does not prevent it.
             const string baseCspDirectives =
                 "default-src 'self'; " +
                 "script-src 'self' 'unsafe-inline'; " +
@@ -158,7 +296,7 @@ internal static class WebApplicationExtensions
                 "img-src 'self' data: blob: https:; " +
                 "font-src 'self' data:; " +
                 "media-src 'self' blob:; " +
-                "connect-src 'self' ws: wss:; " +
+                "connect-src 'self'; " +
                 "worker-src 'self'; " +
                 "manifest-src 'self'; " +
                 "object-src 'none'; " +
@@ -167,9 +305,10 @@ internal static class WebApplicationExtensions
                 "frame-ancestors 'none'";
 
             // Add HSTS and CSP headers when behind HTTPS proxy
-            // Use case-insensitive comparison as HTTP headers are case-insensitive per RFC 7230
-            if (context.Request.Headers.TryGetValue("X-Forwarded-Proto", out var forwardedProto) && 
-                forwardedProto.ToString().Equals("https", StringComparison.OrdinalIgnoreCase))
+            // Use case-insensitive comparison as HTTP headers are case-insensitive per RFC 7230.
+            // The first value is the client's scheme; a proxy that sets the header twice sends a list.
+            if (context.Request.Headers.TryGetValue("X-Forwarded-Proto", out var forwardedProto) &&
+                forwardedProto.ToString().Split(',')[0].Trim().Equals("https", StringComparison.OrdinalIgnoreCase))
             {
                 // HSTS: Force HTTPS for 1 year
                 context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
@@ -190,8 +329,9 @@ internal static class WebApplicationExtensions
                 }
             }
             
-            // Prevent caching for API endpoints and HTML pages
-            if (context.Request.Path.StartsWithSegments("/api"))
+            // Prevent caching for API endpoints and HTML pages. The OPDS feeds are per user too; its pages and
+            // covers set their own, private, cache policy.
+            if (context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments(OpdsFeatureGateMiddleware.PathPrefix))
             {
                 context.Response.Headers["Cache-Control"] = "no-store, private";
             }
@@ -241,8 +381,10 @@ internal static class WebApplicationExtensions
         // AND the controller never runs, so the browser sees a 404 with the file
         // contents and refuses to register the service worker
         // ("A bad HTTP response code (404) was received when fetching the script").
+        // manifest.json too, because its URLs get the base path filled in there.
         app.UseWhen(
-            ctx => !ctx.Request.Path.Equals("/sw.js", StringComparison.OrdinalIgnoreCase),
+            ctx => !ctx.Request.Path.Equals("/sw.js", StringComparison.OrdinalIgnoreCase) &&
+                   !ctx.Request.Path.Equals("/manifest.json", StringComparison.OrdinalIgnoreCase),
             branch => branch.UseStaticFiles(new StaticFileOptions
         {
             OnPrepareResponse = ctx =>
@@ -283,6 +425,10 @@ internal static class WebApplicationExtensions
             }
         }));
 
+        // Before routing and authentication: while the OPDS catalog is off its routes do not exist, even to clients
+        // that send no credentials.
+        app.UseMiddleware<OpdsFeatureGateMiddleware>();
+
         app.UseRouting();
 
         // Request timeouts must run *after* routing: RequestTimeoutsMiddleware reads the
@@ -296,9 +442,6 @@ internal static class WebApplicationExtensions
         app.UseRateLimiter();
 
         app.MapControllers();
-        // A hub connection is open for as long as the page is, so it must never be
-        // subject to the default request timeout.
-        app.MapHub<ProgressHub>("/hubs/progress").DisableRequestTimeout();
 
         // Map health check endpoints. Both are anonymous so probes do not need credentials.
         app.MapHealthChecks("/health", new HealthCheckOptions
@@ -314,8 +457,8 @@ internal static class WebApplicationExtensions
 
         // Map default route to serve index.html for non-API routes only
         // This prevents the fallback from catching API requests, ensuring they always return JSON.
-        // Index is served via a custom delegate so that __APP_VERSION__ is substituted
-        // (mirroring HtmlVersionInjectionMiddleware) on SPA routes that don't match a real file.
+        // Index is served via a custom delegate so that its placeholders are substituted
+        // (see HtmlVersionInjectionMiddleware) on SPA routes that don't match a real file.
         app.MapFallback(async context =>
         {
             // Don't serve index.html for sw.js - it's handled by ServiceWorkerController
@@ -327,13 +470,14 @@ internal static class WebApplicationExtensions
                 return;
             }
 
-            // Only serve index.html for non-API and non-hub routes
+            // Only serve index.html for non-API, non-hub and non-OPDS routes
             if (context.Request.Path.StartsWithSegments("/api") ||
-                context.Request.Path.StartsWithSegments("/hubs"))
+                context.Request.Path.StartsWithSegments("/hubs") ||
+                context.Request.Path.StartsWithSegments(OpdsFeatureGateMiddleware.PathPrefix))
             {
                 context.Response.StatusCode = 404;
                 context.Response.ContentType = "application/json; charset=utf-8";
-                await context.Response.WriteAsync("{\"error\":\"Not Found\",\"message\":\"The requested endpoint does not exist\"}");
+                await context.Response.WriteAsync(UnknownEndpointResponse.Body);
                 return;
             }
 
@@ -345,9 +489,8 @@ internal static class WebApplicationExtensions
                 return;
             }
 
-            var html = await File.ReadAllTextAsync(indexPath);
             var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0";
-            html = html.Replace("__APP_VERSION__", version);
+            var html = HtmlVersionInjectionMiddleware.InjectPlaceholders(await File.ReadAllTextAsync(indexPath), version, basePath);
 
             context.Response.Headers["Cache-Control"] = "no-store, private";
             context.Response.ContentType = "text/html; charset=utf-8";

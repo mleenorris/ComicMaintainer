@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 
 namespace ComicMaintainer.Tests.Utilities;
@@ -67,5 +68,40 @@ public class SeriesMatchScorerTests
         // the scorer should pick the alias score.
         var score = SeriesMatchScorer.Score("Caped Crusader", "Batman", new[] { "Caped Crusader" });
         Assert.InRange(score, 90d, 99d);
+    }
+
+    [Theory]
+    [InlineData("Monster", "Monsters")]
+    [InlineData("Batman", "Batman Beyond")]
+    [InlineData("Naruto", "Boruto: Naruto Next Generations")]
+    [InlineData("The Walking Dead", "Walking Dead")]
+    public void SelectAutomaticMatch_RejectsNearMisses(string query, string candidate)
+    {
+        var candidates = new[] { new ExternalSeriesMetadata { CanonicalTitle = candidate } };
+
+        Assert.Null(SeriesMatchScorer.SelectAutomaticMatch(candidates, query));
+    }
+
+    [Fact]
+    public void SelectAutomaticMatch_TakesTheHighestScore_AndKeepsTheFirstOnATie()
+    {
+        var fuzzy = new ExternalSeriesMetadata { CanonicalTitle = "Berserk of Gluttony" };
+        var alias = new ExternalSeriesMetadata { CanonicalTitle = "Kenpuu Denki", Aliases = new List<string> { "Berserk" } };
+        var exact = new ExternalSeriesMetadata { CanonicalTitle = "BERSERK!" };
+        var laterExact = new ExternalSeriesMetadata { CanonicalTitle = "Berserk" };
+
+        var best = SeriesMatchScorer.SelectAutomaticMatch(new[] { fuzzy, alias, exact, laterExact }, "Berserk");
+
+        Assert.NotNull(best);
+        Assert.Same(exact, best.Value.Match);
+        Assert.Equal(100d, best.Value.Score);
+        Assert.Same(alias, SeriesMatchScorer.SelectAutomaticMatch(new[] { fuzzy, alias }, "Berserk")!.Value.Match);
+    }
+
+    [Fact]
+    public void SelectAutomaticMatch_NoCandidatesOrBlankQuery_ReturnsNull()
+    {
+        Assert.Null(SeriesMatchScorer.SelectAutomaticMatch(Array.Empty<ExternalSeriesMetadata>(), "Berserk"));
+        Assert.Null(SeriesMatchScorer.SelectAutomaticMatch(new[] { new ExternalSeriesMetadata { CanonicalTitle = "Berserk" } }, " "));
     }
 }

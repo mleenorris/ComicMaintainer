@@ -8,10 +8,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
+const { deferred } = require('./support/app');
 const {
     FILE, NEXT_FILE, THIRD_FILE, pageImage, comicInfo, adjacentInfo, openWebcomicReader, progressPosts,
     markReadPosts, adjacentRequests, streamPages, streamImage, pageObserver, setLayout, contentLayout,
-    scrollContent
+    scrollContent, loadReader, waitWithImages, press
 } = require('./support/reader-helpers');
 
 const RETRY = 'Could not load the next issue. Scroll again to retry.';
@@ -176,6 +177,8 @@ test('a stitched issue whose opening pages fail is taken out again and retried l
     assert.equal(endMessage(page), RETRY);
     assert.deepEqual(streamLayout(page), [...pagesOf(FILE, [1, 2, 3]), 'end']);
     assert.ok([...pageObserver(page).targets].every(img => img.dataset.comic === FILE));
+    // ...releasing their blobs: only the first issue's pages hold one.
+    assert.deepEqual([...page.objectUrls.keys()].sort(), page.$$('#webcomicContainer img[data-page]').map(img => img.src).sort());
     assert.ok(page.consoleMessages.some(m => m.type === 'error' && m.args[0] === 'Error loading page 3:'));
     // The reader still treats the first issue as the end of the stream.
     assert.equal(page.run('streamTailPath'), FILE);
@@ -299,4 +302,199 @@ test('a stale pointer that resolves to no further issue ends the series', async 
     assert.equal(endMessage(page), 'End of series');
     assert.deepEqual(markReadPosts(page), [NEXT_FILE]);
     assert.equal(page.$$('.comic-transition').length, 1);
+});
+
+/**
+ * Lay the stream out top-down (pages 1000px, transitions 200px), every child
+ * reporting its place relative to #readerContent's current scroll position,
+ * so what is above a child moves it when it is taken out.
+ */
+function layOutStream(page) {
+    const container = page.$('#webcomicContainer');
+    const content = page.$('#readerContent');
+    const heightOf = el => (el.matches('img[data-page]') ? 1000 : el.classList.contains('comic-transition') ? 200 : 0);
+    for (const el of container.children) {
+        el.getBoundingClientRect = () => {
+            let top = -content.scrollTop;
+            for (let above = container.firstElementChild; above && above !== el; above = above.nextElementSibling) top += heightOf(above);
+            return { top, bottom: top + heightOf(el), left: 0, right: 0, width: 0, height: heightOf(el) };
+        };
+    }
+}
+
+// --- a stitch that outlives its stream ------------------------------------------
+
+/**
+ * Open a two-issue series, wait until `started` says the stitch of the next
+ * issue is held up, then leave webcomic mode and come back. That builds a new
+ * stream while the old stitch is still waiting.
+ */
+async function rebuildWhileStitching(routes, started) {
+    const page = loadReader({
+        series: { [FILE]: 3, [NEXT_FILE]: 3 },
+        localStorage: { readingMode: 'webcomic' },
+        beforeScripts: contentLayout(5000),
+        routes
+    });
+    await waitWithImages(page, () => page.run('isLoadingNext') === true && started(page));
+    press(page, 'm');
+    await page.waitFor(() => page.run('readingMode') === 'manga' && page.$('.page-image'));
+    press(page, 'm');
+    await waitWithImages(page, () => page.run('readingMode') === 'webcomic' && page.run('allImagesLoaded') && page.$('#webcomicContainer img[data-page]'));
+    return page;
+}
+
+/** The rebuilt stream holds the open issue only, and nothing the old stitch learned. */
+function assertUntouchedStream(page) {
+    assert.equal(endMessage(page), null);
+    assert.deepEqual(streamLayout(page), pagesOf(FILE, [1, 2, 3]));
+    assert.equal(page.run('streamTailPath'), FILE);
+    assert.deepEqual([...page.run('stitchedComicPaths')], [FILE]);
+    assert.equal(page.run(`comicMeta.has(${JSON.stringify(NEXT_FILE)})`), false);
+    assert.deepEqual(page.errors, []);
+}
+
+const requested = (page, path, filePath) => page.fetchCalls.some(call => call.path === path && call.query.filePath === filePath);
+
+const STALE_STITCHES = {
+    'the pages of the next issue': {
+        path: '/api/ComicReader/page',
+        answer: call => pageImage(call),
+        normally: call => pageImage(call),
+        started: page => page.run('stitchedComicPaths.size') === 2
+    },
+    'the details of the next issue': {
+        path: '/api/ComicReader/info',
+        answer: () => comicInfo(NEXT_FILE, 3),
+        normally: call => comicInfo(call.query.filePath, 3)
+    },
+    'details that are then refused': {
+        path: '/api/ComicReader/info',
+        answer: () => respond(500, { error: 'Failed' }),
+        normally: call => comicInfo(call.query.filePath, 3)
+    },
+    'details that are then lost to a network error': {
+        path: '/api/ComicReader/info',
+        answer: () => {
+            throw new TypeError('Failed to fetch');
+        },
+        normally: call => comicInfo(call.query.filePath, 3)
+    }
+};
+
+for (const [label, { path, answer, normally, started }] of Object.entries(STALE_STITCHES)) {
+    test(`a stitch still waiting for ${label} when the stream is rebuilt leaves the new stream alone`, async () => {
+        const gate = deferred();
+        let held = true;
+        const page = await rebuildWhileStitching(
+            { [`GET ${path}`]: call => (held && call.query.filePath === NEXT_FILE ? gate.promise.then(() => answer(call)) : normally(call)) },
+            started || (loaded => requested(loaded, path, NEXT_FILE))
+        );
+
+        gate.resolve();
+        await page.waitFor(() => !page.run('isLoadingNext'));
+        await page.settle();
+        assertUntouchedStream(page);
+
+        // The new stream stitches the next issue as usual.
+        held = false;
+        await scrollAndSettle(page, NEAR_END);
+        await page.waitFor(() => streamImage(page, NEXT_FILE, 3));
+        assert.equal(endMessage(page), null);
+    });
+}
+
+test('a stitch still reading the next issue\'s details when the stream is rebuilt leaves the new stream alone', async () => {
+    const gate = deferred();
+    const page = await rebuildWhileStitching({
+        'GET /api/ComicReader/info': call => {
+            if (call.query.filePath !== NEXT_FILE) return comicInfo(FILE, 3);
+            return new Response(new ReadableStream({
+                async pull(controller) {
+                    await gate.promise;
+                    controller.enqueue(new TextEncoder().encode(JSON.stringify(comicInfo(NEXT_FILE, 3))));
+                    controller.close();
+                }
+            }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+    }, loaded => requested(loaded, '/api/ComicReader/info', NEXT_FILE));
+
+    gate.resolve();
+    await page.waitFor(() => !page.run('isLoadingNext'));
+    await page.settle();
+
+    assertUntouchedStream(page);
+});
+
+test('a next-issue lookup that outlives its stream leaves the new stream\'s pointer alone', async () => {
+    const gate = deferred();
+    const page = await rebuildWhileStitching({
+        'GET /api/ComicReader/adjacent': call => (call.query.filePath === NEXT_FILE
+            ? gate.promise.then(() => adjacentInfo(THIRD_FILE))
+            : adjacentInfo(NEXT_FILE))
+    }, loaded => requested(loaded, '/api/ComicReader/adjacent', NEXT_FILE));
+
+    gate.resolve();
+    await page.waitFor(() => !page.run('isLoadingNext'));
+    await page.settle();
+
+    assert.equal(page.run('nextComicInfo.filePath'), NEXT_FILE);
+    assertUntouchedStream(page);
+});
+
+test('a stitch whose lookup outlives its stream does not go on to stitch into the new one', async () => {
+    const gate = deferred();
+    let lookups = 0;
+    // The stitch started by opening the comic asks first and waits; the
+    // reader's own lookup behind it answers straight away.
+    const page = await rebuildWhileStitching({
+        'GET /api/ComicReader/adjacent': () => (++lookups === 1 ? gate.promise.then(() => adjacentInfo(NEXT_FILE)) : adjacentInfo(NEXT_FILE))
+    }, () => lookups >= 2);
+
+    gate.resolve();
+    await page.waitFor(() => !page.run('isLoadingNext'));
+    await page.settle();
+
+    assertUntouchedStream(page);
+});
+
+test('issues more than one behind the one on screen are taken out of the stream, and the view stays put', async () => {
+    const page = await openSeries({ [FILE]: 3, [NEXT_FILE]: 4, [THIRD_FILE]: 2 }, {
+        routes: {
+            'GET /api/ComicReader/adjacent': call => adjacentInfo(
+                call.query.filePath === FILE ? NEXT_FILE : call.query.filePath === NEXT_FILE ? THIRD_FILE : null)
+        }
+    });
+    await scrollAndSettle(page, NEAR_END);
+    await page.waitFor(() => streamImage(page, NEXT_FILE, 4));
+    await scrollAndSettle(page, NEAR_END);
+    await page.waitFor(() => streamImage(page, THIRD_FILE, 2));
+    assert.deepEqual(streamLayout(page), [
+        ...pagesOf(FILE, [1, 2, 3]), 'transition', 'marker',
+        ...pagesOf(NEXT_FILE, [1, 2, 3, 4]), 'transition', 'marker',
+        ...pagesOf(THIRD_FILE, [1, 2])
+    ]);
+    const firstIssueUrls = [1, 2, 3].map(n => streamImage(page, FILE, n).src);
+    assert.ok(firstIssueUrls.every(url => page.objectUrls.has(url)));
+
+    // The reader scrolls on and stops at the top of the third issue (3000px
+    // of the first issue, a transition, the second issue and another
+    // transition above it).
+    layOutStream(page);
+    await scrollAndSettle(page, 7400);
+    await page.waitFor(() => !streamImage(page, FILE, 1));
+
+    // The first issue is gone; the second one, just behind, stays with the
+    // transition into it.
+    assert.deepEqual(streamLayout(page).filter(item => item !== 'end'), [
+        'transition', 'marker', ...pagesOf(NEXT_FILE, [1, 2, 3, 4]), 'transition', 'marker', ...pagesOf(THIRD_FILE, [1, 2])
+    ]);
+    assert.equal(page.run('comicFilePath'), THIRD_FILE);
+    assert.ok(firstIssueUrls.every(url => !page.objectUrls.has(url)), 'its pages released their blobs');
+    assert.equal(page.run(`loadedPages.has(${JSON.stringify(`${FILE}#1`)})`), false);
+    assert.ok(page.run(`stitchedComicPaths.has(${JSON.stringify(FILE)})`), 'it is never stitched in again');
+    // 3000px came out above the view, which scrolled up as much: the third
+    // issue's first page is still at the top.
+    assert.equal(page.$('#readerContent').scrollTop, 4400);
+    assert.equal(streamImage(page, THIRD_FILE, 1).getBoundingClientRect().top, 0);
 });

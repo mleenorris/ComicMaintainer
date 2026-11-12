@@ -8,7 +8,7 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class SeriesLibraryService
 {
-    public async Task<SeriesLibraryResult> GetSeriesAsync(
+    public Task<SeriesLibraryResult> GetSeriesAsync(
         string? filter = null,
         string? search = null,
         int page = 1,
@@ -16,17 +16,31 @@ public partial class SeriesLibraryService
         string? sort = "name",
         string? direction = "asc",
         CancellationToken cancellationToken = default)
+        => GetSeriesAsync(filter, search, page, perPage, sort, direction, facets: null, cancellationToken);
+
+    public async Task<SeriesLibraryResult> GetSeriesAsync(
+        string? filter,
+        string? search,
+        int page,
+        int perPage,
+        string? sort,
+        string? direction,
+        SeriesFacetFilter? facets,
+        CancellationToken cancellationToken = default)
     {
         var (fileFilter, seriesFilter) = SplitFilter(filter);
-        var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: true, cancellationToken);
+        var groups = await BuildGroupsAsync(fileFilter, cancellationToken);
+        var readPaths = await GetReadPathsForProjectionAsync(cancellationToken);
 
         var groupedSeries = groups.Values
-            .Where(accumulator => MatchesSeriesFilter(accumulator, seriesFilter))
+            .Where(accumulator => MatchesSeriesFilter(accumulator, seriesFilter) && MatchesFacets(accumulator, facets))
             .Select(accumulator =>
             {
                 // Copy rather than re-assigning accumulator.Issues: accumulators
                 // may be shared with other requests via the library snapshot.
-                var sortedIssues = new List<SeriesIssueDto>(accumulator.GetSortedIssues());
+                var sortedIssues = accumulator.GetSortedIssues()
+                    .Select(issue => ProjectIssue(issue, readPaths))
+                    .ToList();
 
                 return new SeriesLibraryDto
                 {
@@ -42,7 +56,10 @@ public partial class SeriesLibraryService
                     HasExternalImage = accumulator.HasExternalImage,
                     ExternalImageUrl = BuildExternalImageUrl(accumulator),
                     Issues = sortedIssues,
-                    Synopsis = accumulator.Synopsis
+                    Synopsis = accumulator.Synopsis,
+                    Genres = accumulator.Genres,
+                    PublicationStatus = accumulator.PublicationStatus,
+                    SiteUrl = accumulator.SiteUrl
                 };
             })
             .ToList();
@@ -86,7 +103,7 @@ public partial class SeriesLibraryService
         };
     }
 
-    public async Task<SeriesSummaryResult> GetSeriesSummariesAsync(
+    public Task<SeriesSummaryResult> GetSeriesSummariesAsync(
         string? filter = null,
         string? search = null,
         int page = 1,
@@ -96,11 +113,24 @@ public partial class SeriesLibraryService
         int? offset = null,
         int? limit = null,
         CancellationToken cancellationToken = default)
+        => GetSeriesSummariesAsync(filter, search, page, perPage, sort, direction, offset, limit, facets: null, cancellationToken);
+
+    public async Task<SeriesSummaryResult> GetSeriesSummariesAsync(
+        string? filter,
+        string? search,
+        int page,
+        int perPage,
+        string? sort,
+        string? direction,
+        int? offset,
+        int? limit,
+        SeriesFacetFilter? facets,
+        CancellationToken cancellationToken = default)
     {
         var (fileFilter, seriesFilter) = SplitFilter(filter);
         // Summary mode never opens an archive on disk, so even huge libraries
         // stay snappy. Per-issue details are loaded lazily by GetSeriesIssuesAsync.
-        var snapshot = await GetGroupsSnapshotAsync(fileFilter, allowDiskRead: false, cancellationToken);
+        var snapshot = await GetGroupsSnapshotAsync(fileFilter, cancellationToken);
 
         // The filtered + sorted list depends only on the snapshot and these
         // inputs, so infinite-scroll requests for later pages reuse it and
@@ -109,10 +139,12 @@ public partial class SeriesLibraryService
             seriesFilter ?? string.Empty,
             search ?? string.Empty,
             (sort ?? string.Empty).ToLowerInvariant(),
-            (direction ?? string.Empty).ToLowerInvariant());
+            (direction ?? string.Empty).ToLowerInvariant(),
+            (facets?.Genre ?? string.Empty).ToLowerInvariant(),
+            (facets?.Status ?? string.Empty).ToLowerInvariant());
         if (!snapshot.SummaryViews.TryGetValue(viewKey, out var view))
         {
-            view = BuildSummaryView(snapshot.Groups.Values, seriesFilter, search, sort, direction);
+            view = BuildSummaryView(snapshot.Groups.Values, seriesFilter, search, sort, direction, facets);
             if (snapshot.SummaryViews.Count >= MaxSummaryViewsPerSnapshot)
             {
                 snapshot.SummaryViews.Clear();
@@ -165,7 +197,10 @@ public partial class SeriesLibraryService
                 ExternalImageUrl = BuildExternalImageUrl(accumulator),
                 LookupStatus = accumulator.LookupStatus,
                 LastLookupUtc = accumulator.LastLookupUtc,
-                Synopsis = accumulator.Synopsis
+                Synopsis = accumulator.Synopsis,
+                Genres = accumulator.Genres,
+                PublicationStatus = accumulator.PublicationStatus,
+                SiteUrl = accumulator.SiteUrl
             }).ToList(),
             Page = page,
             TotalPages = totalPages,
@@ -184,9 +219,10 @@ public partial class SeriesLibraryService
         string? seriesFilter,
         string? search,
         string? sort,
-        string? direction)
+        string? direction,
+        SeriesFacetFilter? facets)
     {
-        var filtered = groups.Where(accumulator => MatchesSeriesFilter(accumulator, seriesFilter));
+        var filtered = groups.Where(accumulator => MatchesSeriesFilter(accumulator, seriesFilter) && MatchesFacets(accumulator, facets));
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -208,7 +244,8 @@ public partial class SeriesLibraryService
     {
         // Overview never reads archives on disk; it relies on the cached
         // grouping so the home page stays fast even for huge libraries.
-        var groups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken);
+        var groups = await BuildGroupsAsync(filter: null, cancellationToken);
+        var readPaths = await GetReadPathsForProjectionAsync(cancellationToken);
 
         var entries = new List<SeriesOverviewEntry>(groups.Count);
         foreach (var accumulator in groups.Values)
@@ -233,7 +270,10 @@ public partial class SeriesLibraryService
                     ExternalImageUrl = BuildExternalImageUrl(accumulator),
                     LookupStatus = accumulator.LookupStatus,
                     LastLookupUtc = accumulator.LastLookupUtc,
-                    Synopsis = accumulator.Synopsis
+                    Synopsis = accumulator.Synopsis,
+                    Genres = accumulator.Genres,
+                    PublicationStatus = accumulator.PublicationStatus,
+                    SiteUrl = accumulator.SiteUrl
                 },
                 EarliestCreatedAt = accumulator.EarliestCreatedAt == DateTime.MaxValue
                     ? DateTime.MinValue
@@ -245,12 +285,60 @@ public partial class SeriesLibraryService
                 // Issues marked read via the file read flag (independent of the
                 // per-user reading progress) so Continue Reading can recognise a
                 // fully-read series and drop it from the row.
-                ReadFilePaths = sortedIssues.Where(i => i.Read).Select(i => i.FilePath).ToList()
+                ReadFilePaths = sortedIssues
+                    .Where(i => ProjectIssue(i, readPaths).Read)
+                    .Select(i => i.FilePath)
+                    .ToList()
             });
         }
 
         return entries;
     }
+
+    /// <inheritdoc />
+    public async Task<SeriesFacetsResult> GetSeriesFacetsAsync(CancellationToken cancellationToken = default)
+    {
+        var groups = await BuildGroupsAsync(filter: null, cancellationToken);
+
+        var genres = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var statuses = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var result = new SeriesFacetsResult();
+        foreach (var accumulator in groups.Values)
+        {
+            if (accumulator.Genres.Count == 0)
+            {
+                result.SeriesWithoutGenres++;
+            }
+
+            foreach (var genre in accumulator.Genres)
+            {
+                genres[genre] = genres.GetValueOrDefault(genre) + 1;
+            }
+
+            if (string.IsNullOrEmpty(accumulator.PublicationStatus))
+            {
+                result.SeriesWithoutStatus++;
+            }
+            else
+            {
+                statuses[accumulator.PublicationStatus] = statuses.GetValueOrDefault(accumulator.PublicationStatus) + 1;
+            }
+        }
+
+        result.Genres = genres
+            .OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(pair => new SeriesFacetCount { Value = pair.Key, Count = pair.Value })
+            .ToList();
+        result.Statuses = SeriesPublicationStatus.All
+            .Where(statuses.ContainsKey)
+            .Select(status => new SeriesFacetCount { Value = status, Count = statuses[status] })
+            .ToList();
+        return result;
+    }
+
+    /// <summary>True when no facet filter is set or the series passes it.</summary>
+    private static bool MatchesFacets(SeriesAccumulator accumulator, SeriesFacetFilter? facets) =>
+        facets is null || facets.Matches(accumulator.Genres, accumulator.PublicationStatus);
 
     /// <summary>
     /// Splits the inbound filter token into a file-level filter (passed to the

@@ -421,6 +421,13 @@ public class ErrorReportingServiceTests
             Comments.Add(body);
             return Task.CompletedTask;
         }
+
+        public Task<GitHubIssueReference?> FindIssueByFingerprintAsync(
+            GitHubIssueTarget target,
+            string fingerprint,
+            DateTimeOffset createdSince,
+            CancellationToken cancellationToken)
+            => Task.FromResult<GitHubIssueReference?>(null);
     }
 
     private sealed class ThrowingGitHubIssueClient : IGitHubIssueClient
@@ -448,5 +455,12 @@ public class ErrorReportingServiceTests
             Attempts++;
             throw _exceptionFactory();
         }
+
+        public Task<GitHubIssueReference?> FindIssueByFingerprintAsync(
+            GitHubIssueTarget target,
+            string fingerprint,
+            DateTimeOffset createdSince,
+            CancellationToken cancellationToken)
+            => Task.FromResult<GitHubIssueReference?>(null);
     }
 }

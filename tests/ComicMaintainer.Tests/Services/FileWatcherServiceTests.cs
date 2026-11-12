@@ -38,6 +38,47 @@ public class FileWatcherServiceTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Creates a comic the watcher must process and waits until it has been, failing if it never is. A test that
+    /// checks a file was ignored calls this after the ignored file's events: every file waits out the same stability
+    /// delay before it is processed, so by the time this later control has been processed, the ignored file would have
+    /// been processed too had the watcher not ignored it. A fixed wait shorter than the stability delay passed whether
+    /// or not the file was ignored.
+    /// </summary>
+    private async Task WaitForAControlComicToBeProcessedAsync()
+    {
+        // Puts the control's stability delay clearly after the one the ignored file would have started, so thread
+        // scheduling cannot let the control be processed first.
+        await Task.Delay(250);
+        var control = Path.Join(_testDirectory, $"control-{Guid.NewGuid():N}.cbz");
+        File.WriteAllText(control, "fake cbz content");
+
+        await WaitForCallAsync(_mockProcessor, nameof(IComicProcessorService.ProcessFileAsync), control);
+        _mockProcessor.Verify(
+            p => p.ProcessFileAsync(control, It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce,
+            "The control comic was never processed, so the check that another file was ignored would prove nothing");
+    }
+
+    /// <summary>
+    /// Deletes a comic and waits until the watcher has removed it from the store, failing if it never does. A test that
+    /// checks a deletion was ignored calls this afterwards: a deletion is handled as soon as it is seen, so by the time
+    /// this later one has been handled, the ignored one would have been too.
+    /// </summary>
+    private async Task WaitForAControlComicDeletionToBeHandledAsync()
+    {
+        await Task.Delay(250);
+        var control = Path.Join(_testDirectory, $"control-{Guid.NewGuid():N}.cbz");
+        File.WriteAllText(control, "fake cbz content");
+        File.Delete(control);
+
+        await WaitForCallAsync(_mockFileStore, nameof(IFileStoreService.RemoveFileAsync), control);
+        _mockFileStore.Verify(
+            fs => fs.RemoveFileAsync(control, It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce,
+            "The control comic's deletion was never handled, so the check that another deletion was ignored would prove nothing");
+    }
+
     public FileWatcherServiceTests()
     {
         _mockLogger = new Mock<ILogger<FileWatcherService>>();
@@ -58,7 +99,7 @@ public class FileWatcherServiceTests : IDisposable
 
         _mockOptions.Setup(o => o.CurrentValue).Returns(_settings);
 
-        _service = new FileWatcherService(
+        _service = TestServices.CreateFileWatcher(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -118,7 +159,7 @@ public class FileWatcherServiceTests : IDisposable
         var mockDisabledOptions = new Mock<IOptionsMonitor<AppSettings>>();
         mockDisabledOptions.Setup(o => o.CurrentValue).Returns(disabledSettings);
         
-        var disabledService = new FileWatcherService(
+        var disabledService = TestServices.CreateFileWatcher(
             mockDisabledOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -145,7 +186,7 @@ public class FileWatcherServiceTests : IDisposable
         var mockDisabledOptions = new Mock<IOptionsMonitor<AppSettings>>();
         mockDisabledOptions.Setup(o => o.CurrentValue).Returns(disabledSettings);
 
-        using var disabledService = new FileWatcherService(
+        using var disabledService = TestServices.CreateFileWatcher(
             mockDisabledOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -194,34 +235,6 @@ public class FileWatcherServiceTests : IDisposable
         // Act & Assert
         await _service.StopAsync();
         Assert.False(_service.IsRunning);
-    }
-
-    [Fact]
-    [Obsolete("Covers the deprecated SetEnabled no-op until it is removed.")]
-    public void SetEnabled_WithTrue_IsDeprecated()
-    {
-        // SetEnabled is now deprecated and does nothing
-        // Act
-        _service.SetEnabled(true);
-
-        // Assert - Should not start watcher (SetEnabled is now a no-op)
-        Assert.False(_service.IsRunning, "SetEnabled is deprecated and should not start watcher");
-    }
-
-    [Fact]
-    [Obsolete("Covers the deprecated SetEnabled no-op until it is removed.")]
-    public async Task SetEnabled_WithFalse_IsDeprecated()
-    {
-        // Arrange
-        await _service.StartAsync();
-        Assert.True(_service.IsRunning);
-
-        // SetEnabled is now deprecated and does nothing
-        // Act
-        _service.SetEnabled(false);
-
-        // Assert - Should not stop watcher (SetEnabled is now a no-op)
-        Assert.True(_service.IsRunning, "SetEnabled is deprecated and should not stop watcher");
     }
 
     [Fact]
@@ -376,6 +389,9 @@ public class FileWatcherServiceTests : IDisposable
         await WaitForCallAsync(_mockFileStore, nameof(IFileStoreService.UpdateFilePathAsync), renamedFile);
         await WaitForCallAsync(_mockFileStore, nameof(IFileStoreService.IsFileProcessedAsync), renamedFile);
 
+        // Wait until a comic created afterwards has been processed: the skipped file would have been by then.
+        await WaitForAControlComicToBeProcessedAsync();
+
         // Assert - File path should be updated atomically, preserving state
         _mockFileStore.Verify(
             fs => fs.UpdateFilePathAsync(tempFile, renamedFile, It.IsAny<CancellationToken>(), It.IsAny<bool>()), 
@@ -409,8 +425,8 @@ public class FileWatcherServiceTests : IDisposable
         // Act - Create a temporary file
         File.WriteAllText(tempFile, "fake cbz content");
         
-        // Wait for file system events
-        await Task.Delay(500);
+        // Wait until a comic created afterwards has been processed: the ignored file would have been by then.
+        await WaitForAControlComicToBeProcessedAsync();
 
         // Assert - Temporary file should NOT be added to store
         _mockFileStore.Verify(
@@ -440,8 +456,8 @@ public class FileWatcherServiceTests : IDisposable
         // Act - Create a temporary file with .tmp extension
         File.WriteAllText(tempFile, "fake tmp content");
         
-        // Wait for file system events
-        await Task.Delay(500);
+        // Wait until a comic created afterwards has been processed: the ignored file would have been by then.
+        await WaitForAControlComicToBeProcessedAsync();
 
         // Assert - Temporary file should NOT be added to store or processed
         _mockFileStore.Verify(
@@ -473,8 +489,8 @@ public class FileWatcherServiceTests : IDisposable
         // Act - Modify the temporary file
         File.AppendAllText(tempFile, "updated content");
         
-        // Wait for file system events
-        await Task.Delay(500);
+        // Wait until a comic created afterwards has been processed: the ignored file would have been by then.
+        await WaitForAControlComicToBeProcessedAsync();
 
         // Assert - Temporary file changes should be ignored
         _mockProcessor.Verify(
@@ -509,6 +525,9 @@ public class FileWatcherServiceTests : IDisposable
         await Task.Delay(ProcessingDelayMs);
         await WaitForCallAsync(_mockFileStore, nameof(IFileStoreService.IsFileProcessedAsync), comicFile);
 
+        // Wait until a comic created afterwards has been processed: the skipped file would have been by then.
+        await WaitForAControlComicToBeProcessedAsync();
+
         // Assert - Should check if file is already processed
         _mockFileStore.Verify(
             fs => fs.IsFileProcessedAsync(comicFile, It.IsAny<CancellationToken>()), 
@@ -540,8 +559,8 @@ public class FileWatcherServiceTests : IDisposable
         // Act - Delete the temporary file
         File.Delete(tempFile);
         
-        // Wait for file system events
-        await Task.Delay(500);
+        // Wait until a comic deleted afterwards has been handled: the ignored deletion would have been by then.
+        await WaitForAControlComicDeletionToBeHandledAsync();
 
         // Assert - Temporary file deletion should be ignored
         _mockFileStore.Verify(
@@ -569,8 +588,8 @@ public class FileWatcherServiceTests : IDisposable
         // Act - Rename to a temporary file
         File.Move(regularFile, tempFile);
         
-        // Wait for file system events
-        await Task.Delay(500);
+        // Wait until a comic created afterwards has been processed: the ignored file would have been by then.
+        await WaitForAControlComicToBeProcessedAsync();
 
         // Assert - Rename to temporary file should be ignored
         _mockFileStore.Verify(
@@ -588,9 +607,19 @@ public class FileWatcherServiceTests : IDisposable
     public async Task StartAsync_IgnoresTemporaryArchivesDuringInitialScan()
     {
         var tempFile = Path.Join(_testDirectory, ".tmp_existing.cbz");
+        var control = Path.Join(_testDirectory, "control.cbz");
         File.WriteAllText(tempFile, "fake cbz content");
+        File.WriteAllText(control, "fake cbz content");
 
         await _service.StartAsync();
+
+        // The scan handles the files it found one after the other, so it has run once it has reached a regular comic
+        // (the short wait covers a temporary archive listed after that comic).
+        await WaitForCallAsync(_mockFileStore, nameof(IFileStoreService.AddFileAsync), control);
+        _mockFileStore.Verify(
+            fs => fs.AddFileAsync(control, It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce,
+            "The scan never reached the regular comic, so the check that the temporary archive was ignored would prove nothing");
         await Task.Delay(SimpleEventDelayMs);
 
         _mockFileStore.Verify(
@@ -617,7 +646,7 @@ public class FileWatcherServiceTests : IDisposable
             WatcherFileStabilityDelaySeconds = 1
         });
 
-        using var service = new FileWatcherService(
+        using var service = TestServices.CreateFileWatcher(
             monitor,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -655,7 +684,7 @@ public class FileWatcherServiceTests : IDisposable
             WatcherFileStabilityDelaySeconds = 1
         });
 
-        using var service = new FileWatcherService(
+        using var service = TestServices.CreateFileWatcher(
             monitor,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -732,7 +761,9 @@ public class FileWatcherServiceTests : IDisposable
 
         // Simulate the processor's own write echoing back as another change event.
         File.AppendAllText(comicFile, "processor rewrite");
-        await Task.Delay(ProcessingDelayMs);
+
+        // Wait until a comic created afterwards has been processed: the ignored file would have been by then.
+        await WaitForAControlComicToBeProcessedAsync();
 
         // Assert - the file is processed only once; the self-induced change is ignored.
         _mockProcessor.Verify(
@@ -758,7 +789,9 @@ public class FileWatcherServiceTests : IDisposable
         // immediately before modifying it.
         _service.SuppressProcessing(comicFile);
         File.AppendAllText(comicFile, "cover embed rewrite");
-        await Task.Delay(ProcessingDelayMs);
+
+        // Wait until a comic created afterwards has been processed: the ignored file would have been by then.
+        await WaitForAControlComicToBeProcessedAsync();
 
         // Assert - the suppressed change must not trigger processing.
         _mockProcessor.Verify(

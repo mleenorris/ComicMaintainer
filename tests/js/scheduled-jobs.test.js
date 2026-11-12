@@ -148,20 +148,19 @@ test('status refresh and leaving the jobs view while Run now is pending cannot r
     const messages = [];
     const sandbox = loadScripts(['js/shared.js', 'js/app/templating.js', 'js/app/scheduled-jobs.js'], {
         document: {
+            documentElement: { dataset: {} },
             getElementById: id => (id === 'scheduledJobsList' ? list : id === 'scheduled-job-library-scan' ? card : null),
             querySelector: () => null,
             querySelectorAll: () => []
         },
-        fetch: async (url, options = {}) => {
+        apiFetch: async (url, options = {}) => {
             if (options.method === 'POST') {
                 return new Promise(resolve => posts.push(resolve));
             }
-            return { ok: true, status: 200, json: async () => [{ ...job }] };
+            return [{ ...job }];
         },
         setTimeout: () => 0,
         clearTimeout: () => {},
-        getAuthHeaders: () => ({}),
-        handleAuthError: () => false,
         showMessage: (message, type) => messages.push({ message, type }),
         userCapabilities: { canAdminister: true },
         currentView: 'jobs'
@@ -193,7 +192,7 @@ test('status refresh and leaving the jobs view while Run now is pending cannot r
     await run(job.jobKey);
     assert.equal(posts.length, 1, 'a second click must not send another POST');
 
-    posts[0]({ ok: true, status: 202, json: async () => ({}) });
+    posts[0]({});
     await firstRun;
     assert.equal(runButton.disabled, true);
     assert.deepEqual(messages.map(item => item.message), ['Library scan started.']);
@@ -209,13 +208,12 @@ test('a rejected Run now request re-enables the button', async () => {
     const messages = [];
     const sandbox = loadScripts(['js/shared.js', 'js/app/templating.js', 'js/app/scheduled-jobs.js'], {
         document: {
+            documentElement: { dataset: {} },
             getElementById: id => (id === 'scheduled-job-library-scan' ? card : null),
             querySelector: () => null,
             querySelectorAll: () => []
         },
-        fetch: async () => ({ ok: false, status: 500, json: async () => ({ error: 'boom' }) }),
-        getAuthHeaders: () => ({}),
-        handleAuthError: () => false,
+        apiFetch: async () => { throw Object.assign(new Error('boom'), { status: 500 }); },
         showMessage: (message, type) => messages.push({ message, type })
     });
     sandbox.run('renderHtml = () => {}');

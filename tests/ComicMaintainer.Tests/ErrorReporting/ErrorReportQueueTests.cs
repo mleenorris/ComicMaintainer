@@ -64,6 +64,27 @@ public class ErrorReportQueueTests
         Assert.False(string.IsNullOrEmpty(report.Fingerprint));
     }
 
+    // Each secret alone and with no key name beside it, so only the literal list can mask it.
+    // The path rule would blank most of a webhook URL but keep its last segment, which is the token.
+    [Theory]
+    [InlineData(nameof(AppSettings.NotifyNtfyToken), "Qw3rtyUiop1234", "Qw3rtyUiop1234")]
+    [InlineData(nameof(AppSettings.NotifyGotifyToken), "Asdfgh5678Jklz", "Asdfgh5678Jklz")]
+    [InlineData(nameof(AppSettings.NotifyDiscordWebhookUrl), "https://discord.example/api/webhooks/1/AbCdEf0123", "AbCdEf0123")]
+    [InlineData(nameof(AppSettings.NotifyWebhookUrl), "https://hook.example/p/Zx9Yw8Vu7Ts", "Zx9Yw8Vu7Ts")]
+    [InlineData(nameof(AppSettings.NotifyKomgaApiKey), "Mnbvcx0987Lkjh", "Mnbvcx0987Lkjh")]
+    [InlineData(nameof(AppSettings.NotifyKavitaApiKey), "Poiuyt6543Rewq", "Poiuyt6543Rewq")]
+    [InlineData(nameof(AppSettings.SuwayomiPassword), "Lkjhgf4321Bvcx", "Lkjhgf4321Bvcx")]
+    public void ErrorReportFactory_MasksEachConfiguredSecret(string setting, string value, string mustNotAppear)
+    {
+        var settings = new AppSettings();
+        typeof(AppSettings).GetProperty(setting)!.SetValue(settings, value);
+        var factory = new ErrorReportFactory(new TestOptionsMonitor<AppSettings>(settings));
+
+        var report = factory.Create("Error", "Send failed", $"The request to {value} was refused", null, "Svc", "corr-1", DateTime.UtcNow);
+
+        Assert.DoesNotContain(mustNotAppear, report.RenderedMessage);
+    }
+
     [Fact]
     public void ErrorReportFactory_TreatsThePlaceholderCorrelationIdAsAbsent()
     {

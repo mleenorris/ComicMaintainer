@@ -1,11 +1,14 @@
+using System.Net.Sockets;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
+using MailKit;
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MimeKit;
+using MimeKit.IO;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -38,31 +41,41 @@ public class SmtpComicEmailSender : IComicEmailSender
         ArgumentNullException.ThrowIfNull(message);
 
         var settings = _settings.CurrentValue;
-        if (!IsConfigured)
+        var fromAddress = settings.EmailFromAddress;
+        // The same check as IsConfigured, made on the settings the message is built from: IsConfigured reads them
+        // again, and a settings save in between could clear the from address.
+        if (string.IsNullOrWhiteSpace(settings.SmtpHost) || !EmailAddressUtils.IsValid(fromAddress))
         {
             throw new InvalidOperationException(
                 "Email delivery is not configured. Set the SMTP host and the from address in Settings.");
         }
 
         using var mime = new MimeMessage();
-        mime.From.Add(new MailboxAddress(settings.EmailFromName ?? "ComicMaintainer", settings.EmailFromAddress));
+        mime.From.Add(new MailboxAddress(settings.EmailFromName ?? "ComicMaintainer", fromAddress));
         mime.To.Add(MailboxAddress.Parse(message.ToAddress));
         mime.Subject = message.Subject;
 
         var body = new BodyBuilder { TextBody = message.Body };
-        if (!string.IsNullOrWhiteSpace(message.AttachmentPath))
+
+        // The attachment is streamed from disk while the message is written
+        // rather than copied into memory first, so it stays open until sent.
+        await using var attachmentStream = string.IsNullOrWhiteSpace(message.AttachmentPath)
+            ? null
+            : File.OpenRead(message.AttachmentPath);
+        if (attachmentStream is not null)
         {
             var contentType = ContentType.Parse(
                 string.IsNullOrWhiteSpace(message.AttachmentContentType)
                     ? "application/octet-stream"
                     : message.AttachmentContentType);
 
-            await using var attachmentStream = File.OpenRead(message.AttachmentPath);
-            await body.Attachments.AddAsync(
-                message.AttachmentFileName ?? Path.GetFileName(message.AttachmentPath),
-                attachmentStream,
-                contentType,
-                cancellationToken);
+            body.Attachments.Add(new MimePart(contentType)
+            {
+                Content = new MimeContent(attachmentStream),
+                ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+                ContentTransferEncoding = ContentEncoding.Base64,
+                FileName = message.AttachmentFileName ?? Path.GetFileName(message.AttachmentPath)
+            });
         }
 
         mime.Body = body.ToMessageBody();
@@ -80,25 +93,185 @@ public class SmtpComicEmailSender : IComicEmailSender
                 : SecureSocketOptions.StartTls;
 
         var host = settings.SmtpHost!;
-        await client.ConnectAsync(host, settings.SmtpPort, socketOptions, cancellationToken);
+        try
+        {
+            await client.ConnectAsync(host, settings.SmtpPort, socketOptions, cancellationToken);
 
-        if (!client.IsSecure)
+            if (!client.IsSecure)
+            {
+                _logger.LogWarning(
+                    "SMTP connection to {Host} is not encrypted because SmtpAllowInsecure is enabled",
+                    LoggingHelper.SanitizeForLog(host));
+            }
+
+            if (!string.IsNullOrWhiteSpace(settings.SmtpUsername))
+            {
+                await AuthenticateAsync(client, settings.SmtpUsername, settings.SmtpPassword, cancellationToken);
+            }
+
+            // The advertised limit can change once authenticated, so it is read
+            // only now. Checking it here explains the rejection before the
+            // whole attachment is uploaded.
+            await EnsureWithinServerLimitAsync(client, mime, cancellationToken);
+
+            await client.SendAsync(mime, cancellationToken);
+        }
+        catch (Exception ex) when (IsTransient(ex, cancellationToken))
+        {
+            throw new TransientEmailSendException(DescribeTransientFailure(ex), ex);
+        }
+
+        // The server has accepted the message. Failing to say goodbye must not
+        // be reported as a failed send, or the caller would send it again.
+        try
+        {
+            await client.DisconnectAsync(true, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogWarning(
-                "SMTP connection to {Host} is not encrypted because SmtpAllowInsecure is enabled",
+                ex,
+                "The mail server accepted the message but closing the connection to {Host} failed",
                 LoggingHelper.SanitizeForLog(host));
         }
-
-        if (!string.IsNullOrWhiteSpace(settings.SmtpUsername))
-        {
-            await client.AuthenticateAsync(settings.SmtpUsername, settings.SmtpPassword ?? string.Empty, cancellationToken);
-        }
-
-        await client.SendAsync(mime, cancellationToken);
-        await client.DisconnectAsync(true, cancellationToken);
 
         _logger.LogInformation(
             "Sent comic email to {Recipient}",
             LoggingHelper.SanitizeForLog(message.ToAddress));
+    }
+
+    /// <summary>
+    /// Logs in. MailKit raises the same exception type for a server that offers no login as it
+    /// does for one that lacks STARTTLS, so the login step is marked here to tell them apart.
+    /// </summary>
+    private static async Task AuthenticateAsync(
+        SmtpClient client,
+        string username,
+        string? password,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await client.AuthenticateAsync(username, password ?? string.Empty, cancellationToken);
+        }
+        catch (NotSupportedException ex)
+        {
+            throw new LoginNotOfferedException(ex);
+        }
+    }
+
+    /// <summary>
+    /// Fails with a clear message when the server advertises a message size
+    /// limit (the SMTP SIZE extension) that the encoded message exceeds. The
+    /// server would reject it with a 552 anyway, but only after the upload.
+    /// </summary>
+    private static async Task EnsureWithinServerLimitAsync(
+        SmtpClient client,
+        MimeMessage message,
+        CancellationToken cancellationToken)
+    {
+        if ((client.Capabilities & SmtpCapabilities.Size) == 0 || client.MaxSize == 0)
+        {
+            return;
+        }
+
+        var options = FormatOptions.Default.Clone();
+        options.NewLineFormat = NewLineFormat.Dos;
+        using var measure = new MeasuringStream();
+        await message.WriteToAsync(options, measure, cancellationToken);
+        if (measure.Length <= client.MaxSize)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"The email is {FormatMegabytes(measure.Length)} once encoded, but the mail server accepts at most " +
+            $"{FormatMegabytes(client.MaxSize)}. Lower the maximum email size in Settings to " +
+            $"{Math.Max(1, (long)client.MaxSize / (1024 * 1024))} MB or less so books are compressed to fit.");
+    }
+
+    private static string FormatMegabytes(long bytes) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{bytes / (1024d * 1024d):0.#} MB");
+
+    /// <summary>
+    /// Whether a failure to connect, authenticate or send is worth retrying
+    /// later: a temporary (4xx) SMTP reply, a dropped or refused connection, or
+    /// a timeout. Permanent (5xx) replies, rejected credentials and TLS
+    /// failures are configuration or recipient problems that would fail the
+    /// same way again.
+    /// </summary>
+    internal static bool IsTransient(Exception exception, CancellationToken cancellationToken) => exception switch
+    {
+        SmtpCommandException command => IsTemporaryReply(command),
+
+        // MailKit reports every refused login this way, keeping the server's
+        // reply inside. A temporary refusal such as "454 too many login
+        // attempts" is the login throttling a batch of sends runs into.
+        AuthenticationException { InnerException: SmtpCommandException command } => IsTemporaryReply(command),
+        AuthenticationException or SslHandshakeException => false,
+        System.Security.Authentication.AuthenticationException => false,
+        SmtpProtocolException or ServiceNotConnectedException => true,
+        TimeoutException or SocketException or IOException => true,
+
+        // A cancellation the caller did not ask for is MailKit's own timeout.
+        OperationCanceledException => !cancellationToken.IsCancellationRequested,
+        _ => false,
+    };
+
+    /// <summary>
+    /// A fixed description of a failed send for the person testing their settings, or
+    /// <c>null</c> when the exception is not a recognised transport failure. It is built
+    /// from the failure's type and SMTP status rather than its message, which can carry
+    /// host names, addresses and the server's own wording.
+    /// </summary>
+    internal static string? DescribeFailureForUser(Exception exception) => exception switch
+    {
+        TransientEmailSendException { InnerException: OperationCanceledException or TimeoutException } =>
+            "The mail server did not respond in time.",
+        TransientEmailSendException { InnerException: SmtpCommandException command } =>
+            $"The mail server temporarily refused the message (SMTP {(int)command.StatusCode}). Try again later.",
+        TransientEmailSendException { InnerException: AuthenticationException { InnerException: SmtpCommandException command } } =>
+            $"The mail server temporarily refused the login (SMTP {(int)command.StatusCode}). Try again later.",
+        TransientEmailSendException =>
+            "Could not reach the mail server. Check the SMTP host and port in Settings.",
+        SmtpCommandException command =>
+            $"The mail server refused the message (SMTP {(int)command.StatusCode}).",
+        AuthenticationException =>
+            "The mail server rejected the login. Check the SMTP username and password in Settings.",
+        SslHandshakeException or System.Security.Authentication.AuthenticationException =>
+            "A secure connection to the mail server could not be established. Check the SMTP port and TLS settings.",
+        LoginNotOfferedException =>
+            "The mail server does not accept logins on this connection. Leave the SMTP username empty if it needs no login, otherwise check the SMTP port and TLS settings.",
+        NotSupportedException =>
+            "The mail server does not offer a secure connection. Check the SMTP port and TLS settings.",
+        ParseException =>
+            "The device's email address is not valid.",
+        _ => null,
+    };
+
+    private static bool IsTemporaryReply(SmtpCommandException command) =>
+        (int)command.StatusCode is >= 400 and < 500;
+
+    private static string DescribeTransientFailure(Exception exception) => exception switch
+    {
+        SmtpCommandException command =>
+            $"The mail server temporarily refused the message ({(int)command.StatusCode}): {command.Message}",
+        AuthenticationException { InnerException: SmtpCommandException command } =>
+            $"The mail server temporarily refused the login ({(int)command.StatusCode}): {command.Message}",
+        OperationCanceledException or TimeoutException =>
+            "The mail server did not respond in time.",
+        _ => $"Could not reach the mail server: {exception.Message}",
+    };
+
+    /// <summary>
+    /// The server offers no way to log in. Still a <see cref="NotSupportedException"/> with
+    /// MailKit's message, so callers other than the settings test see the failure unchanged.
+    /// </summary>
+    private sealed class LoginNotOfferedException : NotSupportedException
+    {
+        public LoginNotOfferedException(NotSupportedException innerException)
+            : base(innerException.Message, innerException)
+        {
+        }
     }
 }

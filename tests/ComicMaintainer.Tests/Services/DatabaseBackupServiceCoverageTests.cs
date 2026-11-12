@@ -205,7 +205,7 @@ public sealed class DatabaseBackupServiceCoverageTests : IDisposable
         Assert.Empty(Directory.GetFiles(_root, ".restore-staging-*"));
     }
 
-    [Fact]
+    [ExclusiveLockFact(ExclusiveLock.AllowsMoving)]
     public void ApplyPendingRestore_SetsAsideAStagedFileThatCannotBeRead()
     {
         CreateDatabase(_dbPath, wal: false);
@@ -225,6 +225,33 @@ public sealed class DatabaseBackupServiceCoverageTests : IDisposable
         Assert.True(File.Exists(_dbPath + ".restore-failed"));
         Assert.True(File.Exists(_dbPath));
         Assert.Contains(logger.Entries, e => e.Level == LogLevel.Error && e.Message.Contains("not a SQLite database"));
+    }
+
+    [ExclusiveLockFact(ExclusiveLock.BlocksMoving)]
+    public void ApplyPendingRestore_KeepsAStagedFileThatAnotherProgramHoldsOpenForTheNextStart()
+    {
+        // On Windows a program holding the staged file open (a virus scanner, a backup tool) also stops it from being
+        // set aside. Startup used to fail on that; now it keeps the current database and the restore stays staged.
+        CreateDatabase(_dbPath, wal: false);
+        var pending = DatabaseBackupService.GetPendingRestorePath(_dbPath);
+        File.Copy(_dbPath, pending);
+        var logger = new CapturingLogger();
+
+        bool applied;
+        using (new FileStream(pending, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            applied = DatabaseBackupService.ApplyPendingRestore(_dbPath, logger);
+        }
+
+        Assert.False(applied);
+        Assert.True(File.Exists(pending));
+        Assert.False(File.Exists(_dbPath + ".restore-failed"));
+        Assert.True(File.Exists(_dbPath));
+        Assert.Contains(logger.Entries, e => e.Level == LogLevel.Error && e.Message.Contains("could not be moved aside"));
+
+        // Once the file is free again, the next start applies the restore.
+        Assert.True(DatabaseBackupService.ApplyPendingRestore(_dbPath, logger));
+        Assert.False(File.Exists(pending));
     }
 
     private DatabaseBackupService CreateService(

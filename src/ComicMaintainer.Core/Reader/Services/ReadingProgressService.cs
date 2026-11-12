@@ -36,6 +36,23 @@ public class ReadingProgressService : IReadingProgressService
     }
 
     /// <inheritdoc/>
+    public async Task<IReadOnlyDictionary<string, ReadingProgress>> GetProgressForContentAsync(string userId, IReadOnlyCollection<string> contentIds, CancellationToken cancellationToken = default)
+    {
+        if (contentIds.Count == 0)
+        {
+            return new Dictionary<string, ReadingProgress>(StringComparer.Ordinal);
+        }
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entities = await db.ReadingProgresses
+            .AsNoTracking()
+            .Where(p => p.UserId == userId && contentIds.Contains(p.ContentId))
+            .ToListAsync(cancellationToken);
+
+        return entities.Select(MapToModel).ToDictionary(p => p.ContentId, StringComparer.Ordinal);
+    }
+
+    /// <inheritdoc/>
     public async Task SaveProgressAsync(ReadingProgress progress, CancellationToken cancellationToken = default)
     {
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -71,6 +88,77 @@ public class ReadingProgressService : IReadingProgressService
             entity.Id,
             isNew ? "created" : "updated");
     }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// This runs on every page turn, so it is one context, two indexed lookups and
+    /// a single <c>SaveChanges</c> (one SQLite write transaction), where the
+    /// reader used to make five round trips and two commits through three
+    /// contexts. When a concurrent request inserts one of the rows between the
+    /// lookup and the save, the save is retried once against the row that won.
+    /// </remarks>
+    public async Task RecordPageAsync(string userId, string filePath, int page, int totalPages, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(userId);
+        ArgumentException.ThrowIfNullOrEmpty(filePath);
+        ArgumentOutOfRangeException.ThrowIfLessThan(page, 1);
+
+        var targetPage = totalPages > 0 ? Math.Min(page, totalPages) : page;
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        for (var attempt = 1; ; attempt++)
+        {
+            var now = DateTime.UtcNow;
+
+            var status = await db.UserFileReadStatuses
+                .FirstOrDefaultAsync(s => s.UserId == userId && s.FilePath == filePath, cancellationToken);
+            if (status is null)
+            {
+                status = new UserFileReadStatusEntity { UserId = userId, FilePath = filePath, CreatedAt = now };
+                db.UserFileReadStatuses.Add(status);
+            }
+
+            status.CurrentPage = targetPage;
+            status.LastReadDate = now;
+            status.UpdatedAt = now;
+
+            if (totalPages > 0)
+            {
+                var entity = await db.ReadingProgresses
+                    .FirstOrDefaultAsync(p => p.UserId == userId && p.ContentId == filePath, cancellationToken);
+                if (entity is null)
+                {
+                    entity = new ReadingProgressEntity { UserId = userId, ContentId = filePath, CreatedAt = now };
+                    db.ReadingProgresses.Add(entity);
+                }
+
+                var progress = MapToModel(entity);
+                progress.TotalPages = totalPages;
+                ReadingProgressCalculator.ApplyProgress(progress, targetPage, now);
+                entity.CurrentPage = progress.CurrentPage;
+                entity.TotalPages = progress.TotalPages;
+                entity.PercentComplete = progress.PercentComplete;
+                entity.LastReadAt = progress.LastReadAt;
+                entity.CompletedAt = progress.CompletedAt;
+                entity.UpdatedAt = now;
+            }
+
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+                return;
+            }
+            catch (DbUpdateException ex) when (attempt == 1 && IsUniqueConstraintViolation(ex))
+            {
+                // Lost an insert race: start over against the rows that now exist.
+                db.ChangeTracker.Clear();
+                _logger.LogDebug("Reading progress row was created concurrently; retrying the save as an update.");
+            }
+        }
+    }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex) =>
+        ex.InnerException is Microsoft.Data.Sqlite.SqliteException { SqliteErrorCode: 19 };
 
     private static ReadingProgress MapToModel(ReadingProgressEntity entity) => new()
     {

@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.WebApi.Controllers;
 using ImageMagick;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -300,5 +301,147 @@ public class FileCoverCacheServiceTests : IDisposable
 
         Assert.Equal(garbage, entry!.Value.Data);
         Assert.Equal("image/jpeg", entry.Value.ContentType);
+    }
+
+    // ---- GetValidator (conditional requests) ------------------------------------------
+
+    [Fact]
+    public void GetValidator_ComesFromTheFilesMetadataWithoutReadingTheArchiveOrTheCache()
+    {
+        var file = CreateFile("a.cbz", new byte[] { 1, 2, 3, 4, 5 });
+        var lastWrite = new DateTime(2026, 2, 3, 4, 5, 6, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(file, lastWrite);
+        _settings.FileCoverThumbnailMaxWidth = 320;
+        _settings.FileCoverThumbnailFormat = "jpeg";
+        _settings.FileCoverThumbnailQuality = 70;
+
+        var validator = _service.GetValidator(file);
+
+        Assert.Equal(new FileCoverValidator(5, new DateTimeOffset(lastWrite), "jpeg-w320-q70"), validator);
+        _reader.VerifyNoOtherCalls();
+        Assert.False(Directory.Exists(_cacheDir));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GetValidator_MatchesTheValidatorOfTheCoverItDescribes(bool cacheEnabled)
+    {
+        _settings.FileCoverCacheEnabled = cacheEnabled;
+        var file = CreateFile("a.cbz");
+        SetupPage(new byte[] { 9, 8, 7 });
+
+        var before = _service.GetValidator(file);
+        var generated = await _service.GetOrCreateAsync(file);
+        var cached = await _service.GetOrCreateAsync(file);
+
+        Assert.NotNull(before);
+        Assert.Equal(before, generated!.Value.Validator);
+        Assert.Equal(before, cached!.Value.Validator);
+    }
+
+    [Fact]
+    public void GetValidator_ChangesWhenTheFileOrTheThumbnailSettingsChange()
+    {
+        var file = CreateFile("a.cbz");
+        var original = _service.GetValidator(file);
+
+        File.WriteAllBytes(file, new byte[] { 1, 2, 3, 4, 5, 6 });
+        var rewritten = _service.GetValidator(file);
+        _settings.FileCoverThumbnailMaxWidth = 123;
+        var resized = _service.GetValidator(file);
+
+        Assert.NotEqual(original, rewritten);
+        Assert.NotEqual(rewritten, resized);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void GetValidator_BlankPath_ReturnsNull(string path) =>
+        Assert.Null(_service.GetValidator(path));
+
+    [Fact]
+    public void GetValidator_MissingFile_ReturnsNull() =>
+        Assert.Null(_service.GetValidator(Path.Join(_testDir, "missing.cbz")));
+
+    // ---- page-list version in the variant ----------------------------------------------
+
+    [Theory]
+    [InlineData("webp-w480-q80")]
+    [InlineData("orig")]
+    public void WithPageListVersion_Version1_KeepsTheVariantCoversWereCachedUnder(string thumbnailVariant) =>
+        Assert.Equal(thumbnailVariant, FileCoverCacheService.WithPageListVersion(thumbnailVariant, 1));
+
+    [Theory]
+    [InlineData("webp-w480-q80", 2, "webp-w480-q80-l2")]
+    [InlineData("orig", 3, "orig-l3")]
+    public void WithPageListVersion_LaterVersions_MakeCachedCoversAndTheirETagsMiss(string thumbnailVariant, int version, string expected)
+    {
+        var variant = FileCoverCacheService.WithPageListVersion(thumbnailVariant, version);
+
+        Assert.Equal(expected, variant);
+        // The token survives into the cover ETag.
+        Assert.Contains("-l" + version, ComicReaderController.BuildCoverETag(new FileCoverValidator(1, DateTimeOffset.UnixEpoch, variant)));
+    }
+
+    [Fact]
+    public void GetValidator_CarriesTheReadersPageListVersion()
+    {
+        var file = CreateFile("a.cbz");
+
+        Assert.Equal(
+            FileCoverCacheService.WithPageListVersion("webp-w480-q80", ComicReaderService.PageListVersion),
+            _service.GetValidator(file)!.Value.Variant);
+    }
+
+    // ---- last-access time (LRU pruning hint) ------------------------------------------
+
+    // The clock values below are far in the past, so the access times the service
+    // writes cannot be confused with the OS's own access-time updates (which stamp
+    // the real current time, when the volume has them enabled at all).
+
+    [Fact]
+    public void RefreshAccessTime_RecentAccessTime_IsNotRewritten()
+    {
+        var blob = CreateFile("x.img");
+        var lastAccess = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        File.SetLastAccessTimeUtc(blob, lastAccess);
+
+        FileCoverCacheService.RefreshAccessTime(blob, lastAccess + FileCoverCacheService.AccessTimeRefreshInterval - TimeSpan.FromMinutes(1));
+
+        Assert.Equal(lastAccess, File.GetLastAccessTimeUtc(blob));
+    }
+
+    [Fact]
+    public void RefreshAccessTime_AccessTimeOlderThanTheInterval_IsSetToNow()
+    {
+        var blob = CreateFile("x.img");
+        File.SetLastAccessTimeUtc(blob, new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        var now = new DateTime(2020, 1, 3, 0, 0, 0, DateTimeKind.Utc);
+
+        FileCoverCacheService.RefreshAccessTime(blob, now);
+
+        Assert.Equal(now, File.GetLastAccessTimeUtc(blob));
+    }
+
+    [Fact]
+    public void RefreshAccessTime_MissingBlob_IsIgnored() =>
+        FileCoverCacheService.RefreshAccessTime(Path.Join(_testDir, "gone.img"), DateTime.UtcNow);
+
+    [Fact]
+    public async Task GetOrCreateAsync_CacheHit_KeepsAStaleBlobRecentForPruning()
+    {
+        var file = CreateFile("a.cbz");
+        SetupPage(new byte[] { 9, 8, 7 });
+        await _service.GetOrCreateAsync(file);
+        var blob = Directory.EnumerateFiles(_cacheDir, "*.img").Single();
+        File.SetLastAccessTimeUtc(blob, new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+
+        var before = DateTime.UtcNow;
+        Assert.NotNull(await _service.GetOrCreateAsync(file));
+
+        Assert.True(File.GetLastAccessTimeUtc(blob) >= before.AddSeconds(-2),
+            $"expected a refreshed access time, got {File.GetLastAccessTimeUtc(blob):O}");
     }
 }

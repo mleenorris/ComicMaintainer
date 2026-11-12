@@ -275,6 +275,9 @@
                 } else if (key === 'j' && userCapabilities.canAdminister) {
                     event.preventDefault();
                     navigate('#/jobs');
+                } else if (key === 'u' && userCapabilities.canAdminister) {
+                    event.preventDefault();
+                    navigate('#/users');
                 }
                 return;
             }

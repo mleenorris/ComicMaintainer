@@ -1,352 +1,182 @@
 # Contributing to ComicMaintainer
 
-Thank you for considering contributing to ComicMaintainer! This document provides guidelines and instructions for contributing to the project.
+Thank you for helping out. This guide covers setting up, making a change and getting it merged.
 
-## Table of Contents
+By taking part, you agree to keep this a respectful and inclusive project.
 
-- [Code of Conduct](#code-of-conduct)
-- [Getting Started](#getting-started)
-- [Development Setup](#development-setup)
-- [Making Changes](#making-changes)
-- [Testing](#testing)
-- [Code Quality](#code-quality)
-- [Submitting Changes](#submitting-changes)
-- [Documentation](#documentation)
+## Getting started
 
-## Code of Conduct
-
-By participating in this project, you agree to maintain a respectful and inclusive environment for all contributors.
-
-## Getting Started
-
-1. **Fork the repository** on GitHub
-2. **Clone your fork** locally:
+1. Fork the repository on GitHub and clone your fork.
+2. Create a branch from `dotnet`, the default branch:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/ComicMaintainer.git
-   cd ComicMaintainer
-   ```
-3. **Create a branch** for your changes:
-   ```bash
+   git checkout dotnet
    git checkout -b feature/your-feature-name
    ```
 
-## Development Setup
+You need:
 
-### Prerequisites
+- [.NET 10 SDK](https://dotnet.microsoft.com/download)
+- Node.js 22.22+, 24.15+ or 26+, for the web UI's tests
+- Docker, for the container smoke test
+- CodeQL and Trivy, only to run the security scans locally
 
-- Python 3.11+
-- Docker (for container testing)
-- Git
+### Setting up a Windows machine
 
-### Install Development Dependencies
+`scripts/dev.ps1` installs everything above except Docker, at the versions CI uses, under
+`%USERPROFILE%\comicmaintainer-tools`. It needs no administrator rights, and it keeps an existing .NET 10 SDK or
+Node.js if they are recent enough:
 
-```bash
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 setup            # add -Android for the Android toolchain
+. .\scripts\dev.ps1 env                                                   # put the tools on PATH in this session
 ```
 
-### Create Test Environment
+On Linux or macOS, install the versions named at the top of `scripts/dev.ps1` with your package manager; the `ci`
+command below then finds them on PATH when run with PowerShell 7.
 
-```bash
-# Create /Config directory for tests
-sudo mkdir -p /Config
-sudo chmod 777 /Config
+### Running CI's checks locally
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 ci                 # everything
+powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 ci -Only codeql    # or any of: build, unit, integration,
+                                                                            #   js, nuget, codeql, docker
 ```
 
-### Run the Application Locally
+`ci` runs the same steps as the workflows: the strict build, unit tests with the coverage gate, integration tests,
+the JavaScript tests and their coverage gates, the NuGet advisory check, CodeQL's security-and-quality queries for C#,
+JavaScript and the workflows, and, when Docker is installed, the image build, container smoke test and Trivy scan. It
+ends with a summary and fails if any step failed. The CodeQL findings are listed in `codeql-findings.txt` under
+`%USERPROFILE%\comicmaintainer-tools\ci-results\<checkout folder>`, with the SARIF files beside them.
+
+Two differences from CI remain: the macOS file-operation job only runs on a Mac, and coverage reads about one point
+lower on Windows than on Linux, so the unit step's gate is 96.3% on Windows and CI's 97% elsewhere.
+
+## Building and running
 
 ```bash
-# Set required environment variables
+dotnet build ComicMaintainer.sln
+
 export WATCHED_DIR=/path/to/test/comics
-
-# Start the web application on http://localhost:5072 (see
-# src/ComicMaintainer.WebApi/Properties/launchSettings.json);
-# append "-- --urls http://localhost:5000" to listen elsewhere
+export DUPLICATE_DIR=/path/to/test/duplicates
+export CONFIG_DIR=/path/to/test/config
 dotnet run --project src/ComicMaintainer.WebApi
 ```
 
-## Making Changes
+The app listens on `http://localhost:5072` (see `src/ComicMaintainer.WebApi/Properties/launchSettings.json`). Add
+`-- --urls http://localhost:5000` to use another address. Swagger UI is at `/swagger` in this mode.
 
-### Code Style
+`ComicMaintainer.sln` and a bare `dotnet test` do not need the Android workload. The Android app has its own solution,
+`src/ComicMaintainer.Android.sln`. See [MAUI_ANDROID_SETUP.md](docs/MAUI_ANDROID_SETUP.md).
 
-- Follow PEP 8 guidelines
-- Use meaningful variable and function names
-- Keep functions focused and small
-- Add docstrings to functions and classes
-- Use type hints where appropriate
-
-### Commit Messages
-
-Write clear, descriptive commit messages:
+## Project structure
 
 ```
-Add health check endpoint for container orchestration
-
-- Added /health and /api/health endpoints
-- Returns status of watched directory, database, and watcher
-- Returns 200 OK for healthy, 503 for unhealthy
+ComicMaintainer/
+├── src/
+│   ├── ComicMaintainer.Core/           # Domain logic: services, models, EF Core data and migrations
+│   ├── ComicMaintainer.WebApi/         # ASP.NET Core host
+│   │   ├── Controllers/                # REST API and OPDS
+│   │   ├── Startup/                    # Service registration and the request pipeline
+│   │   └── wwwroot/                    # The web UI (vanilla JavaScript SPA and PWA)
+│   ├── ComicMaintainer.MauiApp/        # Android client, built from ComicMaintainer.Android.sln
+│   └── Directory.Build.props           # StrictWarnings switch used by CI
+├── tests/
+│   ├── ComicMaintainer.Tests/          # xUnit tests
+│   └── js/                             # node:test tests for the web UI
+├── docs/                               # Documentation; docs/archive holds history
+├── scripts/                            # Coverage, container smoke test and CI helpers
+├── .github/workflows/                  # CI and release
+├── Dockerfile.dotnet
+└── docker-compose.dotnet.yml
 ```
 
 ## Testing
 
-⚠️ **IMPORTANT**: All bug fixes and new features **MUST** include tests. See [TESTING_POLICY.md](docs/TESTING_POLICY.md) for detailed requirements.
-
-### Testing Requirements
-
-**Before submitting a pull request, you MUST:**
-1. ✅ Add unit tests for all new/changed code
-2. ✅ Add integration tests for features involving multiple components
-3. ✅ Ensure all tests pass locally
-4. ✅ Verify code coverage hasn't decreased
-5. ✅ Include test details in the PR description
-
-### Run All Tests
+All bug fixes and new features must include tests. [TESTING_POLICY.md](docs/TESTING_POLICY.md) has the rules and the
+gates CI enforces.
 
 ```bash
-# Run all tests
+# .NET
 dotnet test
-
-# Run only unit tests (fast)
 dotnet test --filter "Category!=Integration"
-
-# Run only integration tests (in-process API via WebApplicationFactory)
 dotnet test --filter "Category=Integration"
+dotnet test --filter "FullyQualifiedName~ComicFileProcessorTests"
 
-# Run tests with coverage (coverlet.runsettings excludes EF migrations)
-dotnet test --collect:"XPlat Code Coverage" --settings coverlet.runsettings
+# .NET with coverage, as CI measures it
+./scripts/run-tests-with-coverage.sh
 
-# Run tests with verbose output
-dotnet test --verbosity normal
-```
-
-### Run JavaScript Unit Tests
-
-The web UI's scripts are covered by tests under `tests/js/` using Node's
-built-in `node:test`. Small helpers run in a bare `node:vm` sandbox
-(`tests/js/support/sandbox.js`); page-level behaviour runs the real HTML pages
-in [jsdom](https://github.com/jsdom/jsdom) through
-`tests/js/support/dom.js`, which stubs `fetch` (per-test routes), SSE,
-service workers, `matchMedia`, dialogs and navigation. jsdom is the only
-dependency (Node.js 22.22+, 24.15+ or 26+):
-
-```bash
+# Web UI
 npm ci
 npm test
+npm run test:coverage   # fails below 99% lines, 97% branches, 99% functions
 
-# With coverage (summary table + coverage/lcov.info)
-npm run test:coverage
-```
-
-The SPA is split into ordered classic scripts under
-`src/ComicMaintainer.WebApi/wwwroot/js/` (`shared.js`, `app/*.js`, then
-`main.js` last). When adding a script, add it to the `<script>` list in
-`index.html`, `APP_SCRIPTS` in `sw.js`, and `WwwrootFiles.AppScripts` in the
-C# tests.
-
-The standalone pages (`reader.html`, `login.html`, `setup.html`,
-`offline.html`) have no inline `<script>` blocks: each loads its own script,
-`js/pages/<page>.js`, as the last element of `<body>`. These are listed in
-`WwwrootFiles.PageScripts`; the ones for pages the service worker serves
-offline (`reader.js`, `offline.js`) are also in `PAGE_SCRIPTS` in `sw.js`.
-
-### Run End-to-End Container Smoke Test
-
-The Docker-based smoke test verifies that the published image starts, serves
-`/api/version`, and the file watcher reacts to a comic dropped into the
-watched directory.
-
-```bash
+# The container, end to end
 docker build -f Dockerfile.dotnet -t comicmaintainer:ci .
 ./scripts/container-smoke-test.sh
 ```
 
-This is the same script run by the **Docker Container Smoke Test** job in
-`.github/workflows/integration-tests-e2e.yml` on every PR.
+`scripts/dev.ps1 ci` runs all of these the way CI does; see [Running CI's checks locally](#running-cis-checks-locally).
 
-### Run Specific Test File
+[tests/README.md](tests/README.md) describes the test layout and helpers.
 
-```bash
-# Run specific test class
-dotnet test --filter "FullyQualifiedName~ComicFileProcessorTests"
+## Conventions
 
-# Run specific test method
-dotnet test --filter "FullyQualifiedName~ComicFileProcessorTests.NormalizeSeriesName_WithUnderscores_ReplacesWithColons"
-```
-
-### Run Tests with Coverage Report
+CI does not run a formatter, so match the code around your change. CI builds `src/` with warnings as errors, and you can
+do the same locally:
 
 ```bash
-# Generate HTML coverage report
-dotnet test --collect:"XPlat Code Coverage" --results-directory ./TestResults
-
-# View coverage (requires reportgenerator tool)
-dotnet tool install -g dotnet-reportgenerator-globaltool
-reportgenerator -reports:"./TestResults/**/coverage.cobertura.xml" -targetdir:"./TestResults/html" -reporttypes:Html
+dotnet build ComicMaintainer.sln -c Release -p:StrictWarnings=true
 ```
 
-### Add New Tests
+### Server
 
-**When adding new features or fixing bugs:**
-1. Create or update test files in `tests/ComicMaintainer.Tests/`
-2. Mirror the source code structure (e.g., `Services/MyServiceTests.cs`)
-3. Follow existing test patterns (see example test files)
-4. Ensure tests are independent and can run in any order
-5. Use descriptive test names: `MethodName_Scenario_ExpectedBehavior`
-6. Test both success and failure scenarios
-7. Test edge cases and boundary conditions
-8. Aim for at least 80% code coverage for new code
+- **Dependency injection.** Use constructor injection and interfaces, and register services in
+  `src/ComicMaintainer.WebApi/Startup/`. See [IOC_DESIGN_PRINCIPLES.md](docs/IOC_DESIGN_PRINCIPLES.md).
+- **Errors.** Do not add generic `catch (Exception)` blocks to controllers. Unexpected failures reach
+  `GlobalExceptionHandler`, which returns a problem document with a correlation id and no exception text. Put the
+  user-facing text in `[FailureMessage("...")]` on the action, and catch only the failures you expect and can answer.
+- **Logging.** Use `ILogger<T>`. Pass anything that comes from a user or a file name through
+  `LoggingHelper.SanitizeForLog` or `LoggingHelper.SanitizePathForLog`.
+- **Authorization.** Write actions on the library and settings controllers get their policy from
+  `WriteOperationAuthorizationConvention`. When you add a controller with write actions, add it to the convention's
+  table. A write that only touches the caller's own state, such as read status, takes `[PerUserWriteOperation]`.
+- **Settings.** Each environment override is one row in `AppSettingsEnvironmentOverrides`, which also drives the
+  read-only state on the Settings page and the `409` refusal. Add new variables to
+  [ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md).
+- **Database.** Schema changes need an EF Core migration. See [DATABASE.md](docs/DATABASE.md).
+- **Reader.** Bump `ComicReaderService.PageListVersion` when the rules for which archive entries are pages, or their
+  order, change. A test holds the current rules to the current version.
 
-**Example Unit Test:**
-```csharp
-[Theory]
-[InlineData("input", "expected")]
-public void MethodName_Scenario_ExpectedBehavior(string input, string expected)
-{
-    // Arrange
-    var service = new MyService();
-    
-    // Act
-    var result = service.MyMethod(input);
-    
-    // Assert
-    Assert.Equal(expected, result);
-}
-```
+### Web UI
 
-**Example Integration Test:**
-```csharp
-[Fact]
-public async Task ProcessFile_WithValidFile_CompletesSuccessfully()
-{
-    // Arrange
-    var testFile = CreateTestFile();
-    
-    // Act
-    var result = await _processor.ProcessFileAsync(testFile);
-    
-    // Assert
-    Assert.True(result.Success);
-    // ... additional assertions
-    
-    // Cleanup
-    CleanupTestFile(testFile);
-}
-```
+- The SPA is ordered classic scripts in `wwwroot/js/`: `shared.js`, `app/*.js`, then `main.js`. When you add a script,
+  add it to the `<script>` list in `index.html`, to `APP_SCRIPTS` in `sw.js`, and to `WwwrootFiles.AppScripts` in the C#
+  tests.
+- The standalone pages (`reader.html`, `login.html`, `setup.html`, `offline.html`) have no inline scripts. Each loads
+  `js/pages/<page>.js`. These are listed in `WwwrootFiles.PageScripts`. The ones the service worker serves offline are
+  also in `PAGE_SCRIPTS` in `sw.js`.
+- Make requests with `apiFetch` from `js/app/api.js`. It applies credentials, handles `401` and `403`, and adds
+  `BASE_PATH`. To log every request in the browser console, run `localStorage.setItem('debug_api', 'true')`.
 
-### Test Organization
+## Submitting changes
 
-```
-tests/
-└── ComicMaintainer.Tests/
-    ├── Controllers/         # Controller tests
-    ├── Services/           # Service tests
-    ├── Models/             # Model tests
-    └── Utilities/          # Utility tests
-```
+1. Run the tests above, and update the documentation your change affects. Add notable changes to `CHANGELOG.md`.
+2. Push your branch and open a pull request into `dotnet`.
+3. Fill in the pull request template, and include screenshots for UI changes.
+4. Respond to review comments by pushing more commits.
 
-For detailed testing guidelines, see [TESTING_POLICY.md](docs/TESTING_POLICY.md).
+`PR Test Check` fails a pull request that changes server or web UI code without changing `tests/`. If a change genuinely
+needs no test, say why in the description and add the `no-tests-needed` label.
 
-## Code Quality
+Merging to `dotnet` releases automatically. See [GITHUB_ACTIONS_DOTNET.md](docs/GITHUB_ACTIONS_DOTNET.md). A commit
+message containing `[skip-version-bump]` is tested and published as `:dotnet` without a new version. Each merge increments
+the patch number, unless the project's version has no tag yet, in which case that version is released as it stands.
 
-### Run Linters
+## Getting help
 
-```bash
-# Pylint
-pylint src/*.py
-
-# Flake8
-flake8 src/
-```
-
-### Security Scanning
-
-```bash
-# Bandit - Python security scanner
-bandit -r src/ -c .bandit
-
-# pip-audit - Check dependencies for vulnerabilities
-pip-audit -r requirements.txt
-```
-
-### Pre-commit Checks
-
-Before committing, ensure:
-- [ ] **All tests pass** (`dotnet test`)
-- [ ] **New tests added** for all code changes (see [TESTING_POLICY.md](docs/TESTING_POLICY.md))
-- [ ] **Code coverage hasn't decreased**
-- [ ] No linter errors
-- [ ] Security scans pass
-- [ ] Code is properly formatted
-- [ ] Documentation is updated
-
-## Submitting Changes
-
-1. **Push your changes** to your fork:
-   ```bash
-   git push origin feature/your-feature-name
-   ```
-
-2. **Create a Pull Request** on GitHub:
-   - Provide a clear title and description
-   - Reference any related issues
-   - Include screenshots for UI changes
-   - Ensure CI checks pass
-
-3. **Address review feedback**:
-   - Make requested changes
-   - Push additional commits to your branch
-   - Respond to comments
-
-## Documentation
-
-### Update Documentation
-
-When making changes, update relevant documentation:
-
-- **README.md** - For user-facing features
-- **CHANGELOG.md** - For all notable changes
-- **Code comments** - For complex logic
-- **Docstrings** - For functions and classes
-
-### Documentation Standards
-
-- Use clear, concise language
-- Include code examples where helpful
-- Update version numbers in CHANGELOG.md
-- Keep README.md up to date with features
-
-## Project Structure
-
-```
-ComicMaintainer/
-├── src/                    # Python source code
-│   ├── web_app.py         # Main Flask application
-│   ├── watcher.py         # File watcher service
-│   ├── process_file.py    # File processing logic
-│   └── ...                # Other modules
-├── templates/             # HTML templates
-├── docs/                  # Documentation
-│   ├── archive/          # Historical documentation
-│   └── ...               # Current documentation
-├── tests/                 # Test files (in root)
-├── .github/               # GitHub workflows
-├── Dockerfile             # Container definition
-├── docker-compose.yml     # Docker Compose config
-├── requirements.txt       # Python dependencies
-├── requirements-dev.txt   # Development dependencies
-└── README.md             # Main documentation
-```
-
-## Need Help?
-
-- **Issues**: Check existing issues or create a new one
-- **Discussions**: Use GitHub Discussions for questions
-- **Security**: See SECURITY.md for reporting vulnerabilities
+- **Questions and bugs**: [GitHub Issues](https://github.com/mleenorris/ComicMaintainer/issues)
+- **Security problems**: see [SECURITY.md](SECURITY.md), and do not open a public issue
 
 ## License
 
-By contributing to ComicMaintainer, you agree that your contributions will be licensed under the MIT License.
-
----
-
-Thank you for contributing to ComicMaintainer! 🎉
+By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE).

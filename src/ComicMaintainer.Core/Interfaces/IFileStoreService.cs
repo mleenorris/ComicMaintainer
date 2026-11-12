@@ -19,7 +19,32 @@ public interface IFileStoreService
 
     Task<ComicFile?> GetFileAsync(string filePath, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The tracked file's stable row id for each of <paramref name="filePaths"/> that is tracked, keyed by path. Callers
+    /// outside the app (OPDS clients) refer to a file by this opaque id, never by its path.
+    /// </summary>
+    Task<IReadOnlyDictionary<string, int>> GetFileIdsAsync(IReadOnlyCollection<string> filePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>The path of the tracked file with row id <paramref name="fileId"/>, or null when there is none.</summary>
+    Task<string?> GetFilePathAsync(int fileId, CancellationToken cancellationToken = default);
+
     Task ApplyUserMetadataEditAsync(string filePath, ComicMetadata patch, ComicMetadataFieldFlags lockFields, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records a user's metadata edit in the file's stored metadata: the <paramref name="fields"/>
+    /// of <paramref name="values"/> are stored exactly (an empty value clears the field) and locked
+    /// as user-edited; a file without stored metadata gets all of <paramref name="values"/>. With
+    /// <paramref name="pendingWrite"/> the edit is queued for writing into the archive (its
+    /// <c>MetadataVersion</c> is bumped); without it the archive already holds the values and only
+    /// the stored record is brought in line. Throws <see cref="InvalidOperationException"/> when the
+    /// file is not tracked.
+    /// </summary>
+    Task RecordUserMetadataEditAsync(
+        string filePath,
+        ComicMetadata values,
+        ComicMetadataFieldFlags fields,
+        bool pendingWrite,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get up to <paramref name="max"/> files whose DB metadata has not been written back, ordered by
@@ -88,14 +113,21 @@ public interface IFileStoreService
     Task MarkFileReadAsync(string filePath, bool read, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Mark multiple files as read or unread
+    /// Mark multiple files as read or unread for the current user, in one transaction.
+    /// Throws when the change could not be saved (nothing is saved then), including
+    /// <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> fires.
     /// </summary>
     Task MarkFilesReadAsync(IEnumerable<string> filePaths, bool read, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Save reading progress (current page) for a comic file
+    /// Marks every tracked file in <paramref name="scope"/> read or unread for the current
+    /// user with set-based statements in a single transaction (reading progress included),
+    /// so a whole-library change needs neither a client-side path list nor a write per file.
+    /// Nothing is saved when it fails or <paramref name="cancellationToken"/> fires; the
+    /// exception propagates. Returns the number of tracked files in the scope, or 0 when no
+    /// user is in scope.
     /// </summary>
-    Task SaveReadingProgressAsync(string filePath, int currentPage, CancellationToken cancellationToken = default);
+    Task<int> MarkScopeReadAsync(FileReadScope scope, bool read, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get reading progress (current page) for a comic file
@@ -135,9 +167,16 @@ public interface IFileStoreService
     /// <summary>
     /// Update the tracked file path from oldPath to newPath, preserving all processing state
     /// (IsRenamed, IsNormalized, IsDuplicate, IsRead, Metadata).  Used when a file is renamed
-    /// so the database record follows the file without resetting its status. Identical paths
-    /// are a no-op.
+    /// so the database record follows the file without resetting its status, along with every
+    /// user's read state and the email delivery history. Identical paths are a no-op.
     /// </summary>
+    /// <remarks>
+    /// Throws when the record could not be moved. Nothing has changed then and both stores still
+    /// have the file at <paramref name="oldPath"/>, so a caller that has already moved the file
+    /// on disk can undo that (or leave the record to the file watcher and the next scan). Once
+    /// the record has moved, a later failure (repointing read state or deliveries) is logged and
+    /// not thrown: the file really is at <paramref name="newPath"/> now.
+    /// </remarks>
     /// <param name="broadcastUpdate">
     /// When true (default) a file list update event is broadcast after a successful update.
     /// Callers performing bulk updates (e.g. combining folders containing many files) should
@@ -145,6 +184,71 @@ public interface IFileStoreService
     /// broadcast at the end of the bulk operation instead.
     /// </param>
     Task UpdateFilePathAsync(string oldPath, string newPath, CancellationToken cancellationToken = default, bool broadcastUpdate = true);
+
+    /// <summary>
+    /// After a directory was renamed or moved on disk, moves every tracked file under
+    /// <paramref name="oldDirectory"/> to the same relative path under
+    /// <paramref name="newDirectory"/>, in one transaction: the file rows with all their state
+    /// (processing flags, user metadata edits and field locks), every user's read status and
+    /// reader progress, and the email delivery history. Where a row already exists at a destination path, the moved row wins
+    /// and absorbs its state. Returns the number of files moved; 0 when nothing is tracked
+    /// under <paramref name="oldDirectory"/> or <paramref name="newDirectory"/> is outside the
+    /// allowed directories.
+    /// </summary>
+    Task<int> MoveDirectoryAsync(string oldDirectory, string newDirectory, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// After a directory was deleted or moved out of the library, removes every tracked file
+    /// under <paramref name="directory"/> from the store, as <see cref="RemoveFileAsync"/> does
+    /// for one file. Returns the number of files removed.
+    /// </summary>
+    Task<int> RemoveDirectoryAsync(string directory, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records whether the file watcher has queued the tracked file at
+    /// <paramref name="filePath"/> for automatic processing that has not run yet, so that a
+    /// restart in the meantime does not lose it (see <see cref="GetProcessingPendingFilesAsync"/>).
+    /// Does nothing for an untracked file.
+    /// </summary>
+    Task SetProcessingPendingAsync(string filePath, bool pending, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The tracked files the file watcher queued for automatic processing that has not run,
+    /// for example because the application stopped while they were still settling.
+    /// </summary>
+    Task<IReadOnlyList<string>> GetProcessingPendingFilesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Whether the file watcher has completely scanned <paramref name="directory"/>, or a
+    /// directory containing it, at some point (see <see cref="RecordLibraryScannedAsync"/>):
+    /// then an untracked comic under it arrived since, rather than belonging to a collection
+    /// the application has not seen yet. False when that cannot be read.
+    /// </summary>
+    Task<bool> IsLibraryScannedAsync(string directory, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records that the file watcher has completely scanned <paramref name="directory"/>,
+    /// adding every comic under it to the store. Replaces the directory recorded before, so a
+    /// directory the watcher stopped watching has to be scanned completely again.
+    /// </summary>
+    Task RecordLibraryScannedAsync(string directory, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Forgets the recorded scan (see <see cref="RecordLibraryScannedAsync"/>). The file watcher
+    /// calls it when the tracked library is missing from the disk, as when its volume is not
+    /// mounted, so that the files found when it comes back are not taken for new arrivals.
+    /// </summary>
+    Task ForgetLibraryScanAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Holds off <see cref="CleanupStaleEntriesAsync"/> until the returned lease is disposed:
+    /// a cleanup started meanwhile waits for it. The file watcher takes it while it matches the
+    /// files it finds on disk with the tracked files missing from their paths (files moved
+    /// while it was not watching): until it has moved their rows to the new paths, those rows
+    /// look stale, and pruning them would lose their processing state, user metadata edits and
+    /// read state.
+    /// </summary>
+    IDisposable SuspendStaleCleanup();
 
     /// <summary>
     /// Re-reads the on-disk size and last-write time of each tracked file in
@@ -157,9 +261,46 @@ public interface IFileStoreService
     Task<int> RefreshFileStatsAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Remove stale entries from database where files no longer exist on disk
+    /// Cache the metadata just written into the file's archive, stamped with the file's
+    /// stored size and modification time (call it after <see cref="RefreshFileStatsAsync"/>),
+    /// so the library shows it without reading the archive again. A user edit not yet
+    /// written to the archive is kept. Never throws: if the metadata cannot be cached, the
+    /// background archive-metadata scan reads the archive instead.
     /// </summary>
-    Task<int> CleanupStaleEntriesAsync(CancellationToken cancellationToken = default);
+    Task RecordArchiveMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Up to <paramref name="max"/> tracked files, in id order after <paramref name="afterId"/>,
+    /// whose cached archive metadata is missing or was read from a different version of the
+    /// file (its stored size or modification time has changed since). Files with a user edit
+    /// waiting to be written to the archive are left out.
+    /// </summary>
+    Task<IReadOnlyList<ArchiveMetadataScanCandidate>> GetFilesNeedingMetadataScanAsync(int afterId, int max, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Cache the metadata the background scan read from <paramref name="candidate"/>'s
+    /// archive. Returns false, recording nothing, when the row changed since it was selected
+    /// (the file was modified, replaced or edited meanwhile); a later scan reads it again.
+    /// Library views built from the cached metadata see the new value only after
+    /// <see cref="PublishScannedArchiveMetadata"/>.
+    /// </summary>
+    Task<bool> RecordScannedArchiveMetadataAsync(ArchiveMetadataScanCandidate candidate, ComicMetadata metadata, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Tells the library views that metadata has been recorded by
+    /// <see cref="RecordScannedArchiveMetadataAsync"/>, so they are rebuilt once per batch of
+    /// scanned files. While a whole library is being backfilled, a change notification per
+    /// file would rebuild the library snapshot and change its ETag on every request.
+    /// </summary>
+    void PublishScannedArchiveMetadata();
+
+    /// <summary>
+    /// Remove stale entries from the database for files that no longer exist on disk,
+    /// guarded so a missing or unmounted library can never wipe it: see
+    /// <see cref="StaleCleanupResult"/> for the outcomes. Never throws; failures and
+    /// cancellation are reported through <see cref="StaleCleanupResult.Status"/>.
+    /// </summary>
+    Task<StaleCleanupResult> CleanupStaleEntriesAsync(StaleCleanupOptions options, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Stamp the given file with the series-metadata-cache version it was

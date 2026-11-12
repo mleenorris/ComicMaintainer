@@ -1,11 +1,10 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Telemetry;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
-using System.Collections.Concurrent;
 using System.Xml.Linq;
 using SharpCompress.Archives;
 using SharpCompress.Archives.Zip;
@@ -24,27 +23,16 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
     private readonly IOptionsMonitor<AppSettings> _settingsMonitor;
     private readonly ILogger<ComicProcessorService> _logger;
     private readonly IFileStoreService _fileStore;
-    private readonly IEventBroadcaster? _eventBroadcaster;
-    private readonly ISeriesMetadataCacheService? _seriesMetadataCache;
+    private readonly IEventBroadcaster _eventBroadcaster;
+    private readonly ISeriesMetadataCacheService _seriesMetadataCache;
     private readonly IProcessingHistoryService _historyService;
     private readonly ISeriesNameResolver _seriesNameResolver;
-    private readonly IJobStateStore? _jobStateStore;
-    private readonly ConcurrentDictionary<Guid, ProcessingJob> _jobs = new();
-    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _jobCancellationTokens = new();
-    private readonly ConcurrentDictionary<Guid, object> _jobSyncLocks = new();
-    private readonly ConcurrentDictionary<Guid, JobStatus> _lastPersistedStatus = new();
-    private readonly ConcurrentDictionary<Guid, DateTime> _lastPersistedAt = new();
-    private readonly ConcurrentDictionary<Guid, bool> _persistedTerminalJobs = new();
-    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _jobPersistenceLocks = new();
-    private readonly ConcurrentDictionary<Guid, bool> _deletedPersistedJobs = new();
-
-    /// <summary>
-    /// Minimum spacing between durable progress writes for a job that has not changed status.
-    /// </summary>
-    private static readonly TimeSpan JobPersistenceInterval = TimeSpan.FromSeconds(5);
-    private readonly IComicEmailService? _comicEmail;
+    private readonly IBatchJobRegistry _jobRegistry;
+    private readonly IComicEmailService _comicEmail;
     private readonly ComicMaintainerMetrics? _metrics;
     private readonly SemaphoreSlim _processingSemaphore;
+    private readonly IFileOperationLock _fileLock;
+    private readonly INotificationPublisher _notifications;
     private readonly int _maxWorkers;
     private bool _disposed;
 
@@ -62,15 +50,16 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
         ILogger<ComicProcessorService> logger,
         IFileStoreService fileStore,
         IProcessingHistoryService historyService,
-        IEventBroadcaster? eventBroadcaster = null,
-        IExternalSeriesMetadataService? externalSeriesMetadata = null,
-        ISeriesMetadataCacheService? seriesMetadataCache = null,
-        ISeriesNameResolver? seriesNameResolver = null,
-        IJobStateStore? jobStateStore = null,
-        IComicEmailService? comicEmail = null,
-        ComicMaintainerMetrics? metrics = null,
-        ILoggerFactory? loggerFactory = null)
+        IEventBroadcaster eventBroadcaster,
+        ISeriesMetadataCacheService seriesMetadataCache,
+        ISeriesNameResolver seriesNameResolver,
+        IBatchJobRegistry jobRegistry,
+        IComicEmailService comicEmail,
+        IFileOperationLock fileLock,
+        INotificationPublisher notifications,
+        ComicMaintainerMetrics? metrics = null)
     {
+        _notifications = notifications;
         _metrics = metrics;
         _settingsMonitor = settings;
         _logger = logger;
@@ -78,18 +67,12 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
         _historyService = historyService;
         _eventBroadcaster = eventBroadcaster;
         _seriesMetadataCache = seriesMetadataCache;
-        // DI always supplies the resolver. An instance built by hand (as tests do) gets the
-        // standard one over the same cache and provider, so there is a single implementation
-        // of the series-name priority. Pass a logger factory so its warnings stay visible.
-        _seriesNameResolver = seriesNameResolver ?? new SeriesNameResolver(
-            settings,
-            loggerFactory?.CreateLogger<SeriesNameResolver>() ?? NullLogger<SeriesNameResolver>.Instance,
-            seriesMetadataCache,
-            externalSeriesMetadata);
-        _jobStateStore = jobStateStore;
+        _seriesNameResolver = seriesNameResolver;
+        _jobRegistry = jobRegistry;
         _comicEmail = comicEmail;
         _maxWorkers = Math.Max(1, _settingsMonitor.CurrentValue.MaxWorkers);
         _processingSemaphore = new SemaphoreSlim(_maxWorkers, _maxWorkers);
+        _fileLock = fileLock;
     }
 
     protected virtual void Dispose(bool disposing)
@@ -101,11 +84,8 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
 
         if (disposing)
         {
-            foreach (var cancellationTokenSource in _jobCancellationTokens.Values)
-            {
-                TryCancel(cancellationTokenSource);
-            }
-
+            // The jobs still running hold slots of the semaphore that is about to go away.
+            _jobRegistry.CancelActiveJobs();
             _processingSemaphore.Dispose();
         }
 

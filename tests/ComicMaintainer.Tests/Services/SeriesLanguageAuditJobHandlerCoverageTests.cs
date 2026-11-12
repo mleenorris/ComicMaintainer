@@ -36,7 +36,10 @@ public class SeriesLanguageAuditJobHandlerCoverageTests
         _retag.Object,
         new TestOptionsMonitor<AppSettings>(_settings),
         _logger,
-        resolver);
+        resolver ?? TestServices.CreateSeriesNameResolver(
+            new TestOptionsMonitor<AppSettings>(_settings),
+            Mock.Of<ILogger<SeriesNameResolver>>(),
+            _cache.Object));
 
     private void AddFile(string path, string? series) =>
         _files.Add(new ComicFile { FilePath = path, Metadata = new ComicMetadata { Series = series } });
@@ -66,6 +69,29 @@ public class SeriesLanguageAuditJobHandlerCoverageTests
 
         Assert.Equal("Scanned 1 series: 1 with language mismatch (2 file(s)). Enable autoCorrect to retag.", summary);
         Assert.Contains(_logger.Messages, m => m.Contains("'Attack on Titan' (preferred='en', expected='Attack on Titan') has 2 file(s)"));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_MatchesTagsBySeriesKey_NotByExactText()
+    {
+        // Tags are matched the way SeriesFileMatcher identifies a series: a
+        // differently punctuated alias, or the folder title the record was
+        // first looked up under, is still a title of this series; a re-spelling
+        // of the expected title is not a language mismatch.
+        _settings.DefaultPreferredLanguage = "en";
+        var record = Record("Attack on Titan");
+        record.NormalizedKey = "shingeki-no-kyojin-digital";
+        record.Aliases = new List<string> { "Shingeki no Kyojin" };
+        _records.Add(record);
+        AddFile("/lib/k1.cbz", "Shingeki_no_Kyojin");
+        AddFile("/lib/k2.cbz", "SHINGEKI NO KYOJIN (Digital)");
+        AddFile("/lib/k3.cbz", "ATTACK ON TITAN!");
+        AddFile("/lib/k4.cbz", "attack-on-titan");
+        AddFile("/lib/k5.cbz", "Attack on Titan: Before the Fall");
+
+        var summary = await CreateHandler().ExecuteAsync(null, CancellationToken.None);
+
+        Assert.Equal("Scanned 1 series: 1 with language mismatch (2 file(s)). Enable autoCorrect to retag.", summary);
     }
 
     [Fact]

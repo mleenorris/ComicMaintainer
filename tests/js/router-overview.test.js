@@ -205,19 +205,12 @@ test('coming back to the overview keeps the last rows on screen while they refre
     assert.deepEqual(rowCards(page, 1).map(card => card.querySelector('.series-title').textContent), ['Monstress', 'Saga']);
 });
 
-test('the overview request is authenticated and same-origin', async () => {
+test('the overview request is authenticated and sends the session cookie', async () => {
     const page = await boot({ hash: '#/home' });
     const [request] = requests(page, 'GET', '/api/overview');
 
     assert.match(request.headers.authorization, /^Bearer /);
-    assert.equal(request.init.credentials, 'same-origin');
-
-    // Without the auth helper (api.js not loaded) the request still goes out.
-    page.run('{ const helper = getAuthHeaders; getAuthHeaders = undefined; renderOverview(); getAuthHeaders = helper; }');
-    await page.settle();
-    const last = requests(page, 'GET', '/api/overview').at(-1);
-    assert.equal(last.headers.authorization, undefined);
-    assert.equal(last.init.headers, undefined);
+    assert.equal(request.init.credentials, 'include');
 });
 
 test('nothing is fetched when the page has no overview section', async () => {

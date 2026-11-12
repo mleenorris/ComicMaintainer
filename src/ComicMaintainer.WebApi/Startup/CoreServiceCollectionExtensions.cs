@@ -2,10 +2,12 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Reader.Interfaces;
 using ComicMaintainer.Core.Reader.Services;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Telemetry;
+using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Logging;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.DataProtection;
@@ -26,6 +28,10 @@ internal static class CoreServiceCollectionExtensions
         // win, mirroring the previous precedence: defaults → appsettings.json → user-settings.json → env.
         services.Configure<AppSettings>(configuration.GetSection("AppSettings"));
         services.AddSingleton<Microsoft.Extensions.Options.IPostConfigureOptions<AppSettings>, AppSettingsEnvironmentPostConfigure>();
+
+        // SettingsService reloads this root after each save, so a saved value is visible before the
+        // request returns instead of after the file watcher's debounce.
+        services.AddSingleton((IConfigurationRoot)configuration);
 
         // Configure JWT settings from the section and JWT_SECRET. AddComicMaintainerAuth also resolves JWT_SECRET_FILE
         // and generated keys, then applies the resolved signing secret to these options.
@@ -230,24 +236,35 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<EventBroadcasterService>();
         services.AddSingleton<IEventBroadcaster>(sp => sp.GetRequiredService<EventBroadcasterService>());
         services.AddSingleton<IFileStoreService, FileStoreService>();
+        // One per-file lock for every component that rewrites, renames or deletes archives.
+        services.AddSingleton<IFileOperationLock, FileOperationLock>();
+        // One lock for everything that creates, fills or removes library folders
+        // (Suwayomi import, folder combine), so none removes a folder another fills.
+        services.AddSingleton<ILibraryMutationLock, LibraryMutationLock>();
         services.AddSingleton<ISeriesNameResolver, SeriesNameResolver>();
         services.AddSingleton<IJobStateStore, JobStateStore>();
+        services.AddSingleton<IBatchJobRegistry, BatchJobRegistry>();
         services.AddSingleton<IComicProcessorService, ComicProcessorService>();
+        services.AddSingleton<ArchiveWriteRecoveryService>();
         services.AddSingleton<IFileWatcherService, FileWatcherService>();
         services.AddSingleton<IProcessingHistoryService, ProcessingHistoryService>();
         services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<IComicReaderService, ComicReaderService>();
         services.AddSingleton<IFileCoverCacheService, FileCoverCacheService>();
         services.AddSingleton<ISeriesLibraryService, SeriesLibraryService>();
+        services.AddSingleton<ArchiveMetadataScanService>();
         services.AddSingleton<IOverviewService, OverviewService>();
         services.AddSingleton<ISeriesMetadataCacheService, SeriesMetadataCacheService>();
+        services.AddSingleton<IFolderCombineService, FolderCombineService>();
         services.AddSingleton<ISeriesMetadataRefreshJobService, SeriesMetadataRefreshJobService>();
         services.AddSingleton<ISeriesLanguagePreferenceRetagService, SeriesLanguagePreferenceRetagService>();
         services.AddSingleton<ISeriesImageStore, SeriesImageStore>();
         services.AddSingleton<ISeriesFolderCoverWriter, SeriesFolderCoverWriter>();
         services.AddSingleton<ISeriesArchiveCoverWriter, SeriesArchiveCoverWriter>();
-        services.AddSingleton<SeriesArchiveCoverWriteQueue>();
-        services.AddSingleton<ISeriesArchiveCoverWriteQueue>(sp => sp.GetRequiredService<SeriesArchiveCoverWriteQueue>());
+        // The metadata cache queues cover changes; the writers (which depend on the library,
+        // which depends on the cache) consume them from a hosted service.
+        services.AddSingleton<ISeriesCoverArtifactQueue, SeriesCoverArtifactQueue>();
+        services.AddSingleton<ISeriesCoverArtifactWriter, SeriesCoverArtifactWriter>();
         services.AddHttpClient(SeriesImageStore.HttpClientName)
             .ConfigureHttpClient(client =>
             {
@@ -261,27 +278,26 @@ internal static class CoreServiceCollectionExtensions
                 // User-Agent with HTTP 400, which previously caused intermittent
                 // "image download failed: HTTP 400" errors for certain series.
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
-            });
-        services.AddHttpClient(nameof(ComicVineSeriesMetadataService));
-        services.AddHttpClient(nameof(MangaDexSeriesMetadataService))
-            .ConfigureHttpClient(client =>
-            {
-                // MangaDex (and AniList below) recommend setting a descriptive
-                // User-Agent. Identifying ourselves makes it easier for the provider
-                // to contact us if our traffic causes issues, and some providers
-                // reject empty User-Agent values from misbehaving clients.
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
-            });
-        services.AddHttpClient(nameof(AniListManhwaSeriesMetadataService))
-            .ConfigureHttpClient(client =>
-            {
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
-            });
-        services.AddHttpClient(nameof(AniListMangaSeriesMetadataService))
-            .ConfigureHttpClient(client =>
-            {
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
-            });
+            })
+            // Cover URLs come from users and provider responses: follow no redirects (SeriesImageStore checks and
+            // follows them itself) and connect only to public addresses, checked when connecting (DNS rebinding).
+            .ConfigurePrimaryHttpMessageHandler(() => PublicNetworkGuard.CreateHandler());
+        // Metadata provider clients. Each request also carries its own, shorter
+        // per-attempt timeout (AppSettings.MetadataProviderTimeoutSeconds); the
+        // client timeout is only the backstop that replaces HttpClient's
+        // 100-second default. ComicVine, MangaDex and AniList all ask for a
+        // descriptive User-Agent: identifying ourselves makes it easier for the
+        // provider to contact us if our traffic causes issues, and some
+        // providers reject or block empty User-Agent values.
+        static void ConfigureMetadataProviderClient(HttpClient client)
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
+        }
+        services.AddHttpClient(nameof(ComicVineSeriesMetadataService)).ConfigureHttpClient(ConfigureMetadataProviderClient);
+        services.AddHttpClient(nameof(MangaDexSeriesMetadataService)).ConfigureHttpClient(ConfigureMetadataProviderClient);
+        services.AddHttpClient(nameof(AniListManhwaSeriesMetadataService)).ConfigureHttpClient(ConfigureMetadataProviderClient);
+        services.AddHttpClient(nameof(AniListMangaSeriesMetadataService)).ConfigureHttpClient(ConfigureMetadataProviderClient);
         services.AddHttpClient(SuwayomiService.HttpClientName)
             .ConfigureHttpClient(client =>
             {
@@ -316,24 +332,43 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<IUserPreferencesService, UserPreferencesService>();
 
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IUserAdministrationService, ComicMaintainer.Core.Services.Auth.UserAdministrationService>();
 
         // Email delivery to saved ereader devices (with optional EPUB/AZW3 conversion).
         services.AddSingleton<IEpubConversionService, EpubConversionService>();
         services.AddSingleton<IAzw3ConversionService, Azw3ConversionService>();
         services.AddSingleton<IComicEmailSender, SmtpComicEmailSender>();
         services.AddSingleton<IEreaderDeviceService, EreaderDeviceService>();
-        // The queue resolves the delivery service lazily: the service enqueues work and
-        // the queue executes it, so constructor injection both ways would be a cycle.
+        // The service enqueues work and the queue executes it; the hosted service hands the
+        // queue its consumer when it starts it, so neither is constructed with the other.
         services.AddSingleton<ComicEmailQueue>(sp => new ComicEmailQueue(
-            () => sp.GetRequiredService<IComicEmailService>(),
             sp.GetRequiredService<ILogger<ComicEmailQueue>>(),
-            sp.GetService<ComicMaintainerMetrics>()));
+            sp.GetService<ComicMaintainerMetrics>(),
+            sp.GetService<TimeProvider>()));
         services.AddSingleton<IComicEmailQueue>(sp => sp.GetRequiredService<ComicEmailQueue>());
         services.AddSingleton<IComicEmailService, ComicEmailService>();
         // Condensed EPUB downloads run detached from the request that asked for them so
         // a book that takes minutes can be polled for progress instead of being built
         // behind a request that a browser or proxy will time out.
         services.AddSingleton<ICondensedBookBuildTracker, CondensedBookBuildTracker>();
+
+        // Outbound notifications and media-server rescans. The client never follows a
+        // redirect and logs nothing: its URLs can carry tokens.
+        services.AddHttpClient(NotificationHttpClient.HttpClientName)
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false })
+            .RemoveAllLoggers();
+        services.AddSingleton<NotificationHttpClient>();
+        services.AddSingleton<INotificationChannel, NtfyNotificationChannel>();
+        services.AddSingleton<INotificationChannel, GotifyNotificationChannel>();
+        services.AddSingleton<INotificationChannel, DiscordNotificationChannel>();
+        services.AddSingleton<INotificationChannel, WebhookNotificationChannel>();
+        services.AddSingleton<INotificationChannel, KomgaScanChannel>();
+        services.AddSingleton<INotificationChannel, KavitaScanChannel>();
+        services.AddSingleton<NotificationPublisher>();
+        services.AddSingleton<INotificationPublisher>(sp => sp.GetRequiredService<NotificationPublisher>());
+        services.AddSingleton<ILibraryActivityTracker, LibraryActivityTracker>();
+        services.AddSingleton<ILibraryActivityMonitor, LibraryActivityMonitor>();
+        services.AddSingleton<INotificationTester, NotificationTester>();
 
         return services;
     }
@@ -372,17 +407,30 @@ internal static class CoreServiceCollectionExtensions
 
     public static IServiceCollection AddComicMaintainerHostedServices(this IServiceCollection services)
     {
+        // Clean up after archive writes a previous run was stopped in the middle of. The sweep
+        // runs in the background alongside the file watcher, which is safe because it only
+        // touches files written before it started.
+        services.AddHostedService<ArchiveWriteRecoveryHostedService>();
+
         // Add hosted service for file watcher
         services.AddHostedService<FileWatcherHostedService>();
 
-        // Add hosted service that drains the background series archive cover write queue
-        services.AddHostedService<SeriesArchiveCoverWriteQueueHostedService>();
+        // Add hosted service that drains the background series cover artifact queue
+        services.AddHostedService<SeriesCoverArtifactQueueHostedService>();
 
         // Add hosted service that drains the background comic email delivery queue
         services.AddHostedService<ComicEmailQueueHostedService>();
 
+        // Works through the durable notification queue.
+        services.AddSingleton<NotificationDispatcher>();
+        services.AddHostedService(sp => sp.GetRequiredService<NotificationDispatcher>());
+
         // Add hosted service for database cleanup
         services.AddHostedService<DatabaseCleanupHostedService>();
+
+        // Keep the cached archive metadata (ComicFiles.Metadata) in step with the files, so
+        // library requests never open archives.
+        services.AddHostedService<ArchiveMetadataScanHostedService>();
 
         // Reconcile persisted batch job state, marking anything left in flight by a restart as
         // interrupted so clients polling an old job id get a definite answer.
@@ -401,9 +449,9 @@ internal static class CoreServiceCollectionExtensions
         {
             services.AddSingleton<IScheduledJobHandler, DatabaseBackupJobHandler>();
         }
-        services.AddSingleton<ScheduledJobService>();
-        services.AddSingleton<IScheduledJobService>(sp => sp.GetRequiredService<ScheduledJobService>());
+        services.AddSingleton<IScheduledJobService, ScheduledJobService>();
         services.AddSingleton<ScheduledJobsHostedService>();
+        services.AddSingleton<IScheduledJobRunner>(sp => sp.GetRequiredService<ScheduledJobsHostedService>());
         services.AddHostedService(sp => sp.GetRequiredService<ScheduledJobsHostedService>());
 
         // Logs Authelia outages when AUTHELIA_URL is set; does nothing otherwise. The client's request logging is

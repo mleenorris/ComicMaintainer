@@ -6,17 +6,6 @@
         // Security Note: Ensure this application is deployed with HTTPS in production
         // to protect credentials during transmission.
         
-        // Base path for reverse proxy support
-        const BASE_PATH = '';
-        
-        // Helper function to build URLs with base path
-        function apiUrl(path) {
-            if (!path.startsWith('/')) {
-                path = '/' + path;
-            }
-            return BASE_PATH + path;
-        }
-        
         // Theme management
         function initTheme() {
             const theme = localStorage.getItem('theme') || 'light';
@@ -95,27 +84,43 @@
         // Check if setup is still required
         async function checkSetupRequired() {
             try {
-                const response = await fetch(apiUrl('/api/auth/setup-required'));
-                const data = await response.json();
+                const data = await apiFetch('/api/auth/setup-required', { auth: false });
                 
                 if (!data.setupRequired) {
                     // Setup already completed, redirect to login
-                    window.location.href = '/login.html';
+                    window.location.href = apiUrl('/login.html');
                 }
             } catch (error) {
                 console.error('Error checking setup status:', error);
             }
         }
         
+        // What to tell a client that made too many attempts: the app explains in
+        // JSON, but a limit set on a proxy in front of it may answer with anything.
+        async function rateLimitMessage(response) {
+            try {
+                const data = await response.json();
+                if (data && data.error) {
+                    return data.error;
+                }
+            } catch (error) {
+                console.warn('Rate limit response was not JSON:', error);
+            }
+            return 'Too many attempts. Please wait a few minutes and try again.';
+        }
+
         // Handle setup form submission
         document.getElementById('setupForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            // The one-time code the server logs at startup (or SETUP_TOKEN), so
+            // that whoever reaches a fresh instance first cannot claim it.
+            const setupToken = document.getElementById('setupToken').value.trim();
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
             const confirmPassword = document.getElementById('confirmPassword').value;
             
-            if (!username || !password || !confirmPassword) {
+            if (!setupToken || !username || !password || !confirmPassword) {
                 showError('Please fill in all fields');
                 return;
             }
@@ -145,26 +150,28 @@
             setupBtnSpinner.classList.remove('hidden');
             
             try {
-                const response = await fetch(apiUrl('/api/auth/setup'), {
+                const response = await apiFetch('/api/auth/setup', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ 
-                        username, 
+                    auth: false,
+                    json: false,
+                    body: {
+                        username,
                         password,
-                        email: null
-                    })
+                        email: null,
+                        setupToken
+                    }
                 });
                 
-                const data = await response.json();
-                
+                const data = response.status === 429
+                    ? { error: await rateLimitMessage(response) }
+                    : await response.json();
+
                 if (response.ok) {
                     // Show success and redirect to login
                     showSuccess('Administrator account created successfully! Redirecting to login...');
                     
                     setTimeout(() => {
-                        window.location.href = '/login.html';
+                        window.location.href = apiUrl('/login.html');
                     }, 1500);
                 } else {
                     showError(data.error || 'Setup failed. Please try again.');

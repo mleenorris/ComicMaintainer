@@ -320,6 +320,8 @@ test('failed and empty cover searches say so', async () => {
     assert.equal(candidateCards(page).length, 2);
     const outcomes = [
         [respond(502, { error: 'Bad gateway' }), 'Search failed.'],
+        [respond(503, 'External metadata providers unavailable: MangaDex did not answer within 15s'),
+            'Search failed: External metadata providers unavailable: MangaDex did not answer within 15s'],
         [offline, 'Search failed.'],
         [{ candidates: [] }, 'No provider returned a cover image for that query.'],
         [null, 'No provider returned a cover image for that query.'],
@@ -379,6 +381,31 @@ test('a cover candidate that cannot be downloaded is reported in the panel', asy
     assert.ok(logged(page, 'applySeriesImageCandidate failed'));
     assert.equal(panel(page).style.display, 'block');
     assert.equal(libraryRefreshes(page), refreshes);
+});
+
+test('an expired session during a cover search only goes to the login page', async () => {
+    const page = await coverSearchPage();
+    page.route(`GET ${CANDIDATES}`, 401);
+
+    await searchCovers(page);
+
+    assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
+    assert.equal(providerStatus(page), 'Searching providers...', 'no "Search failed." over the redirect');
+    assert.equal(logged(page, 'searchSeriesImageCandidates failed'), false);
+});
+
+test('an expired session while applying a cover only goes to the login page', async () => {
+    const page = await coverSearchPage();
+    const before = messages(page).length;
+    page.route(`POST ${FROM_PROVIDER}`, 401);
+
+    page.click(candidateCards(page)[0]);
+    await page.settle();
+
+    assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
+    assert.equal(providerStatus(page), 'Downloading selected image...');
+    assert.equal(messages(page).length, before, 'no error message over the redirect');
+    assert.equal(logged(page, 'applySeriesImageCandidate failed'), false);
 });
 
 test('cover candidates without a full image, or left over in a closed modal, are not applied', async () => {

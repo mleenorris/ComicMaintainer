@@ -87,7 +87,7 @@ public partial class SeriesLibraryService
     /// </summary>
     private static IEnumerable<string> UsableAliasKeys(IEnumerable<string>? aliases) =>
         NonBlank(aliases)
-            .Select(NormalizeKey)
+            .Select(SeriesKey.Normalize)
             .Where(aliasKey => !IsAmbiguousNormalizedKey(aliasKey));
 
     /// <summary>
@@ -114,7 +114,7 @@ public partial class SeriesLibraryService
             index.TryAdd(record.NormalizedKey, record.NormalizedKey);
             if (!string.IsNullOrWhiteSpace(record.CanonicalTitle))
             {
-                var canonicalKey = NormalizeKey(record.CanonicalTitle);
+                var canonicalKey = SeriesKey.Normalize(record.CanonicalTitle);
                 // Skip degenerate canonical-title keys (e.g. CJK-only titles
                 // that collapse to a bare digit) so they cannot bridge to
                 // another record whose alias also reduces to the same digit.
@@ -161,7 +161,7 @@ public partial class SeriesLibraryService
     private static void UnionWithCacheKey(UnionFind<string> unionFind, string fileKey, string title, IReadOnlyDictionary<string, string> aliasIndex)
     {
         if (string.IsNullOrWhiteSpace(title)) return;
-        var titleKey = NormalizeKey(title);
+        var titleKey = SeriesKey.Normalize(title);
         unionFind.Add(titleKey);
         unionFind.Union(fileKey, titleKey);
         // Only use the alias index to bridge to a cache record when the title
@@ -294,7 +294,7 @@ public partial class SeriesLibraryService
                     continue;
                 }
 
-                var key = NormalizeKey(title);
+                var key = SeriesKey.Normalize(title);
                 if (IsAmbiguousNormalizedKey(key))
                 {
                     continue;
@@ -365,7 +365,7 @@ public partial class SeriesLibraryService
                 continue;
             }
 
-            var key = NormalizeKey(title);
+            var key = SeriesKey.Normalize(title);
             if (IsAmbiguousNormalizedKey(key))
             {
                 continue;

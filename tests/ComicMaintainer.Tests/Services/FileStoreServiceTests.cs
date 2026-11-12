@@ -44,7 +44,7 @@ public class FileStoreServiceTests : IDisposable
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         // Read state is per-user, so the service under test needs a user in scope.
-        _service = new FileStoreService(options, logger, dbContextFactory, userContext: _userContext);
+        _service = TestServices.CreateFileStore(options, logger, dbContextFactory, userContext: _userContext);
     }
 
     public void Dispose()
@@ -411,7 +411,7 @@ public class FileStoreServiceTests : IDisposable
         var options = new TestOptionsMonitor<AppSettings>(settings);
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        var newService = new FileStoreService(options, logger, dbContextFactory);
+        var newService = TestServices.CreateFileStore(options, logger, dbContextFactory);
         
         // Verify data is in database before initialization
         using (var scope = _serviceProvider.CreateScope())
@@ -553,7 +553,7 @@ public class FileStoreServiceTests : IDisposable
         var options = new TestOptionsMonitor<AppSettings>(settings);
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        var newService = new FileStoreService(options, logger, dbContextFactory);
+        var newService = TestServices.CreateFileStore(options, logger, dbContextFactory);
         
         await newService.InitializeFromDatabaseAsync();
         
@@ -580,82 +580,6 @@ public class FileStoreServiceTests : IDisposable
         Assert.Equal("comic3.cbz", loadedFile3.FileName);
         Assert.False(loadedFile3.IsProcessed);
         Assert.False(loadedFile3.IsDuplicate);
-    }
-
-    [Fact]
-    public async Task CleanupStaleEntriesAsync_RemovesDeletedFiles_FromDatabase()
-    {
-        // Arrange - Add files to database through service
-        var file1 = Path.Join(_testDirectory, "comic1.cbz");
-        var file2 = Path.Join(_testDirectory, "comic2.cbz");
-        var file3 = Path.Join(_testDirectory, "comic3.cbz");
-        
-        File.WriteAllText(file1, "test content 1");
-        File.WriteAllText(file2, "test content 2");
-        File.WriteAllText(file3, "test content 3");
-        
-        await _service.AddFileAsync(file1);
-        await _service.AddFileAsync(file2);
-        await _service.AddFileAsync(file3);
-        
-        // Verify all files are in store
-        var filesBeforeDelete = await _service.GetAllFilesAsync();
-        Assert.Equal(3, filesBeforeDelete.Count());
-        
-        // Act - Delete files from filesystem (simulating external deletion)
-        File.Delete(file1);
-        File.Delete(file3);
-        
-        var removedCount = await _service.CleanupStaleEntriesAsync();
-        
-        // Assert
-        Assert.Equal(2, removedCount);
-        
-        var filesAfterCleanup = await _service.GetAllFilesAsync();
-        Assert.Single(filesAfterCleanup);
-        Assert.Equal(file2, filesAfterCleanup.First().FilePath);
-        
-        // Verify database was actually updated
-        using var scope = _serviceProvider.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
-        var dbFiles = await dbContext.ComicFiles.ToListAsync();
-        Assert.Single(dbFiles);
-        Assert.Equal(file2, dbFiles.First().FilePath);
-    }
-
-    [Fact]
-    public async Task CleanupStaleEntriesAsync_NoDeletedFiles_ReturnsZero()
-    {
-        // Arrange
-        var file1 = Path.Join(_testDirectory, "comic1.cbz");
-        var file2 = Path.Join(_testDirectory, "comic2.cbz");
-        
-        File.WriteAllText(file1, "test content 1");
-        File.WriteAllText(file2, "test content 2");
-        
-        await _service.AddFileAsync(file1);
-        await _service.AddFileAsync(file2);
-        
-        // Act - No files deleted
-        var removedCount = await _service.CleanupStaleEntriesAsync();
-        
-        // Assert
-        Assert.Equal(0, removedCount);
-        
-        var filesAfterCleanup = await _service.GetAllFilesAsync();
-        Assert.Equal(2, filesAfterCleanup.Count());
-    }
-
-    [Fact]
-    public async Task CleanupStaleEntriesAsync_EmptyDatabase_ReturnsZero()
-    {
-        // Arrange - No files added
-        
-        // Act
-        var removedCount = await _service.CleanupStaleEntriesAsync();
-        
-        // Assert
-        Assert.Equal(0, removedCount);
     }
 
     [Fact]
@@ -709,39 +633,6 @@ public class FileStoreServiceTests : IDisposable
         var files = await _service.GetAllFilesAsync();
         var file = files.Single();
         Assert.True(file.IsRead);
-    }
-
-    [Fact]
-    public async Task SaveReadingProgressAsync_NewProgress_SavesPage()
-    {
-        // Arrange
-        var filePath = Path.Join(_testDirectory, "test.cbz");
-        File.WriteAllText(filePath, "test content");
-        await _service.AddFileAsync(filePath);
-
-        // Act
-        await _service.SaveReadingProgressAsync(filePath, 5);
-
-        // Assert
-        var progress = await _service.GetReadingProgressAsync(filePath);
-        Assert.Equal(5, progress);
-    }
-
-    [Fact]
-    public async Task SaveReadingProgressAsync_UpdateProgress_UpdatesPage()
-    {
-        // Arrange
-        var filePath = Path.Join(_testDirectory, "test.cbz");
-        File.WriteAllText(filePath, "test content");
-        await _service.AddFileAsync(filePath);
-        await _service.SaveReadingProgressAsync(filePath, 5);
-
-        // Act
-        await _service.SaveReadingProgressAsync(filePath, 10);
-
-        // Assert
-        var progress = await _service.GetReadingProgressAsync(filePath);
-        Assert.Equal(10, progress);
     }
 
     [Fact]
@@ -1012,8 +903,24 @@ public class FileStoreServiceTests : IDisposable
         Assert.False(withUser.IsRead);
     }
 
+    /// <summary>The resume page the reader saved for <paramref name="userId"/>, as ReadingProgressService stores it.</summary>
+    private async Task SetResumePageAsync(string filePath, int page, string userId = "test-user")
+    {
+        var factory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var row = await db.UserFileReadStatuses.FirstOrDefaultAsync(s => s.UserId == userId && s.FilePath == filePath);
+        if (row is null)
+        {
+            row = new UserFileReadStatusEntity { UserId = userId, FilePath = filePath };
+            db.UserFileReadStatuses.Add(row);
+        }
+
+        row.CurrentPage = page;
+        await db.SaveChangesAsync();
+    }
+
     [Fact]
-    public async Task SaveReadingProgressAsync_ResumePosition_IsPerUser()
+    public async Task GetReadingProgressAsync_ResumePosition_IsPerUser()
     {
         // Arrange
         var filePath = Path.Join(_testDirectory, "test.cbz");
@@ -1021,7 +928,7 @@ public class FileStoreServiceTests : IDisposable
         await _service.AddFileAsync(filePath);
 
         // Act
-        await _service.SaveReadingProgressAsync(filePath, 12);
+        await SetResumePageAsync(filePath, 12);
         _userContext.UserId = "other-user";
         var otherUserProgress = await _service.GetReadingProgressAsync(filePath);
 
@@ -1042,7 +949,7 @@ public class FileStoreServiceTests : IDisposable
         File.WriteAllText(oldPath, "test content");
         await _service.AddFileAsync(oldPath);
         await _service.MarkFileReadAsync(oldPath, true);
-        await _service.SaveReadingProgressAsync(oldPath, 7);
+        await SetResumePageAsync(oldPath, 7);
 
         // Act - the processor renames the file
         File.Move(oldPath, newPath);
@@ -1095,7 +1002,7 @@ public class FileStoreServiceTests : IDisposable
         var filePath = Path.Join(_testDirectory, "sync-progress.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
-        await _service.SaveReadingProgressAsync(filePath, 5);
+        await SetResumePageAsync(filePath, 5);
 
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         await using (var db = await dbContextFactory.CreateDbContextAsync())
@@ -1229,7 +1136,7 @@ public class FileStoreServiceTests : IDisposable
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         var mockBroadcaster = new Mock<Core.Interfaces.IEventBroadcaster>();
         
-        var service = new FileStoreService(options, logger, dbContextFactory, mockBroadcaster.Object);
+        var service = TestServices.CreateFileStore(options, logger, dbContextFactory, mockBroadcaster.Object);
 
         // Act
         await service.AddFileAsync(filePath);
@@ -1251,38 +1158,18 @@ public class FileStoreServiceTests : IDisposable
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         
         // Add file without broadcaster first
-        var serviceWithoutBroadcaster = new FileStoreService(options, logger, dbContextFactory, null);
+        var serviceWithoutBroadcaster = TestServices.CreateFileStore(options, logger, dbContextFactory, null);
         await serviceWithoutBroadcaster.AddFileAsync(filePath);
         
         // Test remove with broadcaster
         var mockBroadcaster = new Mock<Core.Interfaces.IEventBroadcaster>();
-        var service = new FileStoreService(options, logger, dbContextFactory, mockBroadcaster.Object);
+        var service = TestServices.CreateFileStore(options, logger, dbContextFactory, mockBroadcaster.Object);
 
         // Act
         await service.RemoveFileAsync(filePath);
 
         // Assert
         mockBroadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
-    }
-
-    [Fact]
-    public async Task AddFileAsync_WithoutEventBroadcaster_DoesNotThrow()
-    {
-        // Arrange
-        var filePath = Path.Join(_testDirectory, "test_no_broadcaster.cbz");
-        File.WriteAllText(filePath, "test content");
-        
-        var settings = new AppSettings { WatchedDirectory = _testDirectory };
-        var options = new TestOptionsMonitor<AppSettings>(settings);
-        var logger = new Mock<ILogger<FileStoreService>>().Object;
-        var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        
-        var service = new FileStoreService(options, logger, dbContextFactory, null);
-
-        // Act & Assert - should not throw
-        await service.AddFileAsync(filePath);
-        var files = await service.GetAllFilesAsync();
-        Assert.Contains(files, f => f.FilePath == filePath);
     }
 
     // ---- UpdateFilePathAsync tests ----
@@ -1551,7 +1438,7 @@ public class FileStoreServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ChangeVersion_BumpsOnFileAndReadStateMutations()
+    public async Task ChangeVersion_BumpsOnFileMutationsButReadStateHasItsOwnPerUserVersion()
     {
         var filePath = Path.Join(_testDirectory, "versioned.cbz");
         File.WriteAllText(filePath, "content");
@@ -1559,23 +1446,44 @@ public class FileStoreServiceTests : IDisposable
         var v0 = _service.ChangeVersion;
         await _service.AddFileAsync(filePath);
         var v1 = _service.ChangeVersion;
-        Assert.True(v1 > v0);
+        Assert.Equal(v0 + 1, v1);
 
         await _service.MarkFileRenamedAsync(filePath, true);
         var v2 = _service.ChangeVersion;
-        Assert.True(v2 > v1);
+        Assert.Equal(v1 + 1, v2);
 
+        var mine = _service.GetReadStateVersion("test-user");
+        var theirs = _service.GetReadStateVersion("other-user");
         await _service.MarkFileReadAsync(filePath, true);
-        var v3 = _service.ChangeVersion;
-        Assert.True(v3 > v2);
 
-        // Pure reads never bump the version.
+        // Regression: a read change bumped the shared version, so one user finishing an
+        // issue invalidated every other user's library snapshot and ETag.
+        Assert.Equal(v2, _service.ChangeVersion);
+        Assert.True(_service.GetReadStateVersion("test-user") > mine);
+        Assert.Equal(theirs, _service.GetReadStateVersion("other-user"));
+
+        // Pure reads never bump either version.
+        var readVersion = _service.GetReadStateVersion("test-user");
         await _service.GetAllFilesAsync();
         await _service.GetFilteredFilesAsync("read");
-        Assert.Equal(v3, _service.ChangeVersion);
+        Assert.Equal(v2, _service.ChangeVersion);
+        Assert.Equal(readVersion, _service.GetReadStateVersion("test-user"));
 
         await _service.RemoveFileAsync(filePath);
-        Assert.True(_service.ChangeVersion > v3);
+        Assert.True(_service.ChangeVersion > v2);
+    }
+
+    [Fact]
+    public async Task GetReadFilePathsAsync_ReflectsEachUsersOwnReadState()
+    {
+        var filePath = Path.Join(_testDirectory, "per-user.cbz");
+        File.WriteAllText(filePath, "content");
+        await _service.AddFileAsync(filePath);
+
+        await _service.MarkFileReadAsync(filePath, true);
+
+        Assert.Contains(filePath, await _service.GetReadFilePathsAsync("test-user"));
+        Assert.Empty(await _service.GetReadFilePathsAsync("other-user"));
     }
 
     [Fact]
@@ -1588,7 +1496,7 @@ public class FileStoreServiceTests : IDisposable
             service!.MarkFileReadAsync(filePath, true).GetAwaiter().GetResult());
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var factory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        service = new FileStoreService(
+        service = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _testDirectory }),
             logger,
             factory,
@@ -1615,7 +1523,7 @@ public class FileStoreServiceTests : IDisposable
             options.UseInMemoryDatabase($"TestDb_{Guid.NewGuid()}").AddInterceptors(interceptor));
         using var provider = services.BuildServiceProvider();
         using var memoryCache = new MemoryCache(new MemoryCacheOptions());
-        var service = new FileStoreService(
+        var service = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _testDirectory }),
             new Mock<ILogger<FileStoreService>>().Object,
             provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>(),
@@ -1623,14 +1531,17 @@ public class FileStoreServiceTests : IDisposable
             userContext: _userContext);
         await service.AddFileAsync(filePath);
         await service.GetFilteredFilesAsync("unread");
-        var versionBeforeMarkingRead = service.ChangeVersion;
+        var versionBeforeMarkingRead = service.GetReadStateVersion("test-user");
         using var cancellationTokenSource = new CancellationTokenSource();
         interceptor.AfterNextSave = () => cancellationTokenSource.Cancel();
 
-        await service.MarkFileReadAsync(filePath, true, cancellationTokenSource.Token);
+        // The read status itself was committed before the cancellation hit the progress sync;
+        // the cancellation reaches the caller instead of being logged as a database error.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.MarkFileReadAsync(filePath, true, cancellationTokenSource.Token));
 
         Assert.True(cancellationTokenSource.IsCancellationRequested);
-        Assert.True(service.ChangeVersion > versionBeforeMarkingRead);
+        Assert.True(service.GetReadStateVersion("test-user") > versionBeforeMarkingRead);
         var readFile = Assert.Single(await service.GetFilteredFilesAsync("read"));
         Assert.True(readFile.IsRead);
     }

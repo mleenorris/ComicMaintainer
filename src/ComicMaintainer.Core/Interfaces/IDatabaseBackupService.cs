@@ -9,6 +9,11 @@ public sealed record DatabaseBackupInfo(string Name, long SizeBytes, DateTime Cr
 /// <param name="RestartRequired">Always true: the swap happens on the next startup.</param>
 public sealed record DatabaseRestoreResult(string Source, DatabaseBackupInfo SafetyBackup, bool RestartRequired = true);
 
+/// <summary>The backup that covers the migrations startup is about to apply.</summary>
+/// <param name="Backup">The backup of the database as the previous version left it.</param>
+/// <param name="FromEarlierAttempt">True when an earlier start already took it, for an upgrade that has not finished.</param>
+public sealed record PreMigrationBackupResult(DatabaseBackupInfo Backup, bool FromEarlierAttempt);
+
 /// <summary>
 /// Creates, lists, prunes and restores consistent online backups of the
 /// application's SQLite database.
@@ -30,6 +35,22 @@ public interface IDatabaseBackupService
     /// <summary>Takes a consistent copy of the live database.</summary>
     Task<DatabaseBackupInfo> CreateBackupAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Takes a consistent copy of the live database before startup applies pending migrations
+    /// (<c>comicmaintainer-yyyyMMdd-HHmmss-premigrate.db</c>), so the previous version can be run again with it.
+    /// A start that retries an upgrade that has not finished gets the backup the upgrade began with instead of a new
+    /// one: the database may be partly migrated by then, and a restart loop must not fill the disk.
+    /// Taking a new backup also deletes the oldest ones beyond
+    /// <see cref="ComicMaintainer.Core.Services.DatabaseBackupService.PreMigrationBackupsKept"/>.
+    /// </summary>
+    Task<PreMigrationBackupResult> CreatePreMigrationBackupAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records that startup's migrations are done, whether or not any were pending, so the next upgrade takes a backup
+    /// of its own.
+    /// </summary>
+    void MarkMigrationsApplied();
+
     /// <summary>Backups, newest first.</summary>
     IReadOnlyList<DatabaseBackupInfo> ListBackups();
 
@@ -39,7 +60,11 @@ public interface IDatabaseBackupService
     /// <summary>Opens a backup for reading, or returns null when it does not exist.</summary>
     Stream? OpenBackup(string name);
 
-    /// <summary>Deletes all but the newest <c>DatabaseBackupRetention</c> backups. Returns the number deleted.</summary>
+    /// <summary>
+    /// Deletes all but the newest <c>DatabaseBackupRetention</c> backups, counting the backups taken before migrations
+    /// separately: the newest <see cref="ComicMaintainer.Core.Services.DatabaseBackupService.PreMigrationBackupsKept"/> of those are kept.
+    /// Returns the number deleted.
+    /// </summary>
     int PruneBackups();
 
     /// <summary>

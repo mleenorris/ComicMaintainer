@@ -23,6 +23,18 @@ function offerInstall(page, outcome = 'accepted') {
 const installButtons = page => ['#installAppButton', '#installAppSidebarButton'].map(selector => page.$(selector).style.display);
 const logged = (page, line) => consoleLines(page, 'log').includes(line);
 
+test('the page links the same-origin /manifest.json, which the CSP\'s manifest-src \'self\' allows', async () => {
+    const page = await boot();
+    const links = page.$$('link[rel="manifest"]');
+
+    assert.equal(links.length, 1);
+    // Not a blob: URL: those do not match 'self', and the manifest's
+    // root-relative start_url, scope and icons cannot resolve against one.
+    assert.equal(links[0].href, 'http://localhost/manifest.json');
+    assert.equal(links[0].getAttribute('crossorigin'), 'use-credentials');
+    assert.ok(![...page.objectUrls.values()].some(blob => /manifest/.test(blob.type)), 'no manifest blob is created');
+});
+
 test('the browser\'s install prompt is held back and both Install App buttons are shown instead', async () => {
     const page = await boot();
     assert.deepEqual(installButtons(page), ['none', 'none']);

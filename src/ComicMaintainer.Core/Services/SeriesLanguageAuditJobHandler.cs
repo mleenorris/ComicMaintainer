@@ -18,7 +18,7 @@ namespace ComicMaintainer.Core.Services;
 /// <see cref="ISeriesLanguagePreferenceRetagService"/>; otherwise the job
 /// only logs the mismatches and reports a count.
 /// </summary>
-public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
+public class SeriesLanguageAuditJobHandler : IScheduledJobFindingsHandler
 {
     public const string Key = "series-language-audit";
 
@@ -27,7 +27,7 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
     private readonly ISeriesLanguagePreferenceRetagService _retag;
     private readonly IOptionsMonitor<AppSettings> _appSettings;
     private readonly ILogger<SeriesLanguageAuditJobHandler> _logger;
-    private readonly ISeriesNameResolver? _seriesNameResolver;
+    private readonly ISeriesNameResolver _seriesNameResolver;
 
     public SeriesLanguageAuditJobHandler(
         ISeriesMetadataCacheService cache,
@@ -35,7 +35,7 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
         ISeriesLanguagePreferenceRetagService retag,
         IOptionsMonitor<AppSettings> appSettings,
         ILogger<SeriesLanguageAuditJobHandler> logger,
-        ISeriesNameResolver? seriesNameResolver = null)
+        ISeriesNameResolver seriesNameResolver)
     {
         _cache = cache;
         _fileStore = fileStore;
@@ -54,7 +54,10 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
     public ScheduledJobDefaults Defaults =>
         new(Enabled: false, IntervalMinutes: 60 * 24, OptionsJson: """{"autoCorrect":false}""");
 
-    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
+    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken) =>
+        (await ExecuteWithFindingsAsync(optionsJson, cancellationToken)).Summary;
+
+    public async Task<ScheduledJobResult> ExecuteWithFindingsAsync(string? optionsJson, CancellationToken cancellationToken)
     {
         var options = ParseOptions(optionsJson);
         var globalDefault = _appSettings.CurrentValue.DefaultPreferredLanguage;
@@ -62,21 +65,20 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
         var records = await _cache.GetAllAsync(cancellationToken);
         var allFiles = (await _fileStore.GetAllFilesAsync(cancellationToken)).ToList();
 
-        // Build a quick lookup from current file Metadata.Series -> file paths.
-        // Series tags are matched case-insensitively (mirrors how the retag
-        // service collects matching titles).
-        var filesBySeries = new Dictionary<string, List<ComicFile>>(StringComparer.OrdinalIgnoreCase);
+        // Bucket the files by the series key (SeriesKey) of their tracked
+        // <Series> tag, the identity SeriesFileMatcher matches series by. Only
+        // files with a tracked tag can be audited: the audit compares the tag.
+        var filesBySeriesKey = new Dictionary<string, List<ComicFile>>(StringComparer.Ordinal);
         foreach (var file in allFiles)
         {
-            var seriesTag = file.Metadata?.Series;
-            if (string.IsNullOrWhiteSpace(seriesTag))
+            if (SeriesKey.TryNormalize(file.Metadata?.Series) is not { } seriesKey)
             {
                 continue;
             }
-            if (!filesBySeries.TryGetValue(seriesTag, out var bucket))
+            if (!filesBySeriesKey.TryGetValue(seriesKey, out var bucket))
             {
                 bucket = new List<ComicFile>();
-                filesBySeries[seriesTag] = bucket;
+                filesBySeriesKey[seriesKey] = bucket;
             }
             bucket.Add(file);
         }
@@ -96,33 +98,33 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
             // normalize pipeline writes into ComicInfo.xml — the audit
             // exists to catch drift between cache state and on-disk
             // metadata, so it must use the same resolver as the writer.
-            var expected = _seriesNameResolver is not null
-                ? _seriesNameResolver.ResolveForRecord(record)
-                : SeriesDisplayTitleResolver.Resolve(record, globalDefault);
+            var expected = _seriesNameResolver.ResolveForRecord(record);
             if (string.IsNullOrWhiteSpace(expected))
             {
                 continue;
             }
 
-            // Collect titles that identify files belonging to this series. We
-            // intentionally include every alias / localized title (same set
-            // used by SeriesLanguagePreferenceRetagService) so we can find
-            // files whose <Series> has previously been written in another
-            // language and now disagrees with the current preference.
-            var titles = CollectTitlesForRecord(record);
-            if (titles.Count == 0)
+            // The series keys of every title the series is known by (aliases
+            // and localized titles included, see SeriesFileMatcher), so we can
+            // find files whose <Series> has previously been written in another
+            // language and now disagrees with the current preference. A tag
+            // with the expected title's key is only spelled differently, which
+            // is not a language mismatch.
+            var seriesKeys = SeriesFileMatcher.KeysOf(record);
+            if (seriesKeys.Count == 0)
             {
                 continue;
             }
 
+            var expectedKey = SeriesKey.TryNormalize(expected);
             int recordMismatchFiles = 0;
-            foreach (var title in titles)
+            foreach (var seriesKey in seriesKeys)
             {
-                if (string.Equals(title, expected, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(seriesKey, expectedKey, StringComparison.Ordinal))
                 {
                     continue;
                 }
-                if (filesBySeries.TryGetValue(title, out var bucket))
+                if (filesBySeriesKey.TryGetValue(seriesKey, out var bucket))
                 {
                     recordMismatchFiles += bucket.Count;
                 }
@@ -156,37 +158,7 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
             ? $"Scanned {seriesScanned} series: {seriesWithMismatch} with language mismatch ({filesWithMismatch} file(s)); flagged {seriesQueued} series for metadata backfill."
             : $"Scanned {seriesScanned} series: {seriesWithMismatch} with language mismatch ({filesWithMismatch} file(s)). Enable autoCorrect to retag.";
         _logger.LogInformation("{Summary}", summary);
-        return summary;
-    }
-
-    /// <summary>
-    /// Same set used by <see cref="SeriesLanguagePreferenceRetagService"/>:
-    /// canonical title + provider/user aliases + localized titles. These are
-    /// the values the per-file <c>&lt;Series&gt;</c> tag could currently hold
-    /// for a file that belongs to <paramref name="record"/>.
-    /// </summary>
-    private static HashSet<string> CollectTitlesForRecord(SeriesMetadataCacheRecord record)
-    {
-        var titles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(record.CanonicalTitle))
-        {
-            titles.Add(record.CanonicalTitle);
-        }
-        if (record.Aliases is { Count: > 0 })
-        {
-            titles.UnionWith(record.Aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
-        }
-        if (record.UserAliases is { Count: > 0 })
-        {
-            titles.UnionWith(record.UserAliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
-        }
-        if (record.LocalizedTitles is { Count: > 0 })
-        {
-            titles.UnionWith(record.LocalizedTitles
-                .Where(localized => !string.IsNullOrWhiteSpace(localized?.Title))
-                .Select(localized => localized!.Title));
-        }
-        return titles;
+        return new ScheduledJobResult(summary, seriesWithMismatch);
     }
 
     private static SeriesLanguageAuditOptions ParseOptions(string? optionsJson)

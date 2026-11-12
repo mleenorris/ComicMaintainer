@@ -109,7 +109,7 @@ public class FrontendAppShellTests
 
         Assert.Contains("id=\"settingsLoadStatus\"", html);
         Assert.Contains("id=\"settingsRetryButton\" onclick=\"loadSettings()\"", html);
-        Assert.Contains("el.disabled = !settingsLoaded || (!isUserSetting && !userCapabilities.canAdminister);", js);
+        Assert.Contains("el.disabled = !settingsLoaded || (!isUserSetting && !userCapabilities.canAdminister) || el.hasAttribute('data-env-locked');", js);
         Assert.Contains("button.disabled = !settingsLoaded || !userCapabilities.canAdminister;", js);
         Assert.Contains("if (!settingsLoaded || !userCapabilities.canAdminister) return;", js);
         Assert.Contains("setSettingsLoadStatus('error'", js);
@@ -132,26 +132,13 @@ public class FrontendAppShellTests
     {
         var js = WwwrootFiles.ReadAppScripts();
 
-        // Every Save Settings group is sent by saveSettingsGroup.
-        var helperStart = js.IndexOf("async function saveSettingsGroup(", StringComparison.Ordinal);
-        Assert.True(helperStart >= 0, "Expected the shared settings save request");
-        var requestStart = js.IndexOf("fetch(apiUrl(path)", helperStart, StringComparison.Ordinal);
-        Assert.True(requestStart >= 0, "Expected saveSettingsGroup to send the request");
-        var requestEnd = js.IndexOf("});", requestStart, StringComparison.Ordinal);
-        Assert.True(requestEnd > requestStart, "Could not find the end of the settings save request");
-        Assert.Contains("...getAuthHeaders()", js[requestStart..requestEnd]);
-
-        foreach (var path in new[]
-        {
-            "/api/settings/filename-format",
-            "/api/settings/log-max-bytes",
-            "/api/settings/issue-number-padding",
-            "/api/settings/database-cleanup-interval-hours",
-            "/api/settings/external-series-metadata"
-        })
-        {
-            Assert.True(js.Contains($"path: '{path}'", StringComparison.Ordinal), $"Expected a save request for {path}");
-        }
+        // Save Settings sends one request for every group.
+        var helperStart = js.IndexOf("async function saveAllSettings(", StringComparison.Ordinal);
+        Assert.True(helperStart >= 0, "Expected the settings save request");
+        // apiFetch adds the session headers to every request it sends.
+        var requestStart = js.IndexOf("apiFetch('/api/settings', { method: 'PUT', body })", helperStart, StringComparison.Ordinal);
+        Assert.True(requestStart >= 0, "Expected saveAllSettings to send the request");
+        Assert.Contains("getAuthHeaders({ allowExpiredToken })", js);
     }
 
     [Fact]
@@ -208,9 +195,9 @@ public class FrontendAppShellTests
 
         // Old links and bookmarks to /jobs.html land on the routed page.
         var stub = Read("jobs.html");
-        Assert.Contains("window.location.replace('/#/jobs')", stub);
-        Assert.Contains("url=/#/jobs", stub);
-        Assert.Contains("<a href=\"/#/jobs\">", stub);
+        Assert.Contains("window.location.replace('__BASE_PATH__/#/jobs')", stub);
+        Assert.Contains("url=__BASE_PATH__/#/jobs", stub);
+        Assert.Contains("<a href=\"__BASE_PATH__/#/jobs\">", stub);
     }
 
     [Fact]
@@ -235,11 +222,48 @@ public class FrontendAppShellTests
     }
 
     [Fact]
+    public void Users_IsARoutedPageOnlyOfferedToAdministrators()
+    {
+        var html = Read("index.html");
+        var js = WwwrootFiles.ReadAppScripts();
+
+        // The Users page (#/users) is a page of the app shell, like Scheduled Jobs.
+        var main = Regex.Match(html, @"<main\b[\s\S]*?</main>");
+        Assert.True(main.Success, "index.html has no <main> element.");
+        Assert.Contains("id=\"usersView\"", main.Value);
+        Assert.Contains("if (raw === '/users') return { view: 'users' };", js);
+        Assert.Matches(@"function openUsers\(\)\s*\{\s*navigate\('#/users'\);", js);
+        Assert.Matches(@"id=""sidebarUsersBtn""[^>]*onclick=""openUsers\(\)""", html);
+        Assert.Contains("sidebarUsersBtn: currentView === 'users'", js);
+
+        // /api/users is administrator-only, so every entry point is hidden
+        // from everyone else ...
+        foreach (var id in new[] { "sidebarUsersBtn", "usersMenuItem", "usersShortcutItem" })
+        {
+            Assert.Contains($"id=\"{id}\"", html);
+            Assert.Matches(new Regex("'" + id + @"'[\s\S]{0,500}?\.hidden = !userCapabilities\.canAdminister"), js);
+        }
+        Assert.Contains("} else if (key === 'u' && userCapabilities.canAdminister) {", js);
+
+        // ... and anyone who still reaches the page sees a notice, not a 403.
+        Assert.Matches(@"id=""usersAdminNotice""[^>]*hidden", html);
+        Assert.Matches(@"if \(!userCapabilities\.canAdminister\) \{\s*showUsersAdminOnly\(\);", js);
+        Assert.Matches(@"if \(error\.status === 403\) \{\s*showUsersAdminOnly\(\);", js);
+
+        // Its dialogs are static .modal elements, so modals.js gives them the
+        // focus trap, Escape and focus return.
+        foreach (var id in new[] { "addUserModal", "userRoleModal", "userPasswordModal", "userConfirmModal" })
+        {
+            Assert.Matches(new Regex(@"<div class=""modal"" id=""" + id + @""" role=""dialog"" aria-modal=""true"""), html);
+        }
+    }
+
+    [Fact]
     public void Router_TreatsOverviewLibraryAndSettingsAsSeparatePages()
     {
         var js = WwwrootFiles.ReadAppScripts();
 
-        Assert.Contains("const PAGE_TITLES = { home: 'Overview', library: 'Library', settings: 'Settings', jobs: 'Scheduled Jobs' };", js);
+        Assert.Contains("const PAGE_TITLES = { home: 'Overview', library: 'Library', settings: 'Settings', jobs: 'Scheduled Jobs', users: 'Users' };", js);
         Assert.Matches(@"applyViewVisibility\(route\.view\);\s*enterPage\(route\.view\);", js);
         // A series page belongs to the library so returning keeps its scroll.
         Assert.Contains("const page = view === 'series' ? 'library' : view;", js);

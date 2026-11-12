@@ -6,6 +6,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Telemetry;
+using ComicMaintainer.Tests.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -85,6 +86,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
         var file = CreateComic("Series 001.cbz");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateService().QueueFilesAsync(
+            TestEmailScopes.Everyone,
             new[] { file }, 999, null, EmailDeliverySource.Manual, skipAlreadyDelivered: false));
 
         Assert.Equal("Ereader device 999 was not found.", ex.Message);
@@ -97,6 +99,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
         var files = CreateSeries("Series", 2);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateService().QueueCondensedFilesAsync(
+            TestEmailScopes.Everyone,
             files, 999, EmailCondenseMode.All, null, EmailDeliverySource.Manual, skipAlreadyDelivered: false));
 
         Assert.Equal("Ereader device 999 was not found.", ex.Message);
@@ -106,7 +109,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [Fact]
     public async Task SendTestEmailAsync_ThrowsForAnUnknownDevice()
     {
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateService().SendTestEmailAsync(999));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateService().SendTestEmailAsync(TestEmailScopes.Everyone, 999));
 
         Assert.Equal("Ereader device 999 was not found.", ex.Message);
         _sender.Verify(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -116,10 +119,11 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     public async Task QueueCondensedFilesAsync_ThrowsWhenEmailIsNotConfigured()
     {
         _sender.SetupGet(s => s.IsConfigured).Returns(false);
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
         var files = CreateSeries("Series", 2);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateService().QueueCondensedFilesAsync(
+            TestEmailScopes.Everyone,
             files, device.Id, EmailCondenseMode.All, null, EmailDeliverySource.Manual, skipAlreadyDelivered: false));
 
         Assert.Contains("Email delivery is not configured", ex.Message);
@@ -132,10 +136,11 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [InlineData(" None ")]
     public async Task QueueCondensedFilesAsync_RejectsAModeThatDoesNotCondense(string? condenseMode)
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
         var files = CreateSeries("Series", 2);
 
         var ex = await Assert.ThrowsAsync<ArgumentException>(() => CreateService().QueueCondensedFilesAsync(
+            TestEmailScopes.Everyone,
             files, device.Id, condenseMode, null, EmailDeliverySource.Manual, skipAlreadyDelivered: false));
 
         Assert.Equal("condenseMode", ex.ParamName);
@@ -151,6 +156,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
         var files = CreateSeries("Series", 2);
 
         var ex = await Assert.ThrowsAsync<ArgumentException>(() => CreateService().PlanCondensedDeliveryAsync(
+            TestEmailScopes.Everyone,
             files, condenseMode, null));
 
         Assert.Equal("condenseMode", ex.ParamName);
@@ -159,10 +165,11 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [Fact]
     public async Task QueueCondensedFilesAsync_RecordsAnAutomaticSource()
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Azw3);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Azw3);
         var files = CreateSeries("Auto Series", 2);
 
         var result = await CreateService().QueueCondensedFilesAsync(
+            TestEmailScopes.Everyone,
             files, device.Id, EmailCondenseMode.All, null, "AUTO", skipAlreadyDelivered: false);
 
         var queued = Assert.Single(result.Queued);
@@ -184,6 +191,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
         var files = CreateSeries("Series", 2);
 
         var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => CreateService().CreateCondensedBookAsync(
+            TestEmailScopes.Everyone,
             files, EmailCondenseMode.All, null, bookIndex));
 
         Assert.Equal("bookIndex", ex.ParamName);
@@ -207,9 +215,9 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
         string? requestedFormat,
         string expected)
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", deviceFormat);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", deviceFormat);
 
-        var format = await CreateService().ResolveCondensedFormatAsync(requestedFormat, device.Id, CancellationToken.None);
+        var format = await CreateService().ResolveCondensedFormatAsync(TestEmailScopes.Everyone, requestedFormat, device.Id, CancellationToken.None);
 
         Assert.Equal(expected, format);
     }
@@ -217,7 +225,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [Fact]
     public async Task ResolveCondensedFormatAsync_FallsBackToEpubForAnUnknownDevice()
     {
-        var format = await CreateService().ResolveCondensedFormatAsync(null, 999, CancellationToken.None);
+        var format = await CreateService().ResolveCondensedFormatAsync(TestEmailScopes.Everyone, null, 999, CancellationToken.None);
 
         Assert.Equal(EmailDeliveryFormat.Epub, format);
     }
@@ -232,6 +240,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
         var outside = CreateFile(Path.Join(_root, "outside", "Escaped 001.cbz"));
 
         var plan = await CreateService().PlanCondensedDeliveryAsync(
+            TestEmailScopes.Everyone,
             new[] { " ", valid, outside, missing, notAComic, valid },
             EmailCondenseMode.All,
             null);
@@ -252,6 +261,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
         var missing = Path.Join(_watchedDir, "Series 404.cbz");
 
         var plan = await CreateService().PlanCondensedDeliveryAsync(
+            TestEmailScopes.Everyone,
             new[] { missing }, EmailCondenseMode.All, null);
 
         Assert.Equal(EmailCondenseMode.All, plan.Mode);
@@ -265,12 +275,13 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [Fact]
     public async Task UnreadableCondensedMemberLists_AreTreatedAsSingleIssueDeliveries()
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
         var files = CreateSeries("Series", 3);
         await InsertDeliveryAsync(device.Id, files[0], EmailDeliveryStatus.Sent, condensedFilePaths: "not json");
         await InsertDeliveryAsync(device.Id, files[1], EmailDeliveryStatus.Pending, condensedFilePaths: "null");
 
         var plan = await CreateService().PlanCondensedDeliveryAsync(
+            TestEmailScopes.Everyone,
             files,
             EmailCondenseMode.All,
             null,
@@ -281,7 +292,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
         Assert.Equal("Already delivered to this device", plan.Skipped[files[1]]);
         Assert.Equal(new[] { files[2] }, Assert.Single(plan.Books).Files);
 
-        var recent = await CreateService().GetRecentDeliveriesAsync(10);
+        var recent = await CreateService().GetRecentDeliveriesAsync(TestEmailScopes.Everyone, 10);
         Assert.Equal(2, recent.Count);
         Assert.All(recent, delivery => Assert.Equal(1, delivery.IssueCount));
     }
@@ -289,7 +300,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [Fact]
     public async Task QueueCondensedFilesAsync_StillQueuesWhenAnIssueVanishesWhileTheBookIsSized()
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
         var files = CreateSeries("Vanish", 2);
 
         // The book is named (which consults the cache) before it is sized, so
@@ -299,6 +310,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
             .ReturnsAsync((SeriesMetadataCacheRecord?)null);
 
         var result = await CreateService().QueueCondensedFilesAsync(
+            TestEmailScopes.Everyone,
             files, device.Id, EmailCondenseMode.All, null, EmailDeliverySource.Manual, skipAlreadyDelivered: false);
 
         var queued = Assert.Single(result.Queued);
@@ -316,7 +328,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
             CreateComic("Omega.cbz", folder: "Wordless")
         };
 
-        var plan = await CreateService().PlanCondensedDeliveryAsync(files, EmailCondenseMode.All, null);
+        var plan = await CreateService().PlanCondensedDeliveryAsync(TestEmailScopes.Everyone, files, EmailCondenseMode.All, null);
 
         Assert.Equal("Wordless (2 issues)", Assert.Single(plan.Books).DisplayName);
     }
@@ -330,7 +342,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
             CreateComic("Zeta.cbz", folder: "Mixed")
         };
 
-        var plan = await CreateService().PlanCondensedDeliveryAsync(files, EmailCondenseMode.All, null);
+        var plan = await CreateService().PlanCondensedDeliveryAsync(TestEmailScopes.Everyone, files, EmailCondenseMode.All, null);
 
         Assert.Equal("Mixed (2 issues)", Assert.Single(plan.Books).DisplayName);
     }
@@ -344,9 +356,25 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
             CreateComic("Series #13.cbz", folder: "Decimal")
         };
 
-        var plan = await CreateService().PlanCondensedDeliveryAsync(files, EmailCondenseMode.All, null);
+        var plan = await CreateService().PlanCondensedDeliveryAsync(TestEmailScopes.Everyone, files, EmailCondenseMode.All, null);
 
         Assert.Equal("Decimal 012.5-013", Assert.Single(plan.Books).DisplayName);
+    }
+
+    [Fact]
+    public async Task PlanCondensedDeliveryAsync_ReadsIssueNumbersWithTheSharedFileNameParser()
+    {
+        // The shared parser ignores volume tokens and numbers glued to letters, so neither
+        // the "20th" of the first name nor the "v2" of the second is taken for the issue.
+        var files = new[]
+        {
+            CreateComic("Batman 005 - 20th Anniversary.cbz", folder: "Batman"),
+            CreateComic("Batman 006 v2.cbz", folder: "Batman")
+        };
+
+        var plan = await CreateService().PlanCondensedDeliveryAsync(TestEmailScopes.Everyone, files, EmailCondenseMode.All, null);
+
+        Assert.Equal("Batman 005-006", Assert.Single(plan.Books).DisplayName);
     }
 
     [Theory]
@@ -366,7 +394,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
                 ResolvedSeriesName = resolvedName
             });
 
-        var plan = await CreateService().PlanCondensedDeliveryAsync(files, EmailCondenseMode.All, null);
+        var plan = await CreateService().PlanCondensedDeliveryAsync(TestEmailScopes.Everyone, files, EmailCondenseMode.All, null);
 
         Assert.Equal(expected, Assert.Single(plan.Books).DisplayName);
     }
@@ -379,7 +407,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
         _seriesCache.Setup(s => s.GetByTitleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(failure);
 
-        var plan = await CreateService().PlanCondensedDeliveryAsync(files, EmailCondenseMode.All, null);
+        var plan = await CreateService().PlanCondensedDeliveryAsync(TestEmailScopes.Everyone, files, EmailCondenseMode.All, null);
 
         Assert.Equal("Folder Name 001-002", Assert.Single(plan.Books).DisplayName);
         var warning = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Warning);
@@ -395,6 +423,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
             .ThrowsAsync(new OperationCanceledException("stopping"));
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => CreateService().PlanCondensedDeliveryAsync(
+            TestEmailScopes.Everyone,
             files, EmailCondenseMode.All, null));
 
         Assert.Empty(_logger.Entries);
@@ -405,8 +434,8 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [InlineData("   ")]
     public async Task QueueAutoSendAsync_IgnoresABlankPath(string filePath)
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
-        await _devices.UpsertSubscriptionAsync("Unknown Series", device.Id, EmailDeliveryFormat.Device, true);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
+        await _devices.UpsertSubscriptionAsync(TestEmailScopes.Everyone, "Unknown Series", device.Id, EmailDeliveryFormat.Device, true);
 
         var count = await CreateService().QueueAutoSendAsync(filePath, "Unknown Series");
 
@@ -417,8 +446,8 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [Fact]
     public async Task QueueAutoSendAsync_IgnoresAFileWithoutAUsableSeriesKey()
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
-        await _devices.UpsertSubscriptionAsync("Unknown Series", device.Id, EmailDeliveryFormat.Device, true);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
+        await _devices.UpsertSubscriptionAsync(TestEmailScopes.Everyone, "Unknown Series", device.Id, EmailDeliveryFormat.Device, true);
         var punctuationOnly = CreateComic("Issue 001.cbz", folder: "!!!");
         var service = CreateService();
 
@@ -433,10 +462,10 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [Fact]
     public async Task QueueAutoSendAsync_KeepsQueueingWhenOneSubscriptionFails()
     {
-        var broken = await _devices.CreateDeviceAsync("Broken", "broken@kindle.com", EmailDeliveryFormat.Epub);
-        var working = await _devices.CreateDeviceAsync("Working", "working@kindle.com", EmailDeliveryFormat.Epub);
-        var brokenSubscription = await _devices.UpsertSubscriptionAsync("Auto Series", broken.Id, EmailDeliveryFormat.Device, true);
-        await _devices.UpsertSubscriptionAsync("Auto Series", working.Id, EmailDeliveryFormat.Device, true);
+        var broken = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Broken", "broken@kindle.com", EmailDeliveryFormat.Epub);
+        var working = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Working", "working@kindle.com", EmailDeliveryFormat.Epub);
+        var brokenSubscription = await _devices.UpsertSubscriptionAsync(TestEmailScopes.Everyone, "Auto Series", broken.Id, EmailDeliveryFormat.Device, true);
+        await _devices.UpsertSubscriptionAsync(TestEmailScopes.Everyone, "Auto Series", working.Id, EmailDeliveryFormat.Device, true);
 
         await using (var db = await _dbFactory.CreateDbContextAsync())
         {
@@ -473,10 +502,11 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [Fact]
     public async Task ProcessDeliveryAsync_FailsWhenTheIssueWasDeletedAfterQueueing()
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
         var file = CreateComic("Gone 001.cbz");
         var service = CreateService();
         var queued = Assert.Single((await service.QueueFilesAsync(
+            TestEmailScopes.Everyone,
             new[] { file }, device.Id, null, EmailDeliverySource.Manual, false)).Queued);
         File.Delete(file);
 
@@ -492,7 +522,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [Fact]
     public async Task ProcessDeliveryAsync_RefusesAStoredPathOutsideTheLibrary()
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
         var outside = CreateFile(Path.Join(_root, "outside", "Escaped 001.cbz"));
         var deliveryId = await InsertDeliveryAsync(device.Id, outside, EmailDeliveryStatus.Pending);
 
@@ -507,10 +537,11 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [Fact]
     public async Task ProcessDeliveryAsync_FailsWhenTheConverterProducesAnEmptyBook()
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
         var file = CreateComic("Empty 001.cbz");
         var service = CreateService();
         var queued = Assert.Single((await service.QueueFilesAsync(
+            TestEmailScopes.Everyone,
             new[] { file }, device.Id, null, EmailDeliverySource.Manual, false)).Queued);
         var converted = SetupEpubConversion(file, bytes: Array.Empty<byte>());
 
@@ -526,10 +557,11 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [Fact]
     public async Task ProcessDeliveryAsync_LeavesTheDeliveryPendingWhenSendingIsCancelled()
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
         var file = CreateComic("Cancelled 001.cbz");
         var service = CreateService();
         var queued = Assert.Single((await service.QueueFilesAsync(
+            TestEmailScopes.Everyone,
             new[] { file }, device.Id, null, EmailDeliverySource.Manual, false)).Queued);
         var converted = SetupEpubConversion(file);
         _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()))
@@ -547,7 +579,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [Fact]
     public async Task ProcessDeliveryAsync_UsesTheCachedSeriesArtworkAndName()
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
         var file = CreateComic("Cached 001.cbz", folder: "Cached Folder");
         CreateFile(Path.Join(_watchedDir, "Cached Folder", "cover.jpg"));
         var cachedImage = Path.Join(_root, "series-images", "cached.jpg");
@@ -562,6 +594,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
 
         var service = CreateService();
         var queued = Assert.Single((await service.QueueFilesAsync(
+            TestEmailScopes.Everyone,
             new[] { file }, device.Id, null, EmailDeliverySource.Manual, false)).Queued);
         EpubConversionOptions? usedOptions = null;
         SetupEpubConversion(file, onConvert: (_, options) => usedOptions = options);
@@ -581,7 +614,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [InlineData("missing.jpg")]
     public async Task ProcessDeliveryAsync_FallsBackToTheCanonicalTitleAndTheFolderCover(string? localImageFile)
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
         var file = CreateComic("Cached 001.cbz", folder: "Cached Folder");
         var sidecar = CreateFile(Path.Join(_watchedDir, "Cached Folder", "cover.png"));
         _seriesCache.Setup(s => s.GetByTitleAsync("Cached Folder", It.IsAny<CancellationToken>()))
@@ -595,6 +628,7 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
 
         var service = CreateService();
         var queued = Assert.Single((await service.QueueFilesAsync(
+            TestEmailScopes.Everyone,
             new[] { file }, device.Id, null, EmailDeliverySource.Manual, false)).Queued);
         EpubConversionOptions? usedOptions = null;
         SetupEpubConversion(file, onConvert: (_, options) => usedOptions = options);
@@ -615,10 +649,11 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     public async Task ProcessDeliveryAsync_UsesTheSystemTempDirectoryWhenNoneIsConfigured()
     {
         _settings.TempFileDirectory = "  ";
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
         var file = CreateComic("Temp 001.cbz");
         var service = CreateService();
         var queued = Assert.Single((await service.QueueFilesAsync(
+            TestEmailScopes.Everyone,
             new[] { file }, device.Id, null, EmailDeliverySource.Manual, false)).Queued);
         string? workDirectory = null;
         SetupEpubConversion(file, onConvert: (outDir, _) => workDirectory = outDir);
@@ -639,10 +674,11 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [InlineData("Plain Issue 001.zip", "application/octet-stream")]
     public async Task ProcessDeliveryAsync_SendsOriginalArchivesWithTheirContentType(string fileName, string contentType)
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
         var file = CreateComic(fileName);
         var service = CreateService();
         var queued = Assert.Single((await service.QueueFilesAsync(
+            TestEmailScopes.Everyone,
             new[] { file }, device.Id, null, EmailDeliverySource.Manual, false)).Queued);
         ComicEmailMessage? sent = null;
         _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()))
@@ -662,10 +698,11 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
     [Fact]
     public async Task ProcessDeliveryAsync_TruncatesALongErrorMessage()
     {
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
         var file = CreateComic("Long Error 001.cbz");
         var service = CreateService();
         var queued = Assert.Single((await service.QueueFilesAsync(
+            TestEmailScopes.Everyone,
             new[] { file }, device.Id, null, EmailDeliverySource.Manual, false)).Queued);
         _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException(new string('x', 2000)));
@@ -706,11 +743,12 @@ public sealed class ComicEmailServiceCoverageTests : IDisposable
         });
         listener.Start();
 
-        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        var device = await _devices.CreateDeviceAsync(TestEmailScopes.Everyone, "Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
         var sentFile = CreateComic("Metrics 001.cbz");
         var failedFile = CreateComic("Metrics 002.cbz");
         var service = CreateService(metrics);
         var queued = (await service.QueueFilesAsync(
+            TestEmailScopes.Everyone,
             new[] { sentFile, failedFile }, device.Id, null, EmailDeliverySource.Manual, false)).Queued;
         _sender.Setup(s => s.SendAsync(
                 It.Is<ComicEmailMessage>(m => m.AttachmentPath == sentFile),

@@ -9,12 +9,12 @@ namespace ComicMaintainer.Core.Services;
 
 /// <summary>
 /// Default implementation of <see cref="ISeriesLanguagePreferenceRetagService"/>.
-/// Builds a set of "matching titles" for the affected series (canonical title +
-/// aliases + localized titles), scans the tracked file store for files whose
-/// <c>Metadata.Series</c> (or parent folder name) matches one of those titles,
-/// and flags them for a metadata backfill via
-/// <see cref="IFileStoreService.MarkFilesNeedingBackfillAsync"/>. The scheduled
-/// metadata-backfill job then rewrites each file's ComicInfo.xml
+/// Finds the tracked files of the affected series with
+/// <see cref="SeriesFileMatcher"/> (their <c>Metadata.Series</c> or
+/// folder-derived series name has the series key of one of the series' titles:
+/// canonical title, aliases or localized titles) and flags them for a metadata
+/// backfill via <see cref="IFileStoreService.MarkFilesNeedingBackfillAsync"/>.
+/// The scheduled metadata-backfill job then rewrites each file's ComicInfo.xml
 /// <c>&lt;Series&gt;</c> from the DB-authoritative metadata. This keeps the
 /// database as the source of truth and avoids the per-file churn of an eager
 /// forced normalization job.
@@ -53,13 +53,13 @@ public class SeriesLanguagePreferenceRetagService : ISeriesLanguagePreferenceRet
             return 0;
         }
 
-        var titles = CollectTitlesForRecord(record);
-        if (titles.Count == 0)
+        var seriesKeys = SeriesFileMatcher.KeysOf(record);
+        if (seriesKeys.Count == 0)
         {
             return 0;
         }
 
-        return await MarkMatchingFilesForBackfillAsync(titles, cancellationToken);
+        return await MarkMatchingFilesForBackfillAsync(seriesKeys, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -73,7 +73,7 @@ public class SeriesLanguagePreferenceRetagService : ISeriesLanguagePreferenceRet
         }
 
         var allRecords = await _cache.GetAllAsync(cancellationToken);
-        var titles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seriesKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var record in allRecords)
         {
             // Skip series that have explicitly opted in to a per-series
@@ -82,73 +82,23 @@ public class SeriesLanguagePreferenceRetagService : ISeriesLanguagePreferenceRet
             {
                 continue;
             }
-            foreach (var title in CollectTitlesForRecord(record))
-            {
-                titles.Add(title);
-            }
+            seriesKeys.UnionWith(SeriesFileMatcher.KeysOf(record));
         }
 
-        if (titles.Count == 0)
+        if (seriesKeys.Count == 0)
         {
             return 0;
         }
 
-        return await MarkMatchingFilesForBackfillAsync(titles, cancellationToken);
-    }
-
-    /// <summary>
-    /// Build the case-insensitive set of titles that should match a file's
-    /// <c>Metadata.Series</c> to be considered part of <paramref name="record"/>.
-    /// Includes the canonical title, every provider/user alias, and every
-    /// localized title (so files whose <c>&lt;Series&gt;</c> has already been
-    /// rewritten to a localized name are still picked up on a later
-    /// preference change).
-    /// </summary>
-    private static HashSet<string> CollectTitlesForRecord(SeriesMetadataCacheRecord record)
-    {
-        var titles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(record.CanonicalTitle))
-        {
-            titles.Add(record.CanonicalTitle);
-        }
-        if (record.Aliases is { Count: > 0 })
-        {
-            titles.UnionWith(record.Aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
-        }
-        if (record.UserAliases is { Count: > 0 })
-        {
-            titles.UnionWith(record.UserAliases.Where(alias => !string.IsNullOrWhiteSpace(alias)));
-        }
-        if (record.LocalizedTitles is { Count: > 0 })
-        {
-            titles.UnionWith(record.LocalizedTitles
-                .Where(localized => !string.IsNullOrWhiteSpace(localized?.Title))
-                .Select(localized => localized!.Title));
-        }
-        return titles;
+        return await MarkMatchingFilesForBackfillAsync(seriesKeys, cancellationToken);
     }
 
     private async Task<int> MarkMatchingFilesForBackfillAsync(
-        HashSet<string> titles,
+        IReadOnlySet<string> seriesKeys,
         CancellationToken cancellationToken)
     {
         var files = await _fileStore.GetAllFilesAsync(cancellationToken);
-
-        // Build a case-insensitive set of normalized keys for the titles we
-        // care about so we can do a key-based comparison against folder names.
-        // The cache's NormalizeKey applies the same case/whitespace/punctuation
-        // folding the rest of the system uses, so a folder like "One_Piece"
-        // matches a record canonicalised as "One Piece".
-        var titleKeys = new HashSet<string>(
-            titles.Select(t => _cache.NormalizeKey(t))
-                  .Where(k => !string.IsNullOrWhiteSpace(k))!,
-            StringComparer.OrdinalIgnoreCase);
-
-        var matchedPaths = files
-            .Where(f => !string.IsNullOrWhiteSpace(f.FilePath) && MatchesAnyTitle(f, titles, titleKeys))
-            .Select(f => f.FilePath)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var matchedPaths = SeriesFileMatcher.SelectFilePaths(files, seriesKeys);
 
         if (matchedPaths.Count == 0)
         {
@@ -162,40 +112,5 @@ public class SeriesLanguagePreferenceRetagService : ISeriesLanguagePreferenceRet
             "Flagged {FileCount} file(s) for metadata backfill to apply updated preferred-language/series-name metadata.",
             marked);
         return marked;
-    }
-
-    /// <summary>
-    /// Returns true when a tracked file should be considered part of the
-    /// series identified by <paramref name="titles"/>. We first try the file's
-    /// cached ComicInfo.xml <c>Series</c> value (when populated), then fall
-    /// back to the parent-folder-derived series name normalized via the cache
-    /// key so a folder rename / case difference / underscore-vs-colon doesn't
-    /// hide the match. The folder fallback is necessary because the
-    /// <see cref="ComicFile.Metadata"/> field is not currently populated for
-    /// most tracked files, which would otherwise cause the retag scan to find
-    /// zero matches and silently skip rewriting <c>&lt;Series&gt;</c>.
-    /// </summary>
-    private bool MatchesAnyTitle(ComicFile file, HashSet<string> titles, HashSet<string> titleKeys)
-    {
-        var metadataSeries = file.Metadata?.Series;
-        if (!string.IsNullOrWhiteSpace(metadataSeries) && titles.Contains(metadataSeries))
-        {
-            return true;
-        }
-
-        if (titleKeys.Count == 0)
-        {
-            return false;
-        }
-
-        var folderName = Path.GetFileName(Path.GetDirectoryName(file.FilePath));
-        if (string.IsNullOrWhiteSpace(folderName))
-        {
-            return false;
-        }
-
-        var folderSeries = ComicFileProcessor.NormalizeSeriesName(folderName, forComparison: false);
-        var folderKey = _cache.NormalizeKey(folderSeries);
-        return !string.IsNullOrWhiteSpace(folderKey) && titleKeys.Contains(folderKey);
     }
 }

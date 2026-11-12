@@ -31,7 +31,13 @@ public class AuthServiceTests
         _mockJwtSettings = new Mock<IOptions<JwtSettings>>();
         _mockJwtSettings.Setup(x => x.Value).Returns(jwtSettings);
 
-        _authService = new AuthService(_mockUserManager.Object, _mockJwtSettings.Object);
+        _authService = new AuthService(
+            _mockUserManager.Object,
+            _mockJwtSettings.Object,
+            Options.Create(new AutheliaSettings()),
+            new ComicMaintainer.Core.Services.Auth.SetupTokenProvider(null),
+            Mock.Of<ComicMaintainer.Core.Services.Auth.IAuthSessionValidator>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthService>.Instance);
     }
 
     [Fact]
@@ -91,6 +97,41 @@ public class AuthServiceTests
     }
 
     [Fact]
+    public async Task VerifyPasswordAsync_WithTheRightPassword_ReturnsTheAccountAndCountsAsASignIn()
+    {
+        var user = new ApplicationUser { Id = "reader", UserName = "reader", IsActive = true };
+        _mockUserManager.Setup(x => x.FindByNameAsync("reader")).ReturnsAsync(user);
+        _mockUserManager.Setup(x => x.CheckPasswordAsync(user, "Right1234")).ReturnsAsync(true);
+
+        var verified = await _authService.VerifyPasswordAsync("reader", "Right1234", "198.51.100.1");
+
+        Assert.Same(user, verified);
+        Assert.NotNull(user.LastLoginAt);
+        _mockUserManager.Verify(x => x.ResetAccessFailedCountAsync(user), Times.Once);
+    }
+
+    [Fact]
+    public async Task VerifyPasswordAsync_WithAWrongPassword_ReturnsNull()
+    {
+        var user = new ApplicationUser { Id = "reader", UserName = "reader", IsActive = true };
+        _mockUserManager.Setup(x => x.FindByNameAsync("reader")).ReturnsAsync(user);
+        _mockUserManager.Setup(x => x.CheckPasswordAsync(user, "wrong")).ReturnsAsync(false);
+
+        Assert.Null(await _authService.VerifyPasswordAsync("reader", "wrong"));
+        _mockUserManager.Verify(x => x.AccessFailedAsync(user), Times.Once);
+    }
+
+    [Fact]
+    public async Task VerifyPasswordAsync_ForADisabledAccount_ReturnsNull()
+    {
+        var user = new ApplicationUser { Id = "reader", UserName = "reader", IsActive = false };
+        _mockUserManager.Setup(x => x.FindByNameAsync("reader")).ReturnsAsync(user);
+        _mockUserManager.Setup(x => x.CheckPasswordAsync(user, "Right1234")).ReturnsAsync(true);
+
+        Assert.Null(await _authService.VerifyPasswordAsync("reader", "Right1234"));
+    }
+
+    [Fact]
     public async Task LoginAsync_WithNonExistentUser_ReturnsFailure()
     {
         // Arrange
@@ -120,14 +161,16 @@ public class AuthServiceTests
 
         _mockUserManager.Setup(x => x.FindByNameAsync("testuser"))
             .ReturnsAsync(user);
+        _mockUserManager.Setup(x => x.CheckPasswordAsync(user, "password123"))
+            .ReturnsAsync(true);
 
         // Act
         var (success, token, error) = await _authService.LoginAsync("testuser", "password123");
 
-        // Assert
+        // Assert: the same answer as a wrong password, so it does not tell that the account exists.
         Assert.False(success);
         Assert.Empty(token);
-        Assert.Equal("Account is disabled", error);
+        Assert.Equal("Invalid username or password", error);
     }
 
     [Fact]
@@ -201,7 +244,7 @@ public class AuthServiceTests
     public async Task GenerateApiKeyAsync_WithValidUser_ReturnsSuccess()
     {
         // Arrange
-        var user = new ApplicationUser { Id = "test-user-id" };
+        var user = new ApplicationUser { Id = "test-user-id", IsActive = true };
         _mockUserManager.Setup(x => x.FindByIdAsync("test-user-id"))
             .ReturnsAsync(user);
         _mockUserManager.Setup(x => x.UpdateAsync(user))
@@ -234,40 +277,34 @@ public class AuthServiceTests
     }
 
     [Fact]
-    public async Task ValidateApiKeyAsync_WithValidKey_ReturnsTrue()
+    public async Task GetUserByApiKeyAsync_WithTheGeneratedKey_ReturnsItsOwner()
     {
         // Arrange
-        var user = new ApplicationUser
-        {
-            Id = "test-user-id",
-            ApiKey = "valid-api-key",
-            IsActive = true
-        };
-
-        _mockUserManager.Setup(x => x.Users)
-            .Returns(new List<ApplicationUser> { user }.AsQueryable());
-        _mockUserManager.Setup(x => x.IsInRoleAsync(user, "User"))
-            .ReturnsAsync(true);
+        var user = new ApplicationUser { Id = "test-user-id", IsActive = true };
+        _mockUserManager.Setup(x => x.FindByIdAsync("test-user-id")).ReturnsAsync(user);
+        _mockUserManager.Setup(x => x.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+        _mockUserManager.Setup(x => x.Users).Returns(new List<ApplicationUser> { user }.AsQueryable());
+        var (_, apiKey, _) = await _authService.GenerateApiKeyAsync("test-user-id");
 
         // Act
-        var isValid = await _authService.ValidateApiKeyAsync("valid-api-key");
+        var owner = await _authService.GetUserByApiKeyAsync(apiKey!);
 
         // Assert
-        Assert.True(isValid);
+        Assert.Same(user, owner);
     }
 
     [Fact]
-    public async Task ValidateApiKeyAsync_WithInvalidKey_ReturnsFalse()
+    public async Task GetUserByApiKeyAsync_WithAnUnknownKey_ReturnsNull()
     {
         // Arrange
         _mockUserManager.Setup(x => x.Users)
             .Returns(new List<ApplicationUser>().AsQueryable());
 
         // Act
-        var isValid = await _authService.ValidateApiKeyAsync("invalid-api-key");
+        var owner = await _authService.GetUserByApiKeyAsync("invalid-api-key");
 
         // Assert
-        Assert.False(isValid);
+        Assert.Null(owner);
     }
 
     [Fact]
@@ -353,124 +390,5 @@ public class AuthServiceTests
         Assert.Contains("TestAudience", jwtToken.Audiences);
     }
 
-    [Fact]
-    public async Task IsSetupRequiredAsync_WithNoAdminUsers_ReturnsTrue()
-    {
-        // Arrange
-        _mockUserManager.Setup(x => x.GetUsersInRoleAsync("Admin"))
-            .ReturnsAsync(new List<ApplicationUser>());
-
-        // Act
-        var setupRequired = await _authService.IsSetupRequiredAsync();
-
-        // Assert
-        Assert.True(setupRequired);
-    }
-
-    [Fact]
-    public async Task IsSetupRequiredAsync_WithExistingAdmin_ReturnsFalse()
-    {
-        // Arrange
-        var adminUser = new ApplicationUser
-        {
-            Id = "admin-id",
-            UserName = "admin",
-            Email = "admin@example.com",
-            IsActive = true
-        };
-
-        _mockUserManager.Setup(x => x.GetUsersInRoleAsync("Admin"))
-            .ReturnsAsync(new List<ApplicationUser> { adminUser });
-
-        // Act
-        var setupRequired = await _authService.IsSetupRequiredAsync();
-
-        // Assert
-        Assert.False(setupRequired);
-    }
-
-    [Fact]
-    public async Task SetupAdminAsync_WithNoExistingAdmin_ReturnsSuccess()
-    {
-        // Arrange
-        _mockUserManager.Setup(x => x.GetUsersInRoleAsync("Admin"))
-            .ReturnsAsync(new List<ApplicationUser>());
-        _mockUserManager.Setup(x => x.CreateAsync(It.IsAny<ApplicationUser>(), "AdminPass123!"))
-            .ReturnsAsync(IdentityResult.Success);
-        _mockUserManager.Setup(x => x.AddToRoleAsync(It.IsAny<ApplicationUser>(), "Admin"))
-            .ReturnsAsync(IdentityResult.Success);
-
-        // Act
-        var (success, error) = await _authService.SetupAdminAsync("newadmin", "AdminPass123!", "admin@example.com");
-
-        // Assert
-        Assert.True(success);
-        Assert.Null(error);
-    }
-
-    [Fact]
-    public async Task SetupAdminAsync_WithExistingAdmin_ReturnsFailure()
-    {
-        // Arrange
-        var existingAdmin = new ApplicationUser
-        {
-            Id = "admin-id",
-            UserName = "admin",
-            Email = "admin@example.com",
-            IsActive = true
-        };
-
-        _mockUserManager.Setup(x => x.GetUsersInRoleAsync("Admin"))
-            .ReturnsAsync(new List<ApplicationUser> { existingAdmin });
-
-        // Act
-        var (success, error) = await _authService.SetupAdminAsync("newadmin", "AdminPass123!", "admin@example.com");
-
-        // Assert
-        Assert.False(success);
-        Assert.Equal("Admin user already exists", error);
-    }
-
-    [Fact]
-    public async Task SetupAdminAsync_WithWeakPassword_ReturnsFailure()
-    {
-        // Arrange
-        _mockUserManager.Setup(x => x.GetUsersInRoleAsync("Admin"))
-            .ReturnsAsync(new List<ApplicationUser>());
-        
-        var identityError = new IdentityError { Description = "Password must have at least one uppercase letter" };
-        _mockUserManager.Setup(x => x.CreateAsync(It.IsAny<ApplicationUser>(), "weakpass"))
-            .ReturnsAsync(IdentityResult.Failed(identityError));
-
-        // Act
-        var (success, error) = await _authService.SetupAdminAsync("newadmin", "weakpass", "admin@example.com");
-
-        // Assert
-        Assert.False(success);
-        Assert.NotNull(error);
-        Assert.Contains("uppercase", error);
-    }
-
-    [Fact]
-    public async Task SetupAdminAsync_WithoutEmail_UsesDefaultEmail()
-    {
-        // Arrange
-        ApplicationUser? capturedUser = null;
-        _mockUserManager.Setup(x => x.GetUsersInRoleAsync("Admin"))
-            .ReturnsAsync(new List<ApplicationUser>());
-        _mockUserManager.Setup(x => x.CreateAsync(It.IsAny<ApplicationUser>(), "AdminPass123!"))
-            .Callback<ApplicationUser, string>((user, _) => capturedUser = user)
-            .ReturnsAsync(IdentityResult.Success);
-        _mockUserManager.Setup(x => x.AddToRoleAsync(It.IsAny<ApplicationUser>(), "Admin"))
-            .ReturnsAsync(IdentityResult.Success);
-
-        // Act
-        var (success, error) = await _authService.SetupAdminAsync("newadmin", "AdminPass123!", null);
-
-        // Assert
-        Assert.True(success);
-        Assert.Null(error);
-        Assert.NotNull(capturedUser);
-        Assert.Equal("newadmin@comicmaintainer.local", capturedUser.Email);
-    }
+    // First-run setup is covered against the real Identity stack by AuthServiceSetupTests.
 }

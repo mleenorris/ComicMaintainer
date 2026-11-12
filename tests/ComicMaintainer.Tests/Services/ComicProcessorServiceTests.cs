@@ -1,11 +1,14 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using System.IO.Compression;
+using ComicMaintainer.Tests.Helpers;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -19,6 +22,7 @@ public class ComicProcessorServiceTests : IDisposable
     private readonly AppSettings _settings;
     private readonly string _testDirectory;
     private readonly ComicProcessorService _service;
+    private BatchJobRegistry _jobs;
 
     public ComicProcessorServiceTests()
     {
@@ -42,28 +46,14 @@ public class ComicProcessorServiceTests : IDisposable
         
         _mockOptions.Setup(o => o.CurrentValue).Returns(_settings);
         
-        _service = new ComicProcessorService(
+        _jobs = TestServices.CreateBatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance);
+        _service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
             _mockHistoryService.Object,
-            externalSeriesMetadata: _mockExternalSeriesMetadata.Object);
-    }
-
-    [Fact]
-    public void Constructor_WithoutResolver_CreatesFallbackResolverLoggerFromFactory()
-    {
-        var loggerFactory = new Mock<ILoggerFactory>();
-        loggerFactory.Setup(f => f.CreateLogger(It.IsAny<string>())).Returns(Mock.Of<ILogger>());
-
-        using var service = new ComicProcessorService(
-            _mockOptions.Object,
-            _mockLogger.Object,
-            _mockFileStore.Object,
-            _mockHistoryService.Object,
-            loggerFactory: loggerFactory.Object);
-
-        loggerFactory.Verify(f => f.CreateLogger(typeof(SeriesNameResolver).FullName!), Times.Once());
+            externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
+            jobRegistry: _jobs);
     }
 
     [Fact]
@@ -227,7 +217,7 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.Equal("Series With Metadata", before!.Series);
 
         // Act
-        var result = await _service.RemoveMetadataAsync(filePath);
+        var result = (await _service.RemoveMetadataAsync(filePath)).Succeeded;
 
         // Assert
         Assert.True(result);
@@ -251,7 +241,7 @@ public class ComicProcessorServiceTests : IDisposable
         var filePath = Path.Join(_testDirectory, "missing.cbz");
 
         // Act
-        var result = await _service.RemoveMetadataAsync(filePath);
+        var result = (await _service.RemoveMetadataAsync(filePath)).Succeeded;
 
         // Assert
         Assert.False(result);
@@ -265,7 +255,7 @@ public class ComicProcessorServiceTests : IDisposable
         await File.WriteAllTextAsync(filePath, "hello");
 
         // Act
-        var result = await _service.RemoveMetadataAsync(filePath);
+        var result = (await _service.RemoveMetadataAsync(filePath)).Succeeded;
 
         // Assert
         Assert.False(result);
@@ -278,7 +268,7 @@ public class ComicProcessorServiceTests : IDisposable
         var filePath = CreateTestComicArchiveNoMetadata("nometa.cbz");
 
         // Act
-        var result = await _service.RemoveMetadataAsync(filePath);
+        var result = (await _service.RemoveMetadataAsync(filePath)).Succeeded;
 
         // Assert — the operation is a no-op for the metadata layer but should
         // still succeed so callers can rely on idempotent behaviour.
@@ -364,8 +354,8 @@ public class ComicProcessorServiceTests : IDisposable
         // Act
         var result = await _service.ProcessFileAsync(file2);
 
-        // Assert
-        Assert.True(result);
+        // Assert: a duplicate is not processed, so the call reports failure.
+        Assert.False(result);
         // Verify that file2 was marked as duplicate (renamed=false since it couldn't be renamed)
         _mockFileStore.Verify(f => f.MarkFileRenamedAsync(file2, false, It.IsAny<CancellationToken>()), Times.Once);
         // Verify that file2 was marked with IsDuplicate flag
@@ -387,8 +377,8 @@ public class ComicProcessorServiceTests : IDisposable
         // Act
         var result = await _service.ProcessFileAsync(filePath);
 
-        // Assert
-        Assert.True(result);
+        // Assert: a duplicate is not processed, so the call reports failure.
+        Assert.False(result);
         _mockFileStore.Verify(f => f.MarkFileRenamedAsync(filePath, false, It.IsAny<CancellationToken>()), Times.Once);
         _mockFileStore.Verify(f => f.MarkFileDuplicateAsync(filePath, true, It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -475,7 +465,7 @@ public class ComicProcessorServiceTests : IDisposable
         var jobId = Guid.NewGuid();
 
         // Act
-        var job = _service.GetJob(jobId);
+        var job = _jobs.GetJob(jobId);
 
         // Assert
         Assert.Null(job);
@@ -486,12 +476,14 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange
         var mockEventBroadcaster = new Mock<IEventBroadcaster>();
-        var serviceWithBroadcaster = new ComicProcessorService(
-            _mockOptions.Object, 
-            _mockLogger.Object, 
+        _jobs = TestServices.CreateBatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
+        var serviceWithBroadcaster = TestServices.CreateComicProcessor(
+            _mockOptions.Object,
+            _mockLogger.Object,
             _mockFileStore.Object,
             _mockHistoryService.Object,
-            mockEventBroadcaster.Object);
+            mockEventBroadcaster.Object,
+            jobRegistry: _jobs);
 
         var file1 = CreateTestComicArchive("Test Series", "1");
         var files = new List<string> { file1 };
@@ -533,12 +525,14 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange
         var mockEventBroadcaster = new Mock<IEventBroadcaster>();
-        var service = new ComicProcessorService(
+        _jobs = TestServices.CreateBatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
+        var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
             _mockHistoryService.Object,
-            mockEventBroadcaster.Object);
+            mockEventBroadcaster.Object,
+            jobRegistry: _jobs);
 
         var fileA = Path.Join(_testDirectory, "delete-a.cbz");
         var fileB = Path.Join(_testDirectory, "delete-b.cbz");
@@ -587,19 +581,21 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange
         var mockEventBroadcaster = new Mock<IEventBroadcaster>();
-        var service = new ComicProcessorService(
+        _jobs = TestServices.CreateBatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
+        var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
             _mockHistoryService.Object,
-            mockEventBroadcaster.Object);
+            mockEventBroadcaster.Object,
+            jobRegistry: _jobs);
 
         var seen = new System.Collections.Concurrent.ConcurrentBag<string>();
         var postLoopRan = 0;
         var loopCompletedBeforePostHook = false;
 
         // Act
-        var jobId = await service.RunCustomBatchJobAsync(
+        var jobId = await _jobs.RunCustomBatchJobAsync(
             operationName: "TestCustomBatch",
             trackedItems: new[] { "a", "b", "c" },
             itemOperation: (item, _) =>
@@ -629,6 +625,38 @@ public class ComicProcessorServiceTests : IDisposable
             "post-loop hook must run after the per-item loop has completed");
     }
 
+    [Fact]
+    public async Task RunCustomBatchJobAsync_PostLoopReport_AddsTheProblemToTheJobWithoutChangingItsCounts()
+    {
+        var mockEventBroadcaster = new Mock<IEventBroadcaster>();
+        _jobs = TestServices.CreateBatchJobRegistry(_mockOptions.Object, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: mockEventBroadcaster.Object);
+        var service = TestServices.CreateComicProcessor(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            mockEventBroadcaster.Object,
+            jobRegistry: _jobs);
+        var folder = Path.Join(Path.GetTempPath(), "Berserk (Digital)") + Path.DirectorySeparatorChar;
+
+        var jobId = await _jobs.RunCustomBatchJobAsync(
+            operationName: "TestCustomBatch",
+            trackedItems: new[] { "a", "b" },
+            itemOperation: (_, _) => Task.FromResult(true),
+            failureMessage: "test failure",
+            postLoopAsync: (report, _) => report.ReportProblemAsync(folder, "Source folder kept."));
+
+        var job = await WaitForJobCompletionAsync(service, jobId);
+
+        Assert.NotNull(job);
+        Assert.Equal(JobStatus.Completed, job!.Status);
+        Assert.Equal(2, job.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+        Assert.Equal("Source folder kept.", Assert.Single(job.Errors, e => e.Key == folder).Value);
+        // Announced like a failed item, under the folder's name.
+        mockEventBroadcaster.Verify(b => b.BroadcastFileProcessedAsync("Berserk (Digital)", false, "Source folder kept."), Times.Once);
+    }
+
     private const int JobPollingIntervalMs = 50;
 
     // Returns as soon as the job finishes; the budget only matters when the whole
@@ -640,13 +668,13 @@ public class ComicProcessorServiceTests : IDisposable
         return await WaitForJobCompletionAsync(_service, jobId, timeoutMs);
     }
 
-    private static async Task<ProcessingJob?> WaitForJobCompletionAsync(ComicProcessorService service, Guid jobId, int timeoutMs = DefaultJobTimeoutMs)
+    private async Task<ProcessingJob?> WaitForJobCompletionAsync(ComicProcessorService service, Guid jobId, int timeoutMs = DefaultJobTimeoutMs)
     {
         using var cts = new CancellationTokenSource(timeoutMs);
         
         while (!cts.Token.IsCancellationRequested)
         {
-            var job = service.GetJob(jobId);
+            var job = _jobs.GetJob(jobId);
             if (job != null && job.Status != JobStatus.Running && job.Status != JobStatus.Queued)
             {
                 return job;
@@ -663,7 +691,7 @@ public class ComicProcessorServiceTests : IDisposable
             }
         }
         
-        return service.GetJob(jobId); // Return whatever state we're in after timeout
+        return _jobs.GetJob(jobId); // Return whatever state we're in after timeout
     }
 
     private string CreateTestComicArchive(string series, string issue, int? year = null, string? directory = null)
@@ -1045,22 +1073,29 @@ public class ComicProcessorServiceTests : IDisposable
     [Fact]
     public async Task CancelJob_RunningJob_CancelsSuccessfully()
     {
-        // Arrange - Create multiple files to give us time to cancel
-        var files = Enumerable.Range(1, 50)
+        // Arrange - the first file's series lookup holds the job until it is cancelled
+        var files = Enumerable.Range(1, 3)
             .Select(i => CreateTestComicArchive($"Test Comic {i}", i.ToString()))
             .ToList();
-        
+        var lookupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _mockExternalSeriesMetadata
+            .Setup(s => s.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<string, CancellationToken>(async (_, token) =>
+            {
+                lookupStarted.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return null;
+            });
+
         _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ComicFile>());
 
         // Act
         var jobId = await _service.ProcessFilesAsync(files);
-        
-        // Give the job a brief moment to start processing
-        await Task.Delay(50);
+        await lookupStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
         
         // Cancel the job
-        var cancelled = _service.CancelJob(jobId);
+        var cancelled = _jobs.CancelJob(jobId);
         
         // Wait for job to finish
         var job = await WaitForJobCompletionAsync(jobId);
@@ -1068,12 +1103,8 @@ public class ComicProcessorServiceTests : IDisposable
         // Assert
         Assert.True(cancelled);
         Assert.NotNull(job);
-        // Job may be completed or cancelled depending on timing, but cancellation should have been attempted
-        Assert.True(job.Status == JobStatus.Cancelled || job.Status == JobStatus.Completed);
-        if (job.Status == JobStatus.Cancelled)
-        {
-            Assert.True(job.ProcessedFiles < files.Count, $"Cancelled job should not have processed all files. Processed: {job.ProcessedFiles}/{files.Count}");
-        }
+        Assert.Equal(JobStatus.Cancelled, job.Status);
+        Assert.True(job.ProcessedFiles < files.Count, $"Cancelled job should not have processed all files. Processed: {job.ProcessedFiles}/{files.Count}");
     }
 
     [Fact]
@@ -1250,8 +1281,8 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange - ComicInfo.xml has no <Number> element, but the filename
         // contains a chapter number. After normalization the issue number
-        // should be populated from the filename and the title should become
-        // "Chapter <n>" instead of "Chapter Unknown".
+        // should be populated from the filename, and the file's real chapter
+        // title is kept rather than replaced with "Chapter <n>".
         var seriesFolder = Path.Join(_testDirectory, "Spider-Man");
         Directory.CreateDirectory(seriesFolder);
 
@@ -1296,7 +1327,7 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.NotNull(updatedMetadata);
         Assert.Equal("Spider-Man", updatedMetadata.Series);
         Assert.Equal("7", updatedMetadata.Issue);
-        Assert.Equal("Chapter 7", updatedMetadata.Title);
+        Assert.Equal("Some Old Title", updatedMetadata.Title);
     }
 
     [Fact]
@@ -1454,7 +1485,7 @@ public class ComicProcessorServiceTests : IDisposable
 
         // Construct a service with the cache wired in so the user-selected-name
         // path is exercised.
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -1535,7 +1566,7 @@ public class ComicProcessorServiceTests : IDisposable
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord());
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -1617,7 +1648,7 @@ public class ComicProcessorServiceTests : IDisposable
             .Setup(c => c.GetAsync(It.Is<string>(k => k != "batman"), It.IsAny<CancellationToken>()))
             .ReturnsAsync((SeriesMetadataCacheRecord?)null);
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -1718,13 +1749,14 @@ public class ComicProcessorServiceTests : IDisposable
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord());
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
             _mockHistoryService.Object,
             externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
-            seriesMetadataCache: mockSeriesMetadataCache.Object);
+            seriesMetadataCache: mockSeriesMetadataCache.Object,
+            jobRegistry: _jobs);
 
         // Act
         var jobId = await service.RenameFilesAsync(new[] { filePath });
@@ -1849,7 +1881,7 @@ public class ComicProcessorServiceTests : IDisposable
         };
         var cache = BuildLocalizedCache(record);
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -1896,7 +1928,7 @@ public class ComicProcessorServiceTests : IDisposable
         };
         var cache = BuildLocalizedCache(record);
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -1941,7 +1973,7 @@ public class ComicProcessorServiceTests : IDisposable
         };
         var cache = BuildLocalizedCache(record);
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -1982,7 +2014,7 @@ public class ComicProcessorServiceTests : IDisposable
         };
         var cache = BuildLocalizedCache(record);
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -2022,7 +2054,7 @@ public class ComicProcessorServiceTests : IDisposable
         };
         var cache = BuildLocalizedCache(record);
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -2074,7 +2106,7 @@ public class ComicProcessorServiceTests : IDisposable
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord());
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -2132,7 +2164,7 @@ public class ComicProcessorServiceTests : IDisposable
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord());
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -2180,7 +2212,7 @@ public class ComicProcessorServiceTests : IDisposable
                 UserAliases = new List<string> { "Saga Deluxe" },
             });
 
-        using var service = new ComicProcessorService(
+        using var service = TestServices.CreateComicProcessor(
             _mockOptions.Object,
             _mockLogger.Object,
             _mockFileStore.Object,
@@ -2279,8 +2311,8 @@ public class ComicProcessorServiceTests : IDisposable
         // the chapter number "7".
         _mockFileStore.Verify(
             f => f.MarkFileRenamedAsync(
-                It.Is<string>(p => ComicFileProcessor.ChapterNumbersEquivalent(
-                    ComicFileProcessor.ParseChapterNumber(Path.GetFileNameWithoutExtension(p)),
+                It.Is<string>(p => IssueNumberParser.AreEquivalent(
+                    IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(p)),
                     "7")),
                 true,
                 It.IsAny<CancellationToken>()),
@@ -2322,8 +2354,8 @@ public class ComicProcessorServiceTests : IDisposable
         // number cannot be lost.
         _mockFileStore.Verify(
             f => f.MarkFileRenamedAsync(
-                It.Is<string>(p => ComicFileProcessor.ChapterNumbersEquivalent(
-                    ComicFileProcessor.ParseChapterNumber(Path.GetFileNameWithoutExtension(p)),
+                It.Is<string>(p => IssueNumberParser.AreEquivalent(
+                    IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(p)),
                     "7")),
                 true,
                 It.IsAny<CancellationToken>()),

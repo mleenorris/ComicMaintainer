@@ -19,9 +19,7 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbFactory;
     private readonly Mock<IExternalSeriesMetadataService> _external = new();
     private readonly Mock<ISeriesImageStore> _imageStore = new();
-    private readonly Mock<ISeriesFolderCoverWriter> _folderCoverWriter = new();
-    private readonly Mock<ISeriesArchiveCoverWriteQueue> _archiveCoverQueue = new();
-    private readonly Mock<ISeriesArchiveCoverWriter> _archiveCoverWriter = new();
+    private readonly Mock<ISeriesCoverArtifactQueue> _coverArtifacts = new();
     private readonly AppSettings _settings = new() { DownloadExternalSeriesImages = true };
     private readonly ListLogger _logger = new();
     private readonly SeriesMetadataCacheService _service;
@@ -42,9 +40,7 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
             _dbFactory,
             _external.Object,
             _imageStore.Object,
-            _folderCoverWriter.Object,
-            _archiveCoverQueue.Object,
-            _archiveCoverWriter.Object,
+            _coverArtifacts.Object,
             settingsMonitor.Object,
             _logger);
     }
@@ -229,30 +225,21 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
         _external.Verify(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    [Theory]
-    [InlineData(false, "not_found")]
-    [InlineData(true, "error")]
-    public async Task RefreshAsync_ExistingAutomaticRecord_LookupMissOrFailure_RecordsStatusOnly(bool throws, string expectedStatus)
+    [Fact]
+    public async Task RefreshAsync_ExistingAutomaticRecord_LookupMiss_RecordsNotFoundOnly()
     {
         var entity = Entity("series-x", "Series X Canonical");
         entity.Aliases = new List<string> { "Old Alias" };
         entity.Source = "MangaDex";
         entity.MetadataVersion = 3;
         await SeedAsync(entity);
-        var setup = _external.Setup(e => e.LookupSeriesAsync("Series X", It.IsAny<CancellationToken>()));
-        if (throws)
-        {
-            setup.ThrowsAsync(new HttpRequestException("provider down"));
-        }
-        else
-        {
-            setup.ReturnsAsync(default(ExternalSeriesMetadata?));
-        }
+        _external.Setup(e => e.LookupSeriesAsync("Series X", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(default(ExternalSeriesMetadata?));
         var before = _service.ChangeVersion;
 
         var record = await _service.RefreshAsync("Series X");
 
-        Assert.Equal(expectedStatus, record.LookupStatus);
+        Assert.Equal("not_found", record.LookupStatus);
         Assert.Equal("Series X Canonical", record.CanonicalTitle);
         Assert.Equal(new[] { "Old Alias" }, record.Aliases);
         Assert.Equal("MangaDex", record.Source);
@@ -260,7 +247,319 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
         Assert.Equal(3, record.MetadataVersion);
         Assert.Equal(before + 1, _service.ChangeVersion);
         var persisted = await _service.GetAsync("series-x");
-        Assert.Equal(expectedStatus, persisted!.LookupStatus);
+        Assert.Equal("not_found", persisted!.LookupStatus);
+    }
+
+    [Theory]
+    [InlineData("success")]
+    [InlineData("manual")]
+    [InlineData("cleared")]
+    public async Task RefreshAsync_MatchedRecord_ProviderFailure_LeavesTheRecordUntouchedAndThrows(string status)
+    {
+        var entity = Entity("series-x", "Series X Canonical", status);
+        entity.Aliases = new List<string> { "Old Alias" };
+        entity.Source = "MangaDex";
+        entity.MetadataVersion = 3;
+        await SeedAsync(entity, Entity("old-alias", "Old Alias", "not_found"));
+        var outage = new ExternalMetadataUnavailableException(
+            "MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex did not answer within 15s");
+        _external.Setup(e => e.LookupSeriesAsync("Series X", It.IsAny<CancellationToken>())).ThrowsAsync(outage);
+        var before = _service.ChangeVersion;
+
+        var thrown = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => _service.RefreshAsync("Series X"));
+
+        Assert.Same(outage, thrown);
+        Assert.Equal(before, _service.ChangeVersion);
+        var persisted = await _service.GetAsync("series-x");
+        Assert.Equal(status, persisted!.LookupStatus);
+        Assert.Equal("Series X Canonical", persisted.CanonicalTitle);
+        Assert.Equal(new[] { "Old Alias" }, persisted.Aliases);
+        Assert.Null(persisted.LastLookupUtc);
+        Assert.Equal(3, persisted.MetadataVersion);
+
+        // The stale-sibling cleanup that follows a refresh run still treats
+        // the record as authoritative and never deletes it.
+        await _service.CleanupStaleSiblingRecordsAsync();
+        Assert.Contains("series-x", await AllKeysAsync());
+    }
+
+    [Theory]
+    [InlineData("not_found")]
+    [InlineData(null)]
+    public async Task RefreshAsync_UnmatchedRecord_ProviderFailure_RecordsErrorAndThrows(string? status)
+    {
+        await SeedAsync(Entity("series-x", "Series X", status));
+        _external.Setup(e => e.LookupSeriesAsync("Series X", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("provider down"));
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => _service.RefreshAsync("Series X"));
+
+        var persisted = await _service.GetAsync("series-x");
+        Assert.Equal("error", persisted!.LookupStatus);
+        Assert.NotNull(persisted.LastLookupUtc);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_NewSeries_ProviderFailure_CreatesAnErrorRecordAndThrows()
+    {
+        _external.Setup(e => e.LookupSeriesAsync("Brand New", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ExternalMetadataUnavailableException("AniListManga", ExternalMetadataFailureKind.Unavailable, "down"));
+
+        await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(() => _service.RefreshAsync("Brand New"));
+
+        var persisted = await _service.GetAsync("brand-new");
+        Assert.Equal("error", persisted!.LookupStatus);
+        Assert.Equal("Brand New", persisted.CanonicalTitle);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_ManualMatch_RefetchesTheMatchedEntryFromItsProviderOnly()
+    {
+        var entity = Entity("folder-title", "Picked Title", "manual_match");
+        entity.Source = "AniListManga";
+        entity.SourceId = "4242";
+        await SeedAsync(entity);
+        _external.Setup(e => e.LookupMatchAsync("AniListManga", "4242", "Picked Title", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Picked Title (Updated)",
+                Source = "AniListManga",
+                SourceId = "4242",
+                Aliases = new List<string> { "Alias" }
+            });
+
+        var record = await _service.RefreshAsync("Folder Title");
+
+        Assert.Equal("manual_match", record.LookupStatus);
+        Assert.Equal("Picked Title (Updated)", record.CanonicalTitle);
+        Assert.Equal("AniListManga", record.Source);
+        Assert.Equal("4242", record.SourceId);
+        _external.Verify(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_ManualMatchWithoutASource_KeepsTheMatchWithoutALookup()
+    {
+        await SeedAsync(Entity("folder-title", "Picked Title", "manual_match"));
+
+        var record = await _service.RefreshAsync("Folder Title");
+
+        Assert.Equal("manual_match", record.LookupStatus);
+        Assert.Equal("Picked Title", record.CanonicalTitle);
+        Assert.NotNull(record.LastLookupUtc);
+        _external.Verify(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _external.Verify(e => e.LookupMatchAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private static SeriesMetadataCacheEntity MatchedThroughFolder()
+    {
+        var entity = Entity("shingeki-no-kyojin", "Attack on Titan");
+        entity.Source = "MangaDex";
+        entity.UserAliases = new List<string> { "AoT" };
+        return entity;
+    }
+
+    [Fact]
+    public async Task RefreshAsync_SuccessRecordThroughAUserAlias_WithNoProviderHit_StaysMatched()
+    {
+        // A series card's Refresh also refreshes each alias; a name no provider
+        // knows must not turn a valid match into "not found".
+        await SeedAsync(MatchedThroughFolder());
+
+        var record = await _service.RefreshAsync("AoT");
+
+        Assert.Equal("success", record.LookupStatus);
+        Assert.Equal("Attack on Titan", record.CanonicalTitle);
+        Assert.Equal("MangaDex", record.Source);
+        _external.Verify(e => e.LookupMatchAsync("MangaDex", null, "Attack on Titan", It.IsAny<CancellationToken>()), Times.Once);
+        _external.Verify(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_SuccessRecordThroughAnAlias_RefreshesItsOwnMatch_NotWhateverTheAliasNames()
+    {
+        await SeedAsync(MatchedThroughFolder());
+        // The alias happens to be the exact title of another series.
+        _external.Setup(e => e.LookupSeriesAsync("AoT", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata { CanonicalTitle = "Art of Tanks", Source = "MangaDex" });
+        _external.Setup(e => e.LookupMatchAsync("MangaDex", null, "Attack on Titan", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata { CanonicalTitle = "Attack on Titan (Updated)", Source = "MangaDex", SourceId = "uuid-9" });
+
+        var record = await _service.RefreshAsync("AoT");
+
+        Assert.Equal("Attack on Titan (Updated)", record.CanonicalTitle);
+        Assert.Equal("uuid-9", record.SourceId);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_SuccessRecordWithAnId_RefetchesTheEntryById()
+    {
+        var entity = Entity("batman", "Batman");
+        entity.Source = "ComicVine";
+        entity.SourceId = "796";
+        await SeedAsync(entity);
+        _external.Setup(e => e.LookupMatchAsync("ComicVine", "796", "Batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata { CanonicalTitle = "Batman (2016)", Source = "ComicVine", SourceId = "796" });
+
+        var record = await _service.RefreshAsync("Batman");
+
+        Assert.Equal("success", record.LookupStatus);
+        Assert.Equal("Batman (2016)", record.CanonicalTitle);
+        _external.Verify(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_SuccessRecordByItsOwnTitle_EntryGone_FallsBackToTheTitle()
+    {
+        var entity = Entity("batman", "Batman");
+        entity.Source = "ComicVine";
+        entity.SourceId = "796";
+        await SeedAsync(entity);
+        _external.Setup(e => e.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata { CanonicalTitle = "Batman", Source = "MangaDex", SourceId = "uuid-2" });
+
+        var record = await _service.RefreshAsync("Batman");
+
+        Assert.Equal("success", record.LookupStatus);
+        Assert.Equal("MangaDex", record.Source);
+        Assert.Equal("uuid-2", record.SourceId);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_LegacySuccessRecordByItsOwnTitle_IsAStrictLookup_AndAMissUnmatchesIt()
+    {
+        // Matches from before 3.0 have no id; their own title decides.
+        var entity = Entity("batman", "Batman");
+        entity.Source = "ComicVine";
+        await SeedAsync(entity);
+
+        var record = await _service.RefreshAsync("Batman");
+
+        Assert.Equal("not_found", record.LookupStatus);
+        _external.Verify(e => e.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()), Times.Once);
+        _external.Verify(e => e.ForgetNoMatch("Batman"), Times.Once);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_ExplicitRefresh_ForgetsARememberedNoMatchBeforeAsking()
+    {
+        var order = new List<string>();
+        _external.Setup(e => e.ForgetNoMatch("New Series")).Callback(() => order.Add("forget"));
+        _external.Setup(e => e.LookupSeriesAsync("New Series", It.IsAny<CancellationToken>()))
+            .Callback(() => order.Add("lookup"))
+            .ReturnsAsync(default(ExternalSeriesMetadata?));
+
+        await _service.RefreshAsync("New Series");
+
+        Assert.Equal(new[] { "forget", "lookup" }, order);
+    }
+
+    [Theory]
+    [InlineData("manual")]
+    [InlineData("cleared")]
+    public async Task RefreshAsync_UserDecisionRecord_LookupMiss_KeepsItsStatus(string status)
+    {
+        await SeedAsync(Entity("series-x", "Series X", status));
+
+        var record = await _service.RefreshAsync("Series X");
+
+        Assert.Equal(status, record.LookupStatus);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_UnchangedAnswer_DoesNotBumpTheMetadataVersion()
+    {
+        var entity = Entity("batman", "Batman");
+        entity.Aliases = new List<string> { "The Bat" };
+        entity.Source = "ComicVine";
+        entity.SourceId = "796";
+        await SeedAsync(entity);
+        _external.Setup(e => e.LookupMatchAsync("ComicVine", "796", "Batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman",
+                Source = "ComicVine",
+                SourceId = "796",
+                Aliases = new List<string> { "The Bat" }
+            });
+
+        // The first refresh stores the localized titles; the second learns nothing new.
+        var first = await _service.RefreshAsync("Batman");
+        var second = await _service.RefreshAsync("Batman");
+
+        Assert.Equal(first.MetadataVersion, second.MetadataVersion);
+    }
+
+    [Theory]
+    [InlineData("Batman (2016)", "The Bat")]
+    [InlineData("Batman", "The Dark Knight")]
+    public async Task RefreshAsync_ChangedNames_BumpTheMetadataVersion(string canonical, string alias)
+    {
+        var entity = Entity("batman", "Batman");
+        entity.Aliases = new List<string> { "The Bat" };
+        entity.Source = "ComicVine";
+        entity.SourceId = "796";
+        entity.MetadataVersion = 3;
+        await SeedAsync(entity);
+        _external.Setup(e => e.LookupMatchAsync("ComicVine", "796", "Batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = canonical,
+                Source = "ComicVine",
+                SourceId = "796",
+                Aliases = new List<string> { alias }
+            });
+
+        var record = await _service.RefreshAsync("Batman");
+
+        Assert.Equal(4, record.MetadataVersion);
+    }
+
+    [Theory]
+    [InlineData("manual_match")]
+    [InlineData("success")]
+    public async Task ApplyExternalImageAsync_MatchWithoutAnId_KeepsItsSource(string status)
+    {
+        var entity = Entity("series-z", "Series Z", status);
+        entity.Source = "ComicVine";
+        await SeedAsync(entity);
+        _imageStore.Setup(s => s.DownloadAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult("cover.jpg", "image/jpeg", 10));
+
+        var record = await _service.ApplyExternalImageAsync("Series Z", "https://img.example/cover.jpg", "MangaDex");
+
+        Assert.Equal("ComicVine", record.Source);
+    }
+
+    [Fact]
+    public async Task ApplyExternalImageAsync_RecordWithoutAMatch_TakesTheImagesProvider()
+    {
+        await SeedAsync(Entity("series-z", "Series Z", "not_found"));
+        _imageStore.Setup(s => s.DownloadAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult("cover.jpg", "image/jpeg", 10));
+
+        var record = await _service.ApplyExternalImageAsync("Series Z", "https://img.example/cover.jpg", "MangaDex");
+
+        Assert.Equal("MangaDex", record.Source);
+    }
+
+    [Fact]
+    public async Task ApplyExternalMatchAsync_StoresTheSourceId_AndAProviderCoverDoesNotRepointTheMatch()
+    {
+        _imageStore.Setup(s => s.DownloadAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult("cover.jpg", "image/jpeg", 10));
+
+        var matched = await _service.ApplyExternalMatchAsync("Series Z", new ExternalSeriesMetadata
+        {
+            CanonicalTitle = "Series Z",
+            Source = "MangaDex",
+            SourceId = "uuid-1"
+        });
+        var withCover = await _service.ApplyExternalImageAsync("Series Z", "https://img.example/cover.jpg", "AniListManga");
+
+        Assert.Equal("uuid-1", matched.SourceId);
+        Assert.Equal("MangaDex", withCover.Source);
+        Assert.Equal("uuid-1", withCover.SourceId);
     }
 
     [Fact]
@@ -420,9 +719,7 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
 
         Assert.Equal("user", record.ImageStatus);
         Assert.Equal("series-u.png", record.LocalImageFile);
-        _folderCoverWriter.Verify(w => w.WriteAsync(
-            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
-        _archiveCoverQueue.Verify(q => q.EnqueueWrite(
+        _coverArtifacts.Verify(q => q.EnqueueWrite(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
     }
 
@@ -439,33 +736,7 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
 
         Assert.Equal("user", record.ImageStatus);
         _imageStore.Verify(s => s.ResolveAbsolutePath(It.IsAny<string>()), Times.Never);
-        _folderCoverWriter.Verify(w => w.WriteAsync(
-            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task SetUserImageAsync_FolderCoverWriterThrows_IsLoggedAndImageStillSaved()
-    {
-        _imageStore.Setup(s => s.SaveUserImageAsync("series-u", It.IsAny<Stream>(), "image/png", null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesImageStoreResult("series-u.png", "image/png", 3));
-        _imageStore.Setup(s => s.ResolveAbsolutePath("series-u.png")).Returns("/cache/series-u.png");
-        _folderCoverWriter.Setup(w => w.WriteAsync(
-                "series-u", "/cache/series-u.png", "image/png", false, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new IOException("read-only folder"));
-        using var content = new MemoryStream(new byte[] { 1, 2, 3 });
-        var before = _service.ChangeVersion;
-
-        var record = await _service.SetUserImageAsync("Series U", content, "image/png");
-
-        Assert.Equal("user", record.ImageStatus);
-        Assert.Equal("user-upload", record.RemoteImageUrl);
-        Assert.Equal(before + 1, _service.ChangeVersion);
-        Assert.Equal("user", (await _service.GetAsync("series-u"))!.ImageStatus);
-        Assert.Contains(_logger.Entries, e =>
-            e.Level == LogLevel.Debug
-            && e.Exception is IOException
-            && e.Message.Contains("Failed to write on-disk series cover for series-u"));
-        _archiveCoverQueue.Verify(q => q.EnqueueWrite(
+        _coverArtifacts.Verify(q => q.EnqueueWrite(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
     }
 
@@ -474,11 +745,44 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
     {
         Assert.Null(await _service.ClearImageAsync(" "));
         Assert.Null(await _service.ClearImageAsync("missing"));
-        _archiveCoverQueue.Verify(q => q.EnqueueRemove(It.IsAny<string>()), Times.Never);
+        _coverArtifacts.Verify(q => q.EnqueueRemove(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]
-    public async Task ClearImageAsync_FolderCoverRemovalFails_StillClearsAndQueuesArchiveRemoval()
+    public async Task SetUserImageAsync_StoredImage_QueuesItForTheSeriesArtifacts()
+    {
+        _imageStore.Setup(s => s.SaveUserImageAsync("series-u", It.IsAny<Stream>(), "image/png", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult("series-u.png", "image/png", 3));
+        _imageStore.Setup(s => s.ResolveAbsolutePath("series-u.png")).Returns("/cache/series-u.png");
+        using var content = new MemoryStream(new byte[] { 1, 2, 3 });
+
+        var record = await _service.SetUserImageAsync("Series U", content, "image/png");
+
+        Assert.Equal("user", record.ImageStatus);
+        _coverArtifacts.Verify(q => q.EnqueueWrite("series-u", "/cache/series-u.png", "image/png", false), Times.Once);
+    }
+
+    [Fact]
+    public async Task SetUserImageAsync_CoverCannotBeQueued_IsLoggedAndImageStillSaved()
+    {
+        _imageStore.Setup(s => s.SaveUserImageAsync("series-u", It.IsAny<Stream>(), "image/png", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult("series-u.png", "image/png", 3));
+        _imageStore.Setup(s => s.ResolveAbsolutePath("series-u.png")).Throws(new IOException("read-only folder"));
+        using var content = new MemoryStream(new byte[] { 1, 2, 3 });
+        var before = _service.ChangeVersion;
+
+        var record = await _service.SetUserImageAsync("Series U", content, "image/png");
+
+        Assert.Equal("user", record.ImageStatus);
+        Assert.Equal(before + 1, _service.ChangeVersion);
+        Assert.Contains(_logger.Entries, e =>
+            e.Level == LogLevel.Warning
+            && e.Exception is IOException
+            && e.Message.Contains("Failed to queue on-disk series cover for series-u"));
+    }
+
+    [Fact]
+    public async Task ClearImageAsync_CachedImage_ClearsItAndQueuesRemovingTheArtifacts()
     {
         var entity = Entity("series-c", "Series C");
         entity.LocalImageFile = "series-c.jpg";
@@ -486,8 +790,6 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
         entity.ImageStatus = "downloaded";
         entity.RemoteImageUrl = "https://img.example/c.jpg";
         await SeedAsync(entity);
-        _folderCoverWriter.Setup(w => w.RemoveAsync("series-c", It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new UnauthorizedAccessException("denied"));
 
         var record = await _service.ClearImageAsync("series-c");
 
@@ -497,21 +799,17 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
         Assert.Null(record.RemoteImageUrl);
         Assert.Equal("none", (await _service.GetAsync("series-c"))!.ImageStatus);
         _imageStore.Verify(s => s.Delete("series-c.jpg"), Times.Once);
-        _archiveCoverQueue.Verify(q => q.EnqueueRemove("series-c"), Times.Once);
-        Assert.Contains(_logger.Entries, e =>
-            e.Level == LogLevel.Debug
-            && e.Exception is UnauthorizedAccessException
-            && e.Message.Contains("Failed to remove on-disk series cover for series-c"));
+        _coverArtifacts.Verify(q => q.EnqueueRemove("series-c"), Times.Once);
     }
 
     [Fact]
-    public async Task ReapplyImageArtifactsAsync_BlankTitle_Throws()
+    public async Task GetCoverSourceAsync_BlankTitle_Throws()
     {
-        await Assert.ThrowsAsync<ArgumentException>(() => _service.ReapplyImageArtifactsAsync(" ", embedArchiveInline: true));
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.GetCoverSourceAsync(" "));
     }
 
     [Fact]
-    public async Task ReapplyImageArtifactsAsync_UnresolvableImageFile_ReturnsFalse()
+    public async Task GetCoverSourceAsync_UnresolvableImageFile_ReturnsNull()
     {
         var entity = Entity("series-r", "Series R");
         entity.LocalImageFile = "series-r.jpg";
@@ -520,13 +818,7 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
         await SeedAsync(entity);
         _imageStore.Setup(s => s.ResolveAbsolutePath("series-r.jpg")).Returns(default(string?));
 
-        var applied = await _service.ReapplyImageArtifactsAsync("Series R", embedArchiveInline: true);
-
-        Assert.False(applied);
-        _folderCoverWriter.Verify(w => w.WriteAsync(
-            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
-        _archiveCoverWriter.Verify(w => w.WriteAsync(
-            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Null(await _service.GetCoverSourceAsync("Series R"));
     }
 
     [Fact]
@@ -707,6 +999,40 @@ public sealed class SeriesMetadataCacheServiceCoverageTests : IDisposable
         Assert.NotNull(record);
         Assert.Equal("folder-title", record!.NormalizedKey);
         Assert.Equal(new[] { "My Custom Alias" }, record.UserAliases);
+    }
+
+    [Fact]
+    public async Task GetByTitleAsync_ReusesOneTitleIndex_UntilTheCacheChanges()
+    {
+        var aliased = Entity("folder-title", "Canonical Title", "success");
+        aliased.Aliases = new List<string> { "Provider Alias" };
+        aliased.LocalizedTitlesJson = SharedTitleJson;
+        await SeedAsync(aliased, Entity("other-series", "Other Series", "success"));
+
+        // Every lookup that misses the exact key (one per processed file of a
+        // series whose files use another title) is answered from one index.
+        for (var i = 0; i < 5; i++)
+        {
+            Assert.Equal("folder-title", (await _service.GetByTitleAsync("Provider Alias"))!.NormalizedKey);
+            Assert.Equal("folder-title", (await _service.GetByTitleAsync("Shared Title"))!.NormalizedKey);
+            Assert.Null(await _service.GetByTitleAsync("Unknown Title"));
+        }
+        Assert.Equal(1, _service.TitleIndexBuildCount);
+
+        // A change through the service invalidates it, so new titles are found.
+        await _service.SetUserAliasesAsync("Canonical Title", new[] { "Brand New Alias" });
+        Assert.Equal("folder-title", (await _service.GetByTitleAsync("brand new alias"))!.NormalizedKey);
+        Assert.Equal(2, _service.TitleIndexBuildCount);
+    }
+
+    [Fact]
+    public async Task GetByTitleAsync_ExactKeyHit_DoesNotBuildTheTitleIndex()
+    {
+        await SeedAsync(Entity("series-a", "Series A"));
+
+        Assert.NotNull(await _service.GetByTitleAsync("SERIES  A"));
+
+        Assert.Equal(0, _service.TitleIndexBuildCount);
     }
 
     private sealed class ListLogger : ILogger<SeriesMetadataCacheService>

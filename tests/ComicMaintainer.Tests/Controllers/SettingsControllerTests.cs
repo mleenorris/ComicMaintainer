@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -17,7 +18,7 @@ public class SettingsControllerTests
     private readonly Mock<IOptionsMonitor<AppSettings>> _appSettingsMock;
     private readonly Mock<ILogger<SettingsController>> _loggerMock;
     private readonly Mock<IDbContextFactory<ComicMaintainer.Core.Data.ComicMaintainerDbContext>> _dbContextFactoryMock;
-    private readonly Mock<IComicProcessorService> _processorServiceMock;
+    private readonly Mock<IBatchJobRegistry> _jobRegistryMock;
     private readonly Mock<IFileStoreService> _fileStoreMock;
     private readonly Mock<ISettingsService> _settingsServiceMock;
     private readonly Mock<IHostApplicationLifetime> _applicationLifetimeMock;
@@ -41,7 +42,7 @@ public class SettingsControllerTests
         
         _loggerMock = new Mock<ILogger<SettingsController>>();
         _dbContextFactoryMock = new Mock<IDbContextFactory<ComicMaintainer.Core.Data.ComicMaintainerDbContext>>();
-        _processorServiceMock = new Mock<IComicProcessorService>();
+        _jobRegistryMock = new Mock<IBatchJobRegistry>();
         _fileStoreMock = new Mock<IFileStoreService>();
         _settingsServiceMock = new Mock<ISettingsService>();
         _applicationLifetimeMock = new Mock<IHostApplicationLifetime>();
@@ -50,10 +51,14 @@ public class SettingsControllerTests
             _appSettingsMock.Object, 
             _loggerMock.Object,
             _dbContextFactoryMock.Object,
-            _processorServiceMock.Object,
+            _jobRegistryMock.Object,
             _fileStoreMock.Object,
             _settingsServiceMock.Object,
-            _applicationLifetimeMock.Object);
+            _applicationLifetimeMock.Object,
+            Mock.Of<ISeriesLanguagePreferenceRetagService>(),
+            Mock.Of<IEventBroadcaster>(),
+            Mock.Of<IProcessingHistoryService>(),
+            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator);
     }
 
     [Fact]
@@ -78,7 +83,7 @@ public class SettingsControllerTests
         };
 
         // Act
-        var result = await _controller.SetFilenameFormat(request);
+        var result = await _controller.UpdateFilenameFormat(request);
 
         // Assert
         Assert.IsType<OkObjectResult>(result);
@@ -124,10 +129,10 @@ public class SettingsControllerTests
     // New RESTful endpoint tests
 
     [Fact]
-    public void GetAllSettings_ReturnsAllSettings()
+    public async Task GetAllSettings_ReturnsAllSettings()
     {
         // Act
-        var result = _controller.GetAllSettings();
+        var result = await _controller.GetAllSettings();
 
         // Assert
         var okResult = Assert.IsType<ActionResult<object>>(result);
@@ -172,10 +177,23 @@ public class SettingsControllerTests
     }
 
     [Fact]
-    public void GetAllSettings_IncludesWriteCoverToFirstArchive()
+    public async Task GetAllSettings_IncludesConvertRarToCbzOnWrite_OnByDefault()
+    {
+        var result = await _controller.GetAllSettings();
+
+        var okResult = Assert.IsType<ActionResult<object>>(result);
+        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
+        var prop = objectResult.Value!.GetType().GetProperty("convert_rar_to_cbz_on_write");
+        Assert.NotNull(prop);
+        Assert.Equal(true, prop!.GetValue(objectResult.Value));
+        Assert.True(new AppSettings().ConvertRarToCbzOnWrite);
+    }
+
+    [Fact]
+    public async Task GetAllSettings_IncludesWriteCoverToFirstArchive()
     {
         // Act
-        var result = _controller.GetAllSettings();
+        var result = await _controller.GetAllSettings();
 
         // Assert
         var okResult = Assert.IsType<ActionResult<object>>(result);
@@ -201,10 +219,10 @@ public class SettingsControllerTests
     }
 
     [Fact]
-    public void GetAllSettings_IncludesSeriesCoverAndImageSettings()
+    public async Task GetAllSettings_IncludesSeriesCoverAndImageSettings()
     {
         // Act
-        var result = _controller.GetAllSettings();
+        var result = await _controller.GetAllSettings();
 
         // Assert
         var okResult = Assert.IsType<ActionResult<object>>(result);
@@ -214,6 +232,7 @@ public class SettingsControllerTests
         var type = objectResult.Value!.GetType();
         Assert.NotNull(type.GetProperty("write_cover_to_series_folder"));
         Assert.NotNull(type.GetProperty("download_external_series_images"));
+        Assert.NotNull(type.GetProperty("fill_comicinfo_from_providers"));
         Assert.NotNull(type.GetProperty("series_image_max_bytes"));
         Assert.NotNull(type.GetProperty("series_image_max_download_bytes"));
         Assert.NotNull(type.GetProperty("series_image_max_dimension"));
@@ -286,9 +305,12 @@ public class SettingsControllerTests
     }
 
     [Fact]
-    public async Task UpdateSeriesImageLimits_RejectsDownloadSmallerThanStored()
+    public async Task UpdateSeriesImageLimits_LeavesTheOrderOfTheSizesToTheService()
     {
-        // Arrange
+        // Whether the pair is acceptable depends on which of the two the environment pins.
+        _settingsServiceMock
+            .Setup(s => s.UpdateSeriesImageLimitsAsync(25 * 1048576, 5 * 1048576, 2048, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new SettingsValidationException("Series image max download bytes must be greater than or equal to series image max bytes"));
         var request = new SettingsController.SeriesImageLimitsRequest
         {
             MaxMB = 25,
@@ -296,12 +318,9 @@ public class SettingsControllerTests
             MaxDimension = 2048
         };
 
-        // Act
         var result = await _controller.UpdateSeriesImageLimits(request);
 
-        // Assert
         Assert.IsType<BadRequestObjectResult>(result);
-        _settingsServiceMock.Verify(s => s.UpdateSeriesImageLimitsAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // UpdateWatcherEnabled removed - use UpdateWatcherEnableRename and UpdateWatcherEnableNormalize instead
@@ -459,8 +478,8 @@ public class SettingsControllerTests
     public async Task CleanupDatabase_RemovesStaleEntries_ReturnsOk()
     {
         // Arrange
-        _fileStoreMock.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(5); // Simulate 5 stale entries removed
+        _fileStoreMock.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Completed, RemovedCount = 5 }); // Simulate 5 stale entries removed
 
         // Act
         var result = await _controller.CleanupDatabase();
@@ -478,6 +497,6 @@ public class SettingsControllerTests
         Assert.NotNull(removedCountProperty);
         Assert.Equal(5, removedCountProperty.GetValue(value));
         
-        _fileStoreMock.Verify(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _fileStoreMock.Verify(f => f.CleanupStaleEntriesAsync(StaleCleanupOptions.Manual, It.IsAny<CancellationToken>()), Times.Once);
     }
 }

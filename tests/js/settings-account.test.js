@@ -83,11 +83,13 @@ test('a successful change is confirmed and the dialog closes two seconds later',
     assert.match(call.headers.authorization, /^Bearer /);
     assert.equal(call.headers['content-type'], 'application/json');
 
-    pending.resolve({ message: 'Password changed successfully' });
+    // The change signs every session out, this one too: the page carries on with the token returned.
+    pending.resolve({ message: 'Password changed successfully', token: 'renewed-session-token' });
     await page.settle();
     assert.deepEqual(dialog(page), {
         open: true, error: null, success: 'Password changed successfully!', button: 'Change Password', fields: ['', '', '']
     });
+    assert.equal(page.window.localStorage.getItem('jwt_token'), 'renewed-session-token');
 
     t.mock.timers.tick(1999);
     assert.equal(dialog(page).open, true);

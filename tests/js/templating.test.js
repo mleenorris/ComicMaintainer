@@ -136,6 +136,23 @@ test('getParsedTemplate evicts the least recently used entry when full', () => {
     assert.equal(sandbox.run('TEMPLATE_CACHE.has("<i>1</i>")'), false);
 });
 
+test('getParsedTemplate keeps no copy of large one-off markup such as a whole page', () => {
+    const sandbox = load();
+    const limit = sandbox.run('MAX_CACHED_TEMPLATE_LENGTH');
+    const largest = `<p>${'x'.repeat(limit - 7)}</p>`;
+    const page = `<p>${'x'.repeat(limit - 6)}</p>`;
+    assert.equal(largest.length, limit);
+
+    const first = sandbox.run('getParsedTemplate')(page);
+    const second = sandbox.run('getParsedTemplate')(page);
+    assert.notEqual(first, second, 'parsed afresh each time');
+    assert.equal(first.innerHTML, page);
+    assert.equal(sandbox.run('TEMPLATE_CACHE.size'), 0);
+
+    sandbox.run('getParsedTemplate')(largest);
+    assert.equal(sandbox.run('TEMPLATE_CACHE.size'), 1, 'markup up to the limit is still cached');
+});
+
 test('renderHtml replaces, appendHtml adds and clearChildren empties a real element', async () => {
     const page = await loadDocument();
     const target = page.$('#target');

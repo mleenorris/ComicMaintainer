@@ -7,7 +7,10 @@ namespace ComicMaintainer.Core.Interfaces;
 /// </summary>
 public interface ISeriesMetadataCacheService
 {
-    /// <summary>Normalizes a free-form title into the key used to look up cache entries.</summary>
+    /// <summary>
+    /// Normalizes a free-form title into the key used to look up cache entries:
+    /// the series key of <see cref="Utilities.SeriesKey.Normalize"/>.
+    /// </summary>
     string NormalizeKey(string? title);
 
     /// <summary>Loads every cached record. Used by the library/grouping layer.</summary>
@@ -26,6 +29,15 @@ public interface ISeriesMetadataCacheService
     /// record matches.
     /// </summary>
     Task<SeriesMetadataCacheRecord?> GetByTitleAsync(string seriesTitle, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Loads the record that owns a title: of every record known by that title, the most
+    /// authoritative, which is the one the library displays. Unlike
+    /// <see cref="GetByTitleAsync"/>, a record keyed by exactly that title gets no preference,
+    /// so a stale "not_found" sibling cannot hide the series' match. Returns null when no
+    /// record is known by the title.
+    /// </summary>
+    Task<SeriesMetadataCacheRecord?> GetAuthoritativeByTitleAsync(string seriesTitle, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Replaces the user-managed alias list for a series key. Returns the
@@ -88,31 +100,12 @@ public interface ISeriesMetadataCacheService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Re-apply the currently cached series image to the series's on-disk cover
-    /// targets (folder cover sidecars and first-archive embed), forcing the
-    /// writers even when their automatic-write feature flags are disabled.
-    /// Returns <c>false</c> when the series cannot be resolved or has no cached
-    /// image to apply.
+    /// The cached cover image of the series, for copying into its on-disk artifacts. Null when
+    /// the series cannot be resolved or has no cached image to apply.
     /// </summary>
-    Task<bool> ReapplyImageArtifactsAsync(
+    Task<SeriesCoverSource?> GetCoverSourceAsync(
         string seriesTitle,
         CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Re-apply the currently cached series image to the series's on-disk cover
-    /// targets, forcing the writers even when their automatic-write feature
-    /// flags are disabled. When <paramref name="embedArchiveInline"/> is
-    /// <c>true</c> the first-archive cover embed runs synchronously (awaited)
-    /// rather than being deferred to the background queue, so callers driving a
-    /// progress UI can surface real per-series embedding progress. Returns
-    /// <c>false</c> when the series cannot be resolved or has no cached image to
-    /// apply.
-    /// </summary>
-    Task<bool> ReapplyImageArtifactsAsync(
-        string seriesTitle,
-        bool embedArchiveInline,
-        CancellationToken cancellationToken = default);
-
     /// <summary>
     /// Manually adopt an externally-supplied candidate as the cached
     /// metadata for the series. Used when the automatic best-match was wrong

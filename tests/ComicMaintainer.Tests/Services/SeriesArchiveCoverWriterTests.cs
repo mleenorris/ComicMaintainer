@@ -26,15 +26,13 @@ public class SeriesArchiveCoverWriterTests : IDisposable
 
     private SeriesArchiveCoverWriter CreateWriter()
     {
-        var services = new ServiceCollection();
-        services.AddScoped(_ => _library.Object);
-        services.AddScoped(_ => _watcher.Object);
-        var provider = services.BuildServiceProvider();
-        var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
         return new SeriesArchiveCoverWriter(
-            scopeFactory,
+            _library.Object,
+            _watcher.Object,
             _settings.Object,
-            new Mock<ILogger<SeriesArchiveCoverWriter>>().Object);
+            new Mock<ILogger<SeriesArchiveCoverWriter>>().Object,
+            new FileOperationLock(),
+            Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
     }
 
     private string CreateCbz(string name, params string[] pageNames)

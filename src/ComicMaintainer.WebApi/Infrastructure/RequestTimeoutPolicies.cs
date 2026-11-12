@@ -70,7 +70,7 @@ public static class RequestTimeoutPolicies
     public static async Task WriteTimedOutResponseAsync(HttpContext context)
     {
         var correlationId = context.GetCorrelationId();
-        var route = DescribeEndpoint(context);
+        var route = DescribeEndpoint(context.GetEndpoint());
         var timeout = ResolveTimeout(context);
 
         context.RequestServices
@@ -104,9 +104,9 @@ public static class RequestTimeoutPolicies
     /// routing, so an arbitrary request path can never become part of a
     /// fingerprint.
     /// </summary>
-    private static string DescribeEndpoint(HttpContext context)
-        => context.GetEndpoint() is RouteEndpoint endpoint
-            ? endpoint.RoutePattern.RawText ?? "(unrouted)"
+    internal static string DescribeEndpoint(Endpoint? endpoint)
+        => endpoint is RouteEndpoint routeEndpoint
+            ? routeEndpoint.RoutePattern.RawText ?? "(unrouted)"
             : "(unrouted)";
 
     /// <summary>
@@ -120,7 +120,7 @@ public static class RequestTimeoutPolicies
     /// entirely: the timeout would go unreported again, and only for the routes
     /// with parameters.
     /// </remarks>
-    private static string EscapeTemplateText(string text)
+    internal static string EscapeTemplateText(string text)
         => text.Replace("{", "{{", StringComparison.Ordinal)
                .Replace("}", "}}", StringComparison.Ordinal);
 

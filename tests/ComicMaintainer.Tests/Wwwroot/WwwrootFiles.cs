@@ -28,11 +28,12 @@ internal static class WwwrootFiles
         "js/app/library.js",
         "js/app/series.js",
         "js/app/suwayomi-search.js",
-        "js/app/file-list.js",
+        "js/app/selection.js",
         "js/app/file-actions.js",
         "js/app/jobs.js",
         "js/app/settings.js",
         "js/app/scheduled-jobs.js",
+        "js/app/users.js",
         "js/app/email.js",
         "js/app/menus.js",
         "js/app/series-metadata.js",
@@ -73,12 +74,15 @@ internal static class WwwrootFiles
         }
     }
 
-    /// <summary>Reads a file under wwwroot, given as a '/'-separated relative path.</summary>
+    /// <summary>
+    /// Reads a file under wwwroot, given as a '/'-separated relative path, with '\n' line endings: the guards match
+    /// multi-line patterns, and a Windows checkout (core.autocrlf) has CRLF line endings.
+    /// </summary>
     public static string Read(string relativePath)
     {
         var path = Path.Join(new[] { WwwRoot }.Concat(relativePath.Split('/')).ToArray());
         Assert.True(File.Exists(path), $"Expected {path} to exist");
-        return File.ReadAllText(path);
+        return File.ReadAllText(path).ReplaceLineEndings("\n");
     }
 
     /// <summary>

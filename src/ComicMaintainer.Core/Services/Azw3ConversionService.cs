@@ -26,6 +26,13 @@ public partial class Azw3ConversionService : IAzw3ConversionService
     private static readonly XNamespace DcNamespace = "http://purl.org/dc/elements/1.1/";
     private static readonly XNamespace ContainerNamespace = "urn:oasis:names:tc:opendocument:xmlns:container";
 
+    // The intermediate EPUB is generated here: one image and one page document per page,
+    // plus the package files, and a book is capped by what KF8 can hold.
+    private const int MaxIntermediateBookEntries = (2 * Kf8ComicWriter.MaxRecords) + 16;
+
+    // Its package document lists every page, so it outgrows a ComicInfo.xml on a long book.
+    private const long MaxIntermediateDocumentBytes = 64L * 1024 * 1024;
+
     private readonly IEpubConversionService _epubConverter;
     private readonly ILogger<Azw3ConversionService> _logger;
 
@@ -120,23 +127,37 @@ public partial class Azw3ConversionService : IAzw3ConversionService
     /// path the book is moved to, so the error message and fallback title name
     /// the book the user asked for rather than the temporary file.
     /// </summary>
+    /// <remarks>
+    /// Page images are never all in memory at once: only each image's header
+    /// is read here (for its dimensions), and the writer copies the images
+    /// from the EPUB into the AZW3 file one at a time, so a condensed book of
+    /// a whole series needs no more memory than its largest page.
+    /// </remarks>
     private static void Convert(string epubPath, string writePath, string azw3Path, CancellationToken cancellationToken)
     {
-        using var archive = ZipFile.OpenRead(epubPath);
+        using var archive = ArchiveEntryReader.OpenZip(epubPath, MaxIntermediateBookEntries);
 
         var opfPath = ReadOpfPath(archive);
         var opf = XDocument.Parse(ReadEntryText(archive, opfPath));
         var opfDirectory = GetDirectory(opfPath);
 
-        var manifest = opf.Root?
+        var manifestItems = opf.Root?
             .Element(OpfNamespace + "manifest")?
             .Elements(OpfNamespace + "item")
             .Where(item => item.Attribute("id") is not null && item.Attribute("href") is not null)
-            .ToDictionary(
-                item => item.Attribute("id")!.Value,
-                item => (Href: item.Attribute("href")!.Value, MediaType: item.Attribute("media-type")?.Value ?? string.Empty),
-                StringComparer.Ordinal)
-            ?? new Dictionary<string, (string Href, string MediaType)>(StringComparer.Ordinal);
+            .Select(item => (
+                Id: item.Attribute("id")!.Value,
+                Href: item.Attribute("href")!.Value,
+                MediaType: item.Attribute("media-type")?.Value ?? string.Empty))
+            .ToList() ?? [];
+
+        var manifest = new Dictionary<string, (string Href, string MediaType)>(StringComparer.Ordinal);
+        var mediaTypesByPath = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var item in manifestItems)
+        {
+            manifest.TryAdd(item.Id, (item.Href, item.MediaType));
+            mediaTypesByPath.TryAdd(ResolvePath(opfDirectory, item.Href), item.MediaType);
+        }
 
         var pages = new List<Kf8Page>();
         var spine = opf.Root?.Element(OpfNamespace + "spine")?.Elements(OpfNamespace + "itemref") ?? [];
@@ -161,19 +182,23 @@ public partial class Azw3ConversionService : IAzw3ConversionService
             }
 
             var imagePath = ResolvePath(GetDirectory(documentPath), source.Groups[1].Value);
-            var imageBytes = ReadEntryBytes(archive, imagePath);
+            var imageEntry = GetEntry(archive, imagePath);
 
-            var info = new MagickImageInfo(imageBytes);
-            var mediaType = manifest.Values
-                .FirstOrDefault(item => string.Equals(ResolvePath(opfDirectory, item.Href), imagePath, StringComparison.Ordinal))
-                .MediaType;
+            MagickImageInfo info;
+            using (var image = imageEntry.Open())
+            {
+                info = new MagickImageInfo(image);
+            }
+
+            mediaTypesByPath.TryGetValue(imagePath, out var mediaType);
 
             var title = TitleRegex().Match(xhtml) is { Success: true } match
                 ? System.Net.WebUtility.HtmlDecode(match.Groups[1].Value)
                 : $"Page {pages.Count + 1}";
 
             pages.Add(new Kf8Page(
-                imageBytes,
+                imageEntry.Length,
+                imageEntry.Open,
                 string.IsNullOrWhiteSpace(mediaType) ? "image/jpeg" : mediaType,
                 checked((int)info.Width),
                 checked((int)info.Height),
@@ -194,7 +219,7 @@ public partial class Azw3ConversionService : IAzw3ConversionService
             Publisher: metadata?.Element(DcNamespace + "publisher")?.Value,
             Language: metadata?.Element(DcNamespace + "language")?.Value);
 
-        Kf8ComicWriter.Write(book, writePath);
+        Kf8ComicWriter.Write(book, writePath, cancellationToken);
     }
 
     private static string ReadOpfPath(ZipArchive archive)
@@ -211,28 +236,12 @@ public partial class Azw3ConversionService : IAzw3ConversionService
     }
 
     private static string ReadEntryText(ZipArchive archive, string entryName)
-    {
-        using var stream = OpenEntry(archive, entryName);
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-        return reader.ReadToEnd();
-    }
+        => ArchiveEntryReader.DecodeText(ArchiveEntryReader.ReadAllBytes(GetEntry(archive, entryName), MaxIntermediateDocumentBytes));
 
-    private static byte[] ReadEntryBytes(ZipArchive archive, string entryName)
-    {
-        using var stream = OpenEntry(archive, entryName);
-        using var buffer = new MemoryStream();
-        stream.CopyTo(buffer);
-        return buffer.ToArray();
-    }
-
-    private static Stream OpenEntry(ZipArchive archive, string entryName)
-    {
-        var entry = archive.GetEntry(entryName)
+    private static ZipArchiveEntry GetEntry(ZipArchive archive, string entryName)
+        => archive.GetEntry(entryName)
             ?? throw new InvalidOperationException(
                 $"The intermediate book is missing the entry '{entryName}' and cannot be converted to AZW3.");
-
-        return entry.Open();
-    }
 
     private static string GetDirectory(string entryName)
     {

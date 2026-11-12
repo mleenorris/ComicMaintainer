@@ -38,7 +38,23 @@ public class SettingsServiceTests : IDisposable
         _appSettingsMock = new Mock<IOptionsMonitor<AppSettings>>();
         _appSettingsMock.Setup(x => x.CurrentValue).Returns(_appSettings);
 
-        _service = new SettingsService(_loggerMock.Object, _appSettingsMock.Object);
+        _service = new SettingsService(_loggerMock.Object, _appSettingsMock.Object, new ConfigurationBuilder().Build());
+    }
+
+    /// <summary>
+    /// A service wired to a real configuration root. reloadOnChange is off, so anything the
+    /// monitor shows after a save got there through the service's own reload.
+    /// </summary>
+    private (SettingsService Service, IOptionsMonitor<AppSettings> Monitor) CreateConfigurationBackedService()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["AppSettings:ConfigDirectory"] = _testConfigDir })
+            .AddJsonFile(Path.Join(_testConfigDir, "user-settings.json"), optional: true, reloadOnChange: false)
+            .Build();
+        var services = new ServiceCollection();
+        services.AddOptions<AppSettings>().Bind(configuration.GetSection("AppSettings"));
+        var monitor = services.BuildServiceProvider().GetRequiredService<IOptionsMonitor<AppSettings>>();
+        return (new SettingsService(_loggerMock.Object, monitor, configuration), monitor);
     }
 
     /// <summary>
@@ -103,10 +119,10 @@ public class SettingsServiceTests : IDisposable
     public async Task UpdateLogMaxBytes_WithInvalidValue_ThrowsException()
     {
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() => 
+        await Assert.ThrowsAsync<SettingsValidationException>(() => 
             _service.UpdateLogMaxBytesAsync(0));
         
-        await Assert.ThrowsAsync<ArgumentException>(() => 
+        await Assert.ThrowsAsync<SettingsValidationException>(() => 
             _service.UpdateLogMaxBytesAsync(-100));
     }
 
@@ -133,10 +149,10 @@ public class SettingsServiceTests : IDisposable
     public async Task UpdateFilenameFormat_WithEmptyValue_ThrowsException()
     {
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() => 
+        await Assert.ThrowsAsync<SettingsValidationException>(() => 
             _service.UpdateFilenameFormatAsync(""));
         
-        await Assert.ThrowsAsync<ArgumentException>(() => 
+        await Assert.ThrowsAsync<SettingsValidationException>(() => 
             _service.UpdateFilenameFormatAsync("   "));
     }
 
@@ -258,42 +274,11 @@ public class SettingsServiceTests : IDisposable
     public async Task UpdateDatabaseCleanupIntervalHours_WithNegativeValue_ThrowsException()
     {
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() => 
+        await Assert.ThrowsAsync<SettingsValidationException>(() => 
             _service.UpdateDatabaseCleanupIntervalHoursAsync(-1));
         
-        await Assert.ThrowsAsync<ArgumentException>(() => 
+        await Assert.ThrowsAsync<SettingsValidationException>(() => 
             _service.UpdateDatabaseCleanupIntervalHoursAsync(-100));
-    }
-
-    [Theory]
-    [InlineData("series")]
-    [InlineData("files")]
-    [InlineData("SERIES")]
-    [InlineData("  Files  ")]
-    public async Task UpdateDefaultLibraryView_PersistsNormalizedValue(string input)
-    {
-        // Act
-        await _service.UpdateDefaultLibraryViewAsync(input);
-
-        // Assert
-        var settingsFilePath = Path.Join(_testConfigDir, "user-settings.json");
-        Assert.True(File.Exists(settingsFilePath));
-
-        var settings = ReadAppSettingsSection(settingsFilePath);
-        Assert.True(settings.TryGetValue("DefaultLibraryView", out var stored));
-        var expected = input.Trim().ToLowerInvariant();
-        Assert.Equal(expected, stored.GetString());
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    [InlineData(null)]
-    [InlineData("grid")]
-    public async Task UpdateDefaultLibraryView_WithInvalidValue_ThrowsException(string? input)
-    {
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-            _service.UpdateDefaultLibraryViewAsync(input!));
     }
 
     [Fact]
@@ -371,6 +356,16 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SavedSetting_IsVisibleThroughTheMonitorBeforeTheSaveReturns()
+    {
+        var (service, monitor) = CreateConfigurationBackedService();
+
+        await service.UpdateFilenameFormatAsync("{series} chapter {issue}");
+
+        Assert.Equal("{series} chapter {issue}", monitor.CurrentValue.FilenameFormat);
+    }
+
+    [Fact]
     public async Task LegacyFlatShape_ReadCorrectlyAndRewrittenInNewShape()
     {
         // Arrange — pre-populate the file with the legacy flat shape that previous versions wrote
@@ -433,7 +428,7 @@ public class SettingsServiceTests : IDisposable
             l => l.Log(
                 It.IsAny<LogLevel>(),
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains("a-password-value")),
+                It.Is<It.IsAnyType>((v, _) => v!.ToString()!.Contains("a-password-value")),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Never);
@@ -462,14 +457,14 @@ public class SettingsServiceTests : IDisposable
     [Fact]
     public async Task UpdateSuwayomiSettingsAsync_RefusesToEnableWithoutAUrl()
     {
-        await Assert.ThrowsAsync<ArgumentException>(
+        await Assert.ThrowsAsync<SettingsValidationException>(
             () => _service.UpdateSuwayomiSettingsAsync(true, null, null, null));
     }
 
     [Fact]
     public async Task UpdateSuwayomiSettingsAsync_RejectsAnInvalidUrl()
     {
-        await Assert.ThrowsAsync<ArgumentException>(
+        await Assert.ThrowsAsync<SettingsValidationException>(
             () => _service.UpdateSuwayomiSettingsAsync(true, "ftp://suwayomi.example", null, null));
     }
 
@@ -509,7 +504,11 @@ public class SettingsServiceTests : IDisposable
     [Fact]
     public async Task UpdateSuwayomiSettingsAsync_RejectsADownloadsFolderInsideTheLibrary()
     {
-        var exception = await Assert.ThrowsAsync<ArgumentException>(
+        // A fully qualified library on every platform: the default /watched_dir has no drive on Windows, so the
+        // folder would be refused as not absolute before the library check is reached.
+        _appSettings.WatchedDirectory = Path.Join(_testConfigDir, "watched_dir");
+
+        var exception = await Assert.ThrowsAsync<SettingsValidationException>(
             () => _service.UpdateSuwayomiSettingsAsync(
                 false, null, null, null, downloadsDirectory: Path.Join(_appSettings.WatchedDirectory, "suwayomi")));
 
@@ -520,7 +519,7 @@ public class SettingsServiceTests : IDisposable
     [Fact]
     public async Task UpdateSuwayomiSettingsAsync_RejectsAMissingDownloadsFolder()
     {
-        await Assert.ThrowsAsync<ArgumentException>(
+        await Assert.ThrowsAsync<SettingsValidationException>(
             () => _service.UpdateSuwayomiSettingsAsync(
                 false, null, null, null, downloadsDirectory: _testConfigDir + "-not-mounted"));
     }
@@ -528,7 +527,7 @@ public class SettingsServiceTests : IDisposable
     [Fact]
     public async Task UpdateSuwayomiSettingsAsync_RejectsAnImportFolderOutsideTheLibrary()
     {
-        await Assert.ThrowsAsync<ArgumentException>(
+        await Assert.ThrowsAsync<SettingsValidationException>(
             () => _service.UpdateSuwayomiSettingsAsync(
                 false, null, null, null, importDirectory: Path.Join("..", "elsewhere")));
 
@@ -574,7 +573,7 @@ public class SettingsServiceTests : IDisposable
             l => l.Log(
                 It.IsAny<LogLevel>(),
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains("a-token-value")),
+                It.Is<It.IsAnyType>((v, _) => v!.ToString()!.Contains("a-token-value")),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Never);
@@ -583,10 +582,11 @@ public class SettingsServiceTests : IDisposable
     [Fact]
     public async Task UpdateErrorReportingSettingsAsync_LeavesTheStoredTokenAloneWhenOmitted()
     {
-        await _service.UpdateErrorReportingSettingsAsync(
+        var (service, _) = CreateConfigurationBackedService();
+        await service.UpdateErrorReportingSettingsAsync(
             true, "a-token-value", null, 5, 12, true);
 
-        await _service.UpdateErrorReportingSettingsAsync(
+        await service.UpdateErrorReportingSettingsAsync(
             true, null, null, 5, 12, true);
 
         var settings = ReadAppSettingsSection(Path.Join(_testConfigDir, "user-settings.json"));
@@ -609,7 +609,7 @@ public class SettingsServiceTests : IDisposable
     [Fact]
     public async Task UpdateErrorReportingSettingsAsync_RefusesToEnableWithoutAToken()
     {
-        await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateErrorReportingSettingsAsync(
+        await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateErrorReportingSettingsAsync(
             enabled: true,
             gitHubToken: null,
             assignee: null,
@@ -619,36 +619,25 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateErrorReportingSettingsAsync_RefusesToEnableAfterClearingTokenDespiteStaleOptions()
+    public async Task UpdateErrorReportingSettingsAsync_RefusesToEnableAfterClearingToken()
     {
-        var previousEnvironmentToken = Environment.GetEnvironmentVariable("ERROR_REPORTING_GITHUB_TOKEN");
-        Environment.SetEnvironmentVariable("ERROR_REPORTING_GITHUB_TOKEN", null);
+        var (service, _) = CreateConfigurationBackedService();
+        await service.UpdateErrorReportingSettingsAsync(
+            true, "a-token-value", null, 5, 12, true);
+        await service.UpdateErrorReportingSettingsAsync(
+            false, string.Empty, null, 5, 12, true);
 
-        try
-        {
-            await _service.UpdateErrorReportingSettingsAsync(
-                true, "a-token-value", null, 5, 12, true);
-            await _service.UpdateErrorReportingSettingsAsync(
-                false, string.Empty, null, 5, 12, true);
+        await Assert.ThrowsAsync<SettingsValidationException>(() => service.UpdateErrorReportingSettingsAsync(
+            enabled: true,
+            gitHubToken: null,
+            assignee: null,
+            maxIssuesPerDay: 5,
+            dedupeWindowHours: 12,
+            commentOnRecurrence: true));
 
-            _appSettings.ErrorReportingGitHubToken = "a-token-value";
-
-            await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateErrorReportingSettingsAsync(
-                enabled: true,
-                gitHubToken: null,
-                assignee: null,
-                maxIssuesPerDay: 5,
-                dedupeWindowHours: 12,
-                commentOnRecurrence: true));
-
-            var settings = ReadAppSettingsSection(Path.Join(_testConfigDir, "user-settings.json"));
-            Assert.False(settings["ErrorReportingEnabled"].GetBoolean());
-            Assert.Equal(JsonValueKind.Null, settings["ErrorReportingGitHubToken"].ValueKind);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ERROR_REPORTING_GITHUB_TOKEN", previousEnvironmentToken);
-        }
+        var settings = ReadAppSettingsSection(Path.Join(_testConfigDir, "user-settings.json"));
+        Assert.False(settings["ErrorReportingEnabled"].GetBoolean());
+        Assert.Equal(JsonValueKind.Null, settings["ErrorReportingGitHubToken"].ValueKind);
     }
 
     [Theory]
@@ -656,7 +645,7 @@ public class SettingsServiceTests : IDisposable
     [InlineData("login with spaces")]
     public async Task UpdateErrorReportingSettingsAsync_RejectsAnAssigneeThatWouldEscapeTheApiPath(string assignee)
     {
-        await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateErrorReportingSettingsAsync(
+        await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateErrorReportingSettingsAsync(
             true, "a-token-value", assignee, 5, 12, true));
     }
 
@@ -667,7 +656,7 @@ public class SettingsServiceTests : IDisposable
     [InlineData(5, 100000)]
     public async Task UpdateErrorReportingSettingsAsync_RejectsOutOfRangeLimits(int maxPerDay, int windowHours)
     {
-        await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateErrorReportingSettingsAsync(
+        await Assert.ThrowsAsync<SettingsValidationException>(() => _service.UpdateErrorReportingSettingsAsync(
             true, "a-token-value", null, maxPerDay, windowHours, true));
     }
 }

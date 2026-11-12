@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
@@ -24,19 +23,27 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
 
     private void MarkChanged() => Interlocked.Increment(ref _changeVersion);
 
-    // Unicode-aware: keep any Unicode letter (\p{L}) or number (\p{N}) so
-    // non-ASCII titles (CJK, accented Latin, Cyrillic, etc.) produce rich,
-    // distinguishable keys instead of collapsing to a bare digit when every
-    // letter gets stripped. Pure-ASCII titles still produce the same output
-    // as the previous [^a-z0-9]+ sanitizer.
-    private static readonly Regex SeriesKeySanitizer = new(@"[^\p{L}\p{N}]+", RegexOptions.Compiled);
+    /// <summary>
+    /// Longest time a title index is reused even though the cache reports no
+    /// change, as a safety net for changes made to the table outside this
+    /// service.
+    /// </summary>
+    internal static readonly TimeSpan TitleIndexMaxAge = TimeSpan.FromMinutes(10);
+
+    private readonly SemaphoreSlim _titleIndexLock = new(1, 1);
+    private TitleIndex? _titleIndex;
+    private int _titleIndexBuilds;
+
+    /// <summary>How many times the title index has been built (diagnostics and tests).</summary>
+    internal int TitleIndexBuildCount => Volatile.Read(ref _titleIndexBuilds);
+
+    /// <summary>Series key of a title to the key of the record that owns it, as of <paramref name="Version"/>.</summary>
+    private sealed record TitleIndex(long Version, DateTime BuiltUtc, IReadOnlyDictionary<string, string> OwnerKeyByTitleKey);
 
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IExternalSeriesMetadataService _externalMetadata;
     private readonly ISeriesImageStore _imageStore;
-    private readonly ISeriesFolderCoverWriter _folderCoverWriter;
-    private readonly ISeriesArchiveCoverWriteQueue _archiveCoverQueue;
-    private readonly ISeriesArchiveCoverWriter _archiveCoverWriter;
+    private readonly ISeriesCoverArtifactQueue _coverArtifacts;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesMetadataCacheService> _logger;
 
@@ -44,32 +51,21 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         IExternalSeriesMetadataService externalMetadata,
         ISeriesImageStore imageStore,
-        ISeriesFolderCoverWriter folderCoverWriter,
-        ISeriesArchiveCoverWriteQueue archiveCoverQueue,
-        ISeriesArchiveCoverWriter archiveCoverWriter,
+        ISeriesCoverArtifactQueue coverArtifacts,
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesMetadataCacheService> logger)
     {
         _dbContextFactory = dbContextFactory;
         _externalMetadata = externalMetadata;
         _imageStore = imageStore;
-        _folderCoverWriter = folderCoverWriter;
-        _archiveCoverQueue = archiveCoverQueue;
-        _archiveCoverWriter = archiveCoverWriter;
+        _coverArtifacts = coverArtifacts;
         _settings = settings;
         _logger = logger;
     }
 
-    public string NormalizeKey(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return "unknown-series";
-        }
-
-        var normalized = SeriesKeySanitizer.Replace(value.ToLowerInvariant(), "-").Trim('-');
-        return string.IsNullOrWhiteSpace(normalized) ? "unknown-series" : normalized;
-    }
+    /// <inheritdoc />
+    /// <remarks>Cache records are keyed by <see cref="SeriesKey.Normalize"/>.</remarks>
+    public string NormalizeKey(string? value) => SeriesKey.Normalize(value);
 
     public async Task<IReadOnlyList<SeriesMetadataCacheRecord>> GetAllAsync(CancellationToken cancellationToken = default)
     {
@@ -99,27 +95,45 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         }
 
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken);
+        var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken, tracked: false);
         return entity is null ? null : ToRecord(entity);
+    }
+
+    public async Task<SeriesMetadataCacheRecord?> GetAuthoritativeByTitleAsync(string seriesTitle, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            return null;
+        }
+
+        var titleIndex = await GetTitleIndexAsync(cancellationToken);
+        return titleIndex.TryGetValue(NormalizeKey(seriesTitle), out var ownerKey)
+            ? await GetAsync(ownerKey, cancellationToken)
+            : null;
     }
 
     /// <summary>
     /// Resolves the cache entity for a free-form series title. Tries an exact
-    /// normalized-key lookup first, then falls back to scanning every record's
-    /// known titles (canonical title, user-selected name, provider/user
-    /// aliases, and localized titles). The fallback is what keeps a series
-    /// editable after a manual match: applying a match leaves the record keyed
-    /// by the original folder title while the UI now refers to the series by
-    /// its matched canonical title, so an exact-key lookup on that new title
-    /// would otherwise miss the record.
+    /// normalized-key lookup first, then falls back to every record's known
+    /// titles (canonical title, user-selected name, provider/user aliases, and
+    /// localized titles) through the in-memory title index. The fallback is
+    /// what keeps a series editable after a manual match: applying a match
+    /// leaves the record keyed by the original folder title while the UI now
+    /// refers to the series by its matched canonical title, so an exact-key
+    /// lookup on that new title would otherwise miss the record.
     /// </summary>
+    /// <param name="tracked">
+    /// False for read-only callers, so the entity is not change-tracked.
+    /// </param>
     private async Task<SeriesMetadataCacheEntity?> ResolveEntityByTitleAsync(
         ComicMaintainerDbContext db,
         string seriesTitle,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool tracked = true)
     {
+        var entities = tracked ? db.SeriesMetadataCache : db.SeriesMetadataCache.AsNoTracking();
         var key = NormalizeKey(seriesTitle);
-        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        var entity = await entities.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
         if (entity is not null)
         {
             return entity;
@@ -127,25 +141,101 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
 
         // Exact-key miss: the record may be keyed by an older title (typically
         // the original folder name) while the caller refers to the series by
-        // its matched canonical title or one of its aliases. Resolve by
-        // scanning known titles. Exact key is always preferred above.
-        //
-        // A single logical series can be described by several cache records
-        // (e.g. a folder refresh issues a separate lookup for the canonical
-        // title AND each alias, leaving one authoritative "success" record and
-        // one or more stale "not_found" siblings). The library renders the
-        // series using the most authoritative record (see
-        // SeriesLibraryService.ResolveRecordForGroup). We must mirror that
-        // ranking here so mutations (e.g. pinning a series name) land on the
-        // SAME record the library displays — otherwise the change is written to
-        // a stale sibling and the displayed name never updates.
-        var candidates = await db.SeriesMetadataCache.ToListAsync(cancellationToken);
-        return candidates
-            .Where(e => EntityMatchesTitleKey(e, key))
-            .OrderByDescending(e => RankLookupStatus(e.LookupStatus))
-            .ThenByDescending(e => e.LastLookupUtc ?? DateTime.MinValue)
-            .ThenByDescending(e => e.UpdatedAt)
-            .FirstOrDefault();
+        // its matched canonical title or one of its aliases. Exact key is
+        // always preferred above.
+        var titleIndex = await GetTitleIndexAsync(cancellationToken);
+        return titleIndex.TryGetValue(key, out var ownerKey)
+            ? await entities.FirstOrDefaultAsync(e => e.NormalizedKey == ownerKey, cancellationToken)
+            : null;
+    }
+
+    /// <summary>
+    /// Returns the title index: for the series key of every title a record is
+    /// known by, the key of the record that owns it. Built from one untracked
+    /// read of the table and reused until the cache changes
+    /// (<see cref="ChangeVersion"/>) or <see cref="TitleIndexMaxAge"/> passes,
+    /// so resolving a series name for each processed file no longer loads and
+    /// JSON-parses the whole table.
+    /// </summary>
+    /// <remarks>
+    /// A single logical series can be described by several cache records
+    /// (e.g. a folder refresh issues a separate lookup for the canonical title
+    /// AND each alias, leaving one authoritative "success" record and one or
+    /// more stale "not_found" siblings). The library renders the series using
+    /// the most authoritative record (see
+    /// <c>SeriesLibraryService.ResolveRecordForGroup</c>). The index mirrors
+    /// that ranking so mutations (e.g. pinning a series name) land on the SAME
+    /// record the library displays — otherwise the change is written to a
+    /// stale sibling and the displayed name never updates.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<string, string>> GetTitleIndexAsync(CancellationToken cancellationToken)
+    {
+        var current = Volatile.Read(ref _titleIndex);
+        if (IsCurrent(current))
+        {
+            return current!.OwnerKeyByTitleKey;
+        }
+
+        await _titleIndexLock.WaitAsync(cancellationToken);
+        try
+        {
+            current = _titleIndex;
+            if (IsCurrent(current))
+            {
+                return current!.OwnerKeyByTitleKey;
+            }
+
+            // Read the version before the rows: a change committed meanwhile
+            // leaves the index one version behind, so the next lookup rebuilds.
+            var version = ChangeVersion;
+            await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var entities = await db.SeriesMetadataCache.AsNoTracking().ToListAsync(cancellationToken);
+            var owners = new Dictionary<string, SeriesMetadataCacheEntity>(StringComparer.Ordinal);
+            foreach (var entity in entities)
+            {
+                foreach (var titleKey in TitleKeysOf(entity))
+                {
+                    if (owners.TryGetValue(titleKey, out var owner) && !IsMoreAuthoritative(entity, owner))
+                    {
+                        continue;
+                    }
+
+                    owners[titleKey] = entity;
+                }
+            }
+
+            var index = new TitleIndex(
+                version,
+                DateTime.UtcNow,
+                owners.ToDictionary(pair => pair.Key, pair => pair.Value.NormalizedKey, StringComparer.Ordinal));
+            Volatile.Write(ref _titleIndex, index);
+            Interlocked.Increment(ref _titleIndexBuilds);
+            return index.OwnerKeyByTitleKey;
+        }
+        finally
+        {
+            _titleIndexLock.Release();
+        }
+
+        bool IsCurrent(TitleIndex? index)
+            => index is not null
+               && index.Version == ChangeVersion
+               && DateTime.UtcNow - index.BuiltUtc < TitleIndexMaxAge;
+    }
+
+    /// <summary>
+    /// True when <paramref name="candidate"/> represents a series better than
+    /// <paramref name="current"/>: a higher-ranked lookup status, then the more
+    /// recent lookup, then the more recent update. On a full tie the record
+    /// seen first is kept.
+    /// </summary>
+    private static bool IsMoreAuthoritative(SeriesMetadataCacheEntity candidate, SeriesMetadataCacheEntity current)
+    {
+        var byStatus = RankLookupStatus(candidate.LookupStatus).CompareTo(RankLookupStatus(current.LookupStatus));
+        if (byStatus != 0) return byStatus > 0;
+        var byLookup = (candidate.LastLookupUtc ?? DateTime.MinValue).CompareTo(current.LastLookupUtc ?? DateTime.MinValue);
+        if (byLookup != 0) return byLookup > 0;
+        return candidate.UpdatedAt > current.UpdatedAt;
     }
 
     /// <summary>
@@ -173,22 +263,29 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         };
     }
 
-    private bool EntityMatchesTitleKey(SeriesMetadataCacheEntity entity, string requestedKey)
+    /// <summary>
+    /// The series keys of every title <paramref name="entity"/> is known by:
+    /// canonical title, user-selected name, provider/user aliases and
+    /// localized titles. Blank titles are skipped.
+    /// </summary>
+    private static HashSet<string> TitleKeysOf(SeriesMetadataCacheEntity entity)
     {
-        if (KeyEquals(entity.CanonicalTitle, requestedKey)) return true;
-        if (KeyEquals(entity.SeriesName, requestedKey)) return true;
-        if (entity.Aliases is not null && entity.Aliases.Any(a => KeyEquals(a, requestedKey))) return true;
-        if (entity.UserAliases is not null && entity.UserAliases.Any(a => KeyEquals(a, requestedKey))) return true;
-        foreach (var localized in DeserializeLocalizedTitles(entity.LocalizedTitlesJson))
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        void Add(string? title)
         {
-            if (localized is not null && KeyEquals(localized.Title, requestedKey)) return true;
+            if (!string.IsNullOrWhiteSpace(title))
+            {
+                keys.Add(SeriesKey.Normalize(title));
+            }
         }
-        return false;
-    }
 
-    private bool KeyEquals(string? value, string requestedKey)
-        => !string.IsNullOrWhiteSpace(value)
-           && string.Equals(NormalizeKey(value), requestedKey, StringComparison.Ordinal);
+        Add(entity.CanonicalTitle);
+        Add(entity.SeriesName);
+        foreach (var alias in entity.Aliases ?? Enumerable.Empty<string>()) Add(alias);
+        foreach (var alias in entity.UserAliases ?? Enumerable.Empty<string>()) Add(alias);
+        foreach (var localized in DeserializeLocalizedTitles(entity.LocalizedTitlesJson)) Add(localized?.Title);
+        return keys;
+    }
 
     public async Task<SeriesMetadataCacheRecord> SetUserAliasesAsync(
         string seriesTitle,
@@ -283,22 +380,19 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
 
         // If the user previously chose a manual match for this series, refresh
         // must re-resolve to that same match (not perform a fresh title search
-        // that might pick a different result). We look up by the user-selected
-        // canonical title and preserve the "manual_match" status so the
-        // series stays marked as manually matched.
+        // that might pick a different result). Only the provider that supplied
+        // the match is asked, for the matched entry's id when it is known, and
+        // the "manual_match" status is preserved so the series stays marked as
+        // manually matched.
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken);
-        var wasManualMatch = string.Equals(entity?.LookupStatus, "manual_match", StringComparison.OrdinalIgnoreCase);
-        var lookupQuery = wasManualMatch && !string.IsNullOrWhiteSpace(entity!.CanonicalTitle)
-            ? entity.CanonicalTitle
-            : trimmedTitle;
+        var wasManualMatch = HasStatus(entity, "manual_match");
+        var previousStatus = entity?.LookupStatus;
 
-        ExternalSeriesMetadata? lookup = null;
-        string status;
+        ExternalSeriesMetadata? lookup;
         try
         {
-            lookup = await _externalMetadata.LookupSeriesAsync(lookupQuery, cancellationToken);
-            status = lookup is null ? "not_found" : "success";
+            lookup = await LookupForRefreshAsync(entity, key, trimmedTitle, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -307,10 +401,14 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _logger.LogWarning(ex, "External metadata refresh failed for {SeriesTitle}", LoggingHelper.SanitizeForLog(lookupQuery));
-            status = "error";
+            // The provider could not answer, which says nothing about the
+            // series: keep what is known and report the failure to the caller.
+            _logger.LogWarning(ex, "External metadata refresh failed for {SeriesTitle}", LoggingHelper.SanitizeForLog(trimmedTitle));
+            await RecordRefreshFailureAsync(db, entity, key, trimmedTitle, cancellationToken);
+            throw;
         }
 
+        var status = lookup is null ? "not_found" : "success";
         var now = DateTime.UtcNow;
         if (entity is null)
         {
@@ -321,40 +419,65 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
                 Aliases = lookup?.Aliases?.ToList() ?? new List<string>(),
                 UserAliases = new List<string>(),
                 Source = lookup?.Source,
+                SourceId = lookup?.SourceId,
                 LastLookupUtc = now,
                 LookupStatus = status,
                 LocalizedTitlesJson = lookup is null ? null : SerializeLocalizedTitles(BuildLocalizedTitles(lookup)),
                 CreatedAt = now,
                 UpdatedAt = now
             };
+            if (lookup is not null)
+            {
+                ApplyProviderDetails(entity, lookup);
+            }
+
             db.SeriesMetadataCache.Add(entity);
         }
         else
         {
             if (lookup is not null)
             {
-                entity.CanonicalTitle = string.IsNullOrWhiteSpace(lookup.CanonicalTitle) ? entity.CanonicalTitle : lookup.CanonicalTitle;
-                entity.Aliases = lookup.Aliases?.ToList() ?? new List<string>();
-                entity.Source = lookup.Source;
-                entity.LastLookupUtc = now;
-                entity.LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(lookup));
+                // Before Source and SourceId change: it compares them with the lookup's.
+                ApplyProviderDetails(entity, lookup);
+
+                var canonicalTitle = string.IsNullOrWhiteSpace(lookup.CanonicalTitle) ? entity.CanonicalTitle : lookup.CanonicalTitle;
+                var aliases = lookup.Aliases?.ToList() ?? new List<string>();
+                var localizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(lookup));
                 // A manually-matched series stays manually matched after a
                 // successful refresh — the lookup just updates the cached
                 // fields for the user-selected match.
-                entity.LookupStatus = wasManualMatch ? "manual_match" : status;
+                var newStatus = wasManualMatch ? "manual_match" : status;
+                var namesChanged = !string.Equals(entity.CanonicalTitle, canonicalTitle, StringComparison.Ordinal)
+                    || !(entity.Aliases ?? new List<string>()).SequenceEqual(aliases, StringComparer.Ordinal)
+                    || !string.Equals(entity.LocalizedTitlesJson, localizedTitlesJson, StringComparison.Ordinal)
+                    || !string.Equals(previousStatus, newStatus, StringComparison.OrdinalIgnoreCase);
+
+                entity.CanonicalTitle = canonicalTitle;
+                entity.Aliases = aliases;
+                // A refresh by title may not report the id; keep the known one
+                // when the entry is still from the same provider.
+                entity.SourceId = lookup.SourceId
+                    ?? (string.Equals(entity.Source, lookup.Source, StringComparison.OrdinalIgnoreCase) ? entity.SourceId : null);
+                entity.Source = lookup.Source;
+                entity.LastLookupUtc = now;
+                entity.LocalizedTitlesJson = localizedTitlesJson;
+                entity.LookupStatus = newStatus;
                 entity.UpdatedAt = now;
-                // Successful refreshes can change canonical title, aliases,
-                // or localized titles — bump so library scan re-normalizes
-                // affected files.
-                BumpMetadataVersion(entity);
+                if (namesChanged)
+                {
+                    // A new title, alias or match can change what is written
+                    // to the series' files, so bump for the library scan to
+                    // re-normalize them. An unchanged answer leaves them be.
+                    BumpMetadataVersion(entity);
+                }
             }
-            else if (wasManualMatch)
+            else if (KeepsStatusOnMiss(entity, key))
             {
-                // Lookup failed (not_found / error) for a series the user had
-                // previously manually matched. Don't clobber the user's
-                // selection — preserve the existing canonical title, aliases,
-                // and source, and keep the manual_match status. Only record
-                // that a refresh was attempted.
+                // Nothing was found for this title, but that does not undo
+                // what the record holds: a match made by hand, the match of
+                // another of the series' names, or a user decision. Keep the
+                // existing titles, source and status; only record that a
+                // refresh was attempted.
                 entity.LastLookupUtc = now;
                 entity.UpdatedAt = now;
             }
@@ -375,6 +498,156 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
 
         MarkChanged();
         return ToRecord(entity);
+    }
+
+    /// <summary>
+    /// Asks the external providers about a series being refreshed.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>A manual match is re-fetched from its own provider only.</item>
+    /// <item>
+    /// An automatic match reached through another of the series' names (a user
+    /// alias, a merged folder, a provider alias) is also re-fetched from its
+    /// own provider. That name was never what the match was made on: searching
+    /// for it could miss, or find a different series that happens to use it.
+    /// </item>
+    /// <item>
+    /// An automatic match refreshed by its own title (the record's key or its
+    /// canonical title) is re-fetched by entry id when the id is known, which
+    /// also survives a provider renaming the entry. If that entry is gone or
+    /// its provider is disabled, the title decides.
+    /// </item>
+    /// <item>
+    /// Everything else, including older matches without an id, is an ordinary
+    /// strict lookup across every provider. An explicit refresh must ask, so a
+    /// remembered "no match" is forgotten first.
+    /// </item>
+    /// </list>
+    /// </remarks>
+    private async Task<ExternalSeriesMetadata?> LookupForRefreshAsync(
+        SeriesMetadataCacheEntity? entity,
+        string key,
+        string title,
+        CancellationToken cancellationToken)
+    {
+        if (HasStatus(entity, "manual_match"))
+        {
+            return await LookupStoredMatchAsync(entity!, cancellationToken);
+        }
+
+        if (HasStatus(entity, "success"))
+        {
+            var isOwnTitle = IsOwnTitle(entity!, key);
+            if (!isOwnTitle || !string.IsNullOrWhiteSpace(entity!.SourceId))
+            {
+                var stored = await LookupStoredMatchAsync(entity!, cancellationToken);
+                if (stored is not null || !isOwnTitle)
+                {
+                    return stored;
+                }
+            }
+        }
+
+        _externalMetadata.ForgetNoMatch(title);
+        return await _externalMetadata.LookupSeriesAsync(title, cancellationToken);
+    }
+
+    private static bool HasStatus(SeriesMetadataCacheEntity? entity, string status)
+        => string.Equals(entity?.LookupStatus, status, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when <paramref name="key"/> is the record's own identity: the key
+    /// it was stored under or its canonical title, as opposed to one of the
+    /// other names it is known by.
+    /// </summary>
+    private static bool IsOwnTitle(SeriesMetadataCacheEntity entity, string key)
+        => string.Equals(entity.NormalizedKey, key, StringComparison.Ordinal)
+           || string.Equals(SeriesKey.Normalize(entity.CanonicalTitle), key, StringComparison.Ordinal);
+
+    /// <summary>
+    /// True when a lookup that found nothing must leave the record's status
+    /// alone: it holds a manual match, a user decision (<c>manual</c>,
+    /// <c>cleared</c>), or an automatic match that was refreshed through a
+    /// name other than its own.
+    /// </summary>
+    private static bool KeepsStatusOnMiss(SeriesMetadataCacheEntity entity, string key)
+        => HasStatus(entity, "manual_match")
+           || HasStatus(entity, "manual")
+           || HasStatus(entity, "cleared")
+           || (HasStatus(entity, "success") && !IsOwnTitle(entity, key));
+
+    /// <summary>
+    /// Re-fetches a match from the provider that supplied it (by the stored
+    /// entry id when known). A match without a recorded source cannot be
+    /// re-fetched; it is left as it is.
+    /// </summary>
+    private Task<ExternalSeriesMetadata?> LookupStoredMatchAsync(
+        SeriesMetadataCacheEntity entity,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(entity.Source) || string.IsNullOrWhiteSpace(entity.CanonicalTitle))
+        {
+            return Task.FromResult<ExternalSeriesMetadata?>(null);
+        }
+
+        return _externalMetadata.LookupMatchAsync(entity.Source, entity.SourceId, entity.CanonicalTitle, cancellationToken);
+    }
+
+    /// <summary>
+    /// Records a refresh whose provider lookup failed. A record that holds a
+    /// match or a user decision (success, manual, manual_match, cleared) is
+    /// left exactly as it was: the failure says nothing about the series, and
+    /// downgrading it would hide the match from the resolver and expose it to
+    /// the stale-sibling cleanup. A record that had no match yet (or a series
+    /// with no record) is marked <c>error</c> so the UI shows that the lookup
+    /// could not be made, rather than that the series was not found.
+    /// </summary>
+    private async Task RecordRefreshFailureAsync(
+        ComicMaintainerDbContext db,
+        SeriesMetadataCacheEntity? entity,
+        string key,
+        string title,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        if (entity is null)
+        {
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = key,
+                CanonicalTitle = title,
+                Aliases = new List<string>(),
+                UserAliases = new List<string>(),
+                LastLookupUtc = now,
+                LookupStatus = "error",
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+        }
+        else if (RankLookupStatus(entity.LookupStatus) <= RankLookupStatus("not_found")
+                 && !string.Equals(entity.LookupStatus, "cleared", StringComparison.OrdinalIgnoreCase))
+        {
+            entity.LookupStatus = "error";
+            entity.LastLookupUtc = now;
+            entity.UpdatedAt = now;
+        }
+        else
+        {
+            return;
+        }
+
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            MarkChanged();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
+        {
+            // Recording the failure is best effort; the lookup failure itself
+            // is what the caller needs to see.
+            _logger.LogWarning(ex, "Failed to record the failed metadata refresh for {SeriesTitle}", LoggingHelper.SanitizeForLog(title));
+        }
     }
 
     private async Task TryDownloadImageAsync(
@@ -420,7 +693,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             entity.ImageDownloadedUtc = DateTime.UtcNow;
             entity.ImageStatus = "downloaded";
 
-            await TryWriteFolderCoverAsync(entity, cancellationToken);
+            EnqueueCoverArtifacts(entity);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -489,7 +762,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         entity.RemoteImageUrl = "user-upload";
         entity.UpdatedAt = now;
 
-        await TryWriteFolderCoverAsync(entity, cancellationToken);
+        EnqueueCoverArtifacts(entity);
 
         await db.SaveChangesAsync(cancellationToken);
 
@@ -559,13 +832,17 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         entity.ImageContentType = result.ContentType;
         entity.ImageDownloadedUtc = now;
         entity.ImageStatus = "downloaded";
-        if (!string.IsNullOrWhiteSpace(source))
+        // Attribute the record to the image's provider only while it has no
+        // match: Source (with SourceId, when known) identifies the entry a
+        // refresh re-fetches, so a cover picked from another provider must not
+        // re-point a matched series.
+        if (!string.IsNullOrWhiteSpace(source) && !HasStatus(entity, "manual_match") && !HasStatus(entity, "success"))
         {
             entity.Source = source;
         }
         entity.UpdatedAt = now;
 
-        await TryWriteFolderCoverAsync(entity, cancellationToken);
+        EnqueueCoverArtifacts(entity);
 
         await db.SaveChangesAsync(cancellationToken);
 
@@ -604,21 +881,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         entity.RemoteImageUrl = null;
         entity.UpdatedAt = DateTime.UtcNow;
 
-        try
-        {
-            await _folderCoverWriter.RemoveAsync(entity.NormalizedKey, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogDebug(ex,
-                "Failed to remove on-disk series cover for {Key}",
-                LoggingHelper.SanitizeForLog(entity.NormalizedKey));
-        }
-
-        // Embedded first-archive cover removal is deferred to the background
-        // queue: rewriting the archive on disk is comparatively expensive and
-        // does not need to block the metadata update.
-        _archiveCoverQueue.EnqueueRemove(entity.NormalizedKey);
+        _coverArtifacts.EnqueueRemove(entity.NormalizedKey);
 
         await db.SaveChangesAsync(cancellationToken);
 
@@ -626,16 +889,9 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         return ToRecord(entity);
     }
 
-    public Task<bool> ReapplyImageArtifactsAsync(
+    /// <inheritdoc />
+    public async Task<SeriesCoverSource?> GetCoverSourceAsync(
         string seriesTitle,
-        CancellationToken cancellationToken = default)
-    {
-        return ReapplyImageArtifactsAsync(seriesTitle, embedArchiveInline: false, cancellationToken);
-    }
-
-    public async Task<bool> ReapplyImageArtifactsAsync(
-        string seriesTitle,
-        bool embedArchiveInline,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
@@ -644,7 +900,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         }
 
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken);
+        var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken, tracked: false);
         if (entity is null
             || string.IsNullOrWhiteSpace(entity.LocalImageFile)
             || string.IsNullOrWhiteSpace(entity.ImageContentType)
@@ -652,32 +908,21 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             || string.Equals(entity.ImageStatus, "none", StringComparison.OrdinalIgnoreCase)
             || string.Equals(entity.ImageStatus, "failed", StringComparison.OrdinalIgnoreCase))
         {
-            return false;
+            return null;
         }
 
         var sourcePath = _imageStore.ResolveAbsolutePath(entity.LocalImageFile);
-        if (string.IsNullOrWhiteSpace(sourcePath))
-        {
-            return false;
-        }
-
-        await TryWriteFolderCoverAsync(entity, cancellationToken, force: true, embedArchiveInline: embedArchiveInline);
-        return true;
+        return string.IsNullOrWhiteSpace(sourcePath)
+            ? null
+            : new SeriesCoverSource(entity.NormalizedKey, sourcePath, entity.ImageContentType);
     }
 
     /// <summary>
-    /// Best-effort: copy the freshly-persisted cached cover image into each
-    /// on-disk folder that backs the series, as <c>cover.&lt;ext&gt;</c>. The
-    /// writer itself is guarded by a feature flag and swallows per-folder
-    /// failures; this wrapper exists only to translate the persisted
-    /// LocalImageFile into an absolute path and to ensure any unexpected
-    /// throw never bubbles into the metadata update.
+    /// Best-effort: queues copying the freshly-persisted cached cover image into the series'
+    /// on-disk cover artifacts (folder sidecars and first-archive embed). Those writes happen
+    /// off the metadata update's path and can never fail it.
     /// </summary>
-    private async Task TryWriteFolderCoverAsync(
-        SeriesMetadataCacheEntity entity,
-        CancellationToken cancellationToken,
-        bool force = false,
-        bool embedArchiveInline = false)
+    private void EnqueueCoverArtifacts(SeriesMetadataCacheEntity entity)
     {
         if (string.IsNullOrEmpty(entity.LocalImageFile)
             || string.IsNullOrEmpty(entity.ImageContentType))
@@ -688,46 +933,15 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         try
         {
             var sourcePath = _imageStore.ResolveAbsolutePath(entity.LocalImageFile);
-            if (string.IsNullOrEmpty(sourcePath))
+            if (!string.IsNullOrEmpty(sourcePath))
             {
-                return;
-            }
-            await _folderCoverWriter.WriteAsync(
-                entity.NormalizedKey,
-                sourcePath,
-                entity.ImageContentType,
-                force,
-                cancellationToken);
-
-            if (embedArchiveInline)
-            {
-                // Embed the first-archive cover synchronously so an explicit,
-                // user-initiated re-apply surfaces real progress (the archive
-                // rewrite is the slow part) instead of completing instantly and
-                // deferring the heavy work to the background queue invisibly.
-                await _archiveCoverWriter.WriteAsync(
-                    entity.NormalizedKey,
-                    sourcePath,
-                    entity.ImageContentType,
-                    force,
-                    cancellationToken);
-            }
-            else
-            {
-                // Embedded first-archive cover writes are deferred to the background
-                // queue: rewriting the archive on disk is comparatively expensive
-                // and does not need to block the metadata update.
-                _archiveCoverQueue.EnqueueWrite(
-                    entity.NormalizedKey,
-                    sourcePath,
-                    entity.ImageContentType,
-                    force);
+                _coverArtifacts.EnqueueWrite(entity.NormalizedKey, sourcePath, entity.ImageContentType);
             }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _logger.LogDebug(ex,
-                "Failed to write on-disk series cover for {Key}",
+            _logger.LogWarning(ex,
+                "Failed to queue on-disk series cover for {Key}",
                 LoggingHelper.SanitizeForLog(entity.NormalizedKey));
         }
     }
@@ -787,33 +1001,30 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
                 Aliases = match.Aliases?.ToList() ?? new List<string>(),
                 UserAliases = new List<string>(),
                 Source = match.Source,
+                SourceId = match.SourceId,
                 LastLookupUtc = now,
                 LookupStatus = lookupStatus,
                 LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(match)),
-                Synopsis = SynopsisTextNormalizer.Normalize(match.Synopsis),
                 CreatedAt = now,
                 UpdatedAt = now
             };
+            ApplyProviderDetails(entity, match);
             db.SeriesMetadataCache.Add(entity);
         }
         else
         {
+            // Before Source and SourceId change: it compares them with the match's.
+            ApplyProviderDetails(entity, match);
+
             // The provider canonical title is always refreshed; the user's
             // chosen display name (SeriesName) is independent and sticky.
             entity.CanonicalTitle = match.CanonicalTitle;
             entity.Aliases = match.Aliases?.ToList() ?? new List<string>();
             entity.Source = match.Source;
+            entity.SourceId = match.SourceId;
             entity.LastLookupUtc = now;
             entity.LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(match));
             entity.LookupStatus = lookupStatus;
-            // Refresh the synopsis when the provider returned one; preserve the
-            // existing synopsis when this match carries none (e.g. a manual
-            // match selected from a candidate without a description).
-            var normalizedSynopsis = SynopsisTextNormalizer.Normalize(match.Synopsis);
-            if (!string.IsNullOrWhiteSpace(normalizedSynopsis))
-            {
-                entity.Synopsis = normalizedSynopsis;
-            }
             entity.UpdatedAt = now;
             BumpMetadataVersion(entity);
         }
@@ -852,10 +1063,16 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         // user aliases and (if set) the user's canonical-title override.
         entity.Aliases = new List<string>();
         entity.Source = null;
+        entity.SourceId = null;
         entity.LastLookupUtc = null;
         entity.LookupStatus = "cleared";
         entity.LocalizedTitlesJson = null;
         entity.Synopsis = null;
+        entity.SiteUrl = null;
+        entity.GenresJson = null;
+        entity.PublicationStatus = null;
+        entity.TotalChapters = null;
+        entity.Origin = null;
 
         // Revert the provider-derived canonical title to the normalized key
         // so the UI shows a recognisable placeholder rather than a stale
@@ -894,6 +1111,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             UserAliases = entity.UserAliases?.ToList() ?? new List<string>(),
             SeriesName = entity.SeriesName,
             Source = entity.Source,
+            SourceId = entity.SourceId,
             LastLookupUtc = entity.LastLookupUtc,
             LookupStatus = entity.LookupStatus,
             RemoteImageUrl = entity.RemoteImageUrl,
@@ -904,7 +1122,12 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             PreferredLanguage = entity.PreferredLanguage,
             LocalizedTitles = DeserializeLocalizedTitles(entity.LocalizedTitlesJson),
             MetadataVersion = entity.MetadataVersion,
-            Synopsis = entity.Synopsis
+            Synopsis = entity.Synopsis,
+            SiteUrl = entity.SiteUrl,
+            Genres = DeserializeGenres(entity.GenresJson),
+            PublicationStatus = entity.PublicationStatus,
+            TotalChapters = entity.TotalChapters,
+            Origin = entity.Origin
         };
 
         // Compute the single authoritative name via the shared resolver so
@@ -930,6 +1153,68 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         if (entity.MetadataVersion < int.MaxValue)
         {
             entity.MetadataVersion++;
+        }
+    }
+
+    /// <summary>
+    /// Stores what a lookup says about the series beyond its names. Values are cleaned here
+    /// because a manual match passes them back through the client. A value the lookup does not
+    /// carry is kept when the lookup is the same provider entry, and dropped when it is a
+    /// different one, where the old value would describe another series.
+    /// </summary>
+    /// <remarks>
+    /// Never bumps <see cref="SeriesMetadataCacheEntity.MetadataVersion"/>. These values only
+    /// fill empty ComicInfo fields when a file is next processed; a bump would send every file
+    /// of the series through the library scan's retag pass each time a refresh brought a new
+    /// genre or status, and would re-mark the existing library as entries filled in after
+    /// the upgrade.
+    /// </remarks>
+    private static void ApplyProviderDetails(SeriesMetadataCacheEntity entity, ExternalSeriesMetadata lookup)
+    {
+        var otherEntry = IsDifferentEntry(entity, lookup);
+        var genres = ProviderMetadataText.Genres(lookup.Genres);
+
+        entity.Synopsis = SynopsisTextNormalizer.Normalize(lookup.Synopsis) ?? (otherEntry ? null : entity.Synopsis);
+        entity.SiteUrl = ProviderMetadataText.HttpUrl(lookup.SiteUrl) ?? (otherEntry ? null : entity.SiteUrl);
+        entity.GenresJson = genres.Count > 0 ? JsonSerializer.Serialize(genres) : (otherEntry ? null : entity.GenresJson);
+        entity.PublicationStatus = SeriesPublicationStatus.Normalize(lookup.PublicationStatus) ?? (otherEntry ? null : entity.PublicationStatus);
+        entity.TotalChapters = lookup.TotalChapters > 0 ? lookup.TotalChapters : (otherEntry ? null : entity.TotalChapters);
+        entity.Origin = ProviderMetadataText.PrimaryLanguage(lookup.Origin) ?? (otherEntry ? null : entity.Origin);
+    }
+
+    /// <summary>
+    /// True when the record holds a match and <paramref name="lookup"/> is another provider's,
+    /// or another entry at the same provider. An unmatched record has nothing to contradict,
+    /// and a missing id cannot tell two entries apart.
+    /// </summary>
+    private static bool IsDifferentEntry(SeriesMetadataCacheEntity entity, ExternalSeriesMetadata lookup)
+    {
+        if (string.IsNullOrWhiteSpace(entity.Source))
+        {
+            return false;
+        }
+
+        return !string.Equals(entity.Source, lookup.Source, StringComparison.OrdinalIgnoreCase)
+            || (!string.IsNullOrWhiteSpace(entity.SourceId)
+                && !string.IsNullOrWhiteSpace(lookup.SourceId)
+                && !string.Equals(entity.SourceId, lookup.SourceId, StringComparison.Ordinal));
+    }
+
+    /// <summary>Reads <see cref="SeriesMetadataCacheEntity.GenresJson"/>; never throws.</summary>
+    private static List<string> DeserializeGenres(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new List<string>();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
+        }
+        catch (JsonException)
+        {
+            return new List<string>();
         }
     }
 
@@ -1170,6 +1455,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             return 0;
         }
 
+        var titleKeys = entities.ToDictionary(e => e.NormalizedKey, TitleKeysOf, StringComparer.Ordinal);
         var toRemove = new List<SeriesMetadataCacheEntity>();
         foreach (var candidate in entities)
         {
@@ -1186,7 +1472,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
                 !ReferenceEquals(other, candidate)
                 && !string.Equals(other.NormalizedKey, candidate.NormalizedKey, StringComparison.Ordinal)
                 && RankLookupStatus(other.LookupStatus) > RankLookupStatus(candidate.LookupStatus)
-                && EntityMatchesTitleKey(other, candidate.NormalizedKey));
+                && titleKeys[other.NormalizedKey].Contains(candidate.NormalizedKey));
 
             if (subsumed)
             {

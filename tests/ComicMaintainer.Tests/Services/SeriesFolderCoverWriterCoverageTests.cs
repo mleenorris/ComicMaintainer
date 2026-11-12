@@ -122,16 +122,49 @@ public class SeriesFolderCoverWriterCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task WriteAsync_LibraryNotRegistered_IsSwallowed()
+    public async Task WriteAsync_LibraryLookupFails_IsLoggedAtWarningAndSwallowed()
     {
-        var writer = new SeriesFolderCoverWriter(
-            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
-            Options(),
-            Mock.Of<ILogger<SeriesFolderCoverWriter>>());
+        _library
+            .Setup(l => l.GetFoldersForNormalizedKeyAsync(Key, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        var logger = new Mock<ILogger<SeriesFolderCoverWriter>>();
+        var writer = new SeriesFolderCoverWriter(_library.Object, Options(), logger.Object);
 
         await writer.WriteAsync(Key, _source, "image/jpeg");
 
         Assert.Equal([_source], Directory.GetFileSystemEntries(_root));
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) => state!.ToString()!.Contains("Failed to resolve folders for series cover write/remove")),
+                It.IsAny<InvalidOperationException>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task WriteAsync_CancelledDuringLookup_PropagatesWithoutAWarning()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        _library
+            .Setup(l => l.GetFoldersForNormalizedKeyAsync(Key, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+        var logger = new Mock<ILogger<SeriesFolderCoverWriter>>();
+        var writer = new SeriesFolderCoverWriter(_library.Object, Options(), logger.Object);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            writer.WriteAsync(Key, _source, "image/jpeg", cancellationToken: cts.Token));
+
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
     }
 
     // ---- WriteAsync per-folder behaviour ---------------------------------------
@@ -250,10 +283,7 @@ public class SeriesFolderCoverWriterCoverageTests : IDisposable
 
     private SeriesFolderCoverWriter CreateWriter()
     {
-        var services = new ServiceCollection();
-        services.AddScoped(_ => _library.Object);
-        var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
-        return new SeriesFolderCoverWriter(scopeFactory, Options(), Mock.Of<ILogger<SeriesFolderCoverWriter>>());
+        return new SeriesFolderCoverWriter(_library.Object, Options(), Mock.Of<ILogger<SeriesFolderCoverWriter>>());
     }
 
     private IOptionsMonitor<AppSettings> Options()

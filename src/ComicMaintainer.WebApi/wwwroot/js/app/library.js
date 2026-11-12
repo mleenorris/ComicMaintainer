@@ -1,4 +1,4 @@
-        // ComicMaintainer SPA — library view: layout, series/folder loading, filtering, sorting, protected images, series grid and selection.
+        // ComicMaintainer SPA — library view: layout, series loading, filtering, sorting, protected images, series grid and selection.
         //
         // Classic (non-module) script: its top-level declarations are globals
         // shared with the other app scripts and with inline onclick handlers.
@@ -7,25 +7,14 @@
         // depends on a script loaded after it.
 
         // Shared state declared in state.js and reassigned here.
-        /* global seriesTotal: true, folderTotal: true */
+        /* global seriesTotal: true */
 
         async function loadActiveLibraryView({ refresh = false, keepLoaded = false } = {}) {
-            if (libraryViewMode === 'series') {
-                return loadSeriesLibrary({ refresh, keepLoaded });
-            }
-
-            return loadFolders({ refresh });
-        }
-
-        function updateLibraryViewButtons() {
-            document.getElementById('filesViewModeBtn')?.classList.toggle('active', libraryViewMode === 'files');
-            document.getElementById('seriesViewModeBtn')?.classList.toggle('active', libraryViewMode === 'series');
-            updateSeriesLayoutButtons();
+            return loadSeriesLibrary({ refresh, keepLoaded });
         }
 
         // ── Series layout (List / Grid / Compact) ─────────────────────────────
-        // The layout toggle is only meaningful when viewing the series library;
-        // hide it entirely when in Files mode to avoid cluttering the header.
+        // The layout toggle is only meaningful when viewing the series library.
         function isMobilePortrait() {
             try {
                 return window.matchMedia('(max-width: 600px) and (orientation: portrait)').matches;
@@ -41,16 +30,20 @@
             return isMobilePortrait() ? 'list' : 'compact';
         }
 
+        function isLibraryPageActive() {
+            return typeof currentView === 'undefined' || currentView === 'library';
+        }
+
         function updateSeriesLayoutButtons() {
             const toggle = document.getElementById('seriesLayoutToggle');
             const mobileToolbar = document.getElementById('seriesLayoutToolbarMobile');
             // The layout toggle only applies to the full library grid/list — not
             // the overview page or a single series' page.
-            const inSeriesMode = libraryViewMode === 'series'
-                && (typeof currentView === 'undefined' || currentView === 'library');
-            if (toggle) toggle.hidden = !inSeriesMode;
-            if (mobileToolbar) mobileToolbar.hidden = !inSeriesMode;
-            if (!inSeriesMode) return;
+            const onLibraryPage = isLibraryPageActive();
+            if (toggle) toggle.hidden = !onLibraryPage;
+            if (mobileToolbar) mobileToolbar.hidden = !onLibraryPage;
+            syncLibraryFacetsVisibility();
+            if (!onLibraryPage) return;
             const effective = getEffectiveSeriesLayout();
             document.getElementById('seriesLayoutListBtn')?.classList.toggle('active', effective === 'list');
             document.getElementById('seriesLayoutGridBtn')?.classList.toggle('active', effective === 'grid');
@@ -67,7 +60,7 @@
                 localStorage.setItem('seriesLayout', layout);
             } catch (_e) { /* localStorage may be unavailable */ }
             updateSeriesLayoutButtons();
-            if (libraryViewMode === 'series' && !currentSeriesDetailId) {
+            if (!currentSeriesDetailId) {
                 renderSeriesLibrary();
             }
         }
@@ -78,35 +71,10 @@
             // series detail (files) view; their visibility is governed by the
             // dropdown's expand/collapse state, not by the current view.
             const controlsWrapper = document.querySelector('.controls-wrapper');
-            const pagination = document.getElementById('pagination');
 
             if (controlsWrapper) {
                 controlsWrapper.style.display = '';
             }
-
-            if (libraryViewMode === 'series' && currentSeriesDetailId && pagination) {
-                pagination.style.display = 'none';
-            }
-        }
-
-        async function setLibraryViewMode(mode) {
-            // The Files view has been removed; the library is always shown in
-            // Series mode. Any incoming request is coerced to 'series' so legacy
-            // call sites (preferences with `libraryViewMode === 'files'`, etc.)
-            // still resolve to a valid state.
-            mode = 'series';
-
-            if (libraryViewMode === mode && !(mode === 'series' && currentSeriesDetailId)) {
-                return;
-            }
-
-            libraryViewMode = mode;
-            currentSeriesDetailId = null;
-            currentSeriesDetailTitleKeys = null;
-            updateLibraryViewButtons();
-            updateLibraryViewLayout();
-            await setPreferences({ libraryViewMode: mode });
-            await loadActiveLibraryView({ refresh: true });
         }
 
         function promptForForceReprocess(actionDescription, statusDescription) {
@@ -119,7 +87,6 @@
         // soon as the aborted request settles instead of after a full
         // (possibly slow, on large libraries) response.
         let seriesLoadController = null;
-        let folderLoadController = null;
 
         function isAbortError(error) {
             return !!error && error.name === 'AbortError';
@@ -203,38 +170,34 @@
             const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
             seriesLoadController = controller;
             try {
-                let url = apiUrl(`/api/files/series?offset=${seriesOffset}&limit=${limit}`);
+                let path = `/api/files/series?offset=${seriesOffset}&limit=${limit}`;
                 if (refresh) {
-                    url += '&refresh=true';
+                    path += '&refresh=true';
                 }
                 if (searchQuery) {
-                    url += `&search=${encodeURIComponent(searchQuery)}`;
+                    path += `&search=${encodeURIComponent(searchQuery)}`;
                 }
                 if (filterMode !== 'all') {
-                    url += `&filter=${encodeURIComponent(filterMode)}`;
+                    path += `&filter=${encodeURIComponent(filterMode)}`;
                 }
                 if (sortMode !== 'name') {
-                    url += `&sort=${encodeURIComponent(sortMode)}`;
+                    path += `&sort=${encodeURIComponent(sortMode)}`;
                 }
                 if (sortDirection !== 'asc') {
-                    url += `&direction=${encodeURIComponent(sortDirection)}`;
+                    path += `&direction=${encodeURIComponent(sortDirection)}`;
+                }
+                if (seriesGenreFilter) {
+                    path += `&genre=${encodeURIComponent(seriesGenreFilter)}`;
+                }
+                if (seriesStatusFilter) {
+                    path += `&status=${encodeURIComponent(seriesStatusFilter)}`;
                 }
 
-                const response = await fetch(url, {
-                    headers: getAuthHeaders(),
-                    signal: controller ? controller.signal : undefined
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw apiResponseError(response);
-                }
-
-                const data = await response.json();
+                const data = await apiFetch(path, { signal: controller ? controller.signal : undefined });
                 const newSeries = data.series || [];
                 seriesLibrary = seriesLibrary.concat(newSeries);
                 seriesOffset += newSeries.length;
                 seriesTotal = data.total_series || 0;
-                totalFiles = seriesTotal;
                 unmarkedCount = data.unmarked_count || 0;
 
                 if (currentSeriesDetailId) {
@@ -249,6 +212,9 @@
 
                 if (refresh) {
                     loadLibraryHealth();
+                }
+                if (refresh || !libraryFacets) {
+                    loadLibraryFacets();
                 }
             } catch (error) {
                 // Superseded by a newer reload (see seriesLoadController); the
@@ -277,142 +243,117 @@
             }
         }
 
-        async function loadFolders(opts) {
-            let append = false;
-            let refresh = false;
-            if (typeof opts === 'object' && opts !== null) {
-                append = !!opts.append;
-                refresh = !!opts.refresh;
-            } else if (typeof opts === 'boolean') {
-                refresh = opts;
-            }
+        // ── Genre and status filters ──────────────────────────────────────
+        // '' selects every series; SERIES_FACET_NO_DATA the series a provider
+        // has not reported that value for.
+        const SERIES_FACET_NO_DATA = 'none';
+        const SERIES_STATUS_LABELS = Object.freeze({
+            ongoing: 'Ongoing',
+            completed: 'Completed',
+            hiatus: 'On hiatus',
+            cancelled: 'Cancelled',
+            upcoming: 'Not yet released'
+        });
+        let seriesGenreFilter = '';
+        let seriesStatusFilter = '';
+        // The last GET /api/files/series/facets answer; null until one arrives.
+        let libraryFacets = null;
 
-            if (folderLoading) {
-                // Mirror the series loader: don't drop a fresh (non-append)
-                // reload requested while a load is in flight; re-run it after.
-                if (!append) {
-                    folderReloadPending = true;
-                    if (folderLoadController) {
-                        folderLoadController.abort();
-                    }
-                }
+        function seriesStatusLabel(status) {
+            return SERIES_STATUS_LABELS[status] || status;
+        }
+
+        // The filters are an extra: if they cannot be loaded the library still
+        // works, so this stays quiet and the bar stays as it was.
+        async function loadLibraryFacets() {
+            try {
+                libraryFacets = await apiFetch('/api/files/series/facets');
+            } catch (_error) {
                 return;
             }
+            renderLibraryFacets();
+        }
 
-            // For non-append calls, reset the folder summary list (we re-fetch
-            // from offset 0). When the call is an explicit refresh, also clear
-            // per-folder file caches and collapsed state so the user sees fresh
-            // data. Otherwise, preserve cached folder file lists / expanded
-            // state so per-file SSE events don't wipe the user's session.
-            if (!append) {
-                folderList = [];
-                folderOffset = 0;
-                folderTotal = 0;
-                if (refresh) {
-                    folderFiles.clear();
-                    collapsedDirectories.clear();
-                    allFoldersExpanded = false;
-                }
+        function syncLibraryFacetsVisibility() {
+            const bar = document.getElementById('libraryFacets');
+            if (bar) bar.hidden = !libraryFacets || !isLibraryPageActive();
+        }
+
+        // Fills one filter menu. Provider text goes through html``, which
+        // escapes it, and each option's value is the text itself.
+        function renderFacetSelect(id, allLabel, entries, noDataCount, selected, labelFor) {
+            const select = document.getElementById(id);
+            const items = entries.map(entry => ({ value: entry.value, label: `${labelFor(entry.value)} (${entry.count})` }));
+            if (noDataCount > 0) {
+                items.push({ value: SERIES_FACET_NO_DATA, label: `No data yet (${noDataCount})` });
             }
+            // A selection the library no longer holds stays listed, so the
+            // menu keeps describing what the list below it shows.
+            if (selected && !items.some(item => item.value === selected)) {
+                items.push({ value: selected, label: labelFor(selected) });
+            }
+            renderHtml(select, html`<option value="">${allLabel}</option>${items.map(item => html`<option value="${item.value}">${item.label}</option>`)}`);
+            select.value = selected;
+            // Off when there is nothing to choose, but never while a filter
+            // is applied: that would leave no way to clear it.
+            select.disabled = entries.length === 0 && !selected;
+        }
 
-            folderLoading = true;
-            const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-            folderLoadController = controller;
-            try {
-                let url = apiUrl(`/api/files/folders?offset=${folderOffset}&limit=${FOLDER_PAGE_SIZE}`);
-                if (refresh) {
-                    url += '&refresh=true';
-                }
-                if (searchQuery) {
-                    url += `&search=${encodeURIComponent(searchQuery)}`;
-                }
-                if (filterMode !== 'all') {
-                    url += `&filter=${encodeURIComponent(filterMode)}`;
-                }
-                if (sortMode !== 'name') {
-                    url += `&sort=${encodeURIComponent(sortMode)}`;
-                }
-                if (sortDirection !== 'asc') {
-                    url += `&direction=${encodeURIComponent(sortDirection)}`;
-                }
+        function renderLibraryFacets() {
+            const { genres, statuses, series_without_genres: noGenres, series_without_status: noStatus } = libraryFacets;
+            renderFacetSelect('libraryGenreFilter', 'All genres', genres, noGenres, seriesGenreFilter,
+                genre => (genre === SERIES_FACET_NO_DATA ? 'No data yet' : genre));
+            renderFacetSelect('libraryStatusFilter', 'Any status', statuses, noStatus, seriesStatusFilter,
+                status => (status === SERIES_FACET_NO_DATA ? 'No data yet' : seriesStatusLabel(status)));
+            // Nothing to choose from yet: say why rather than show empty menus.
+            document.getElementById('libraryFacetsHint').hidden = genres.length > 0 || statuses.length > 0;
+            syncLibraryFacetsVisibility();
+        }
 
-                const response = await fetch(url, {
-                    headers: getAuthHeaders(),
-                    signal: controller ? controller.signal : undefined
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw apiResponseError(response);
-                }
-                const data = await response.json();
+        function setSeriesFacetFilter() {
+            seriesGenreFilter = document.getElementById('libraryGenreFilter').value;
+            seriesStatusFilter = document.getElementById('libraryStatusFilter').value;
+            currentSeriesDetailTitleKeys = null;
+            loadActiveLibraryView();
+        }
 
-                const newFolders = data.folders || [];
-                folderList = folderList.concat(newFolders);
-                folderOffset += newFolders.length;
-                folderTotal = data.total_folders || 0;
-                totalFiles = folderTotal;
-                unmarkedCount = data.unmarked_count || 0;
-
-                // Newly arrived folders should be collapsed by default, but
-                // preserve the user's explicit state for folders we've already
-                // expanded in this session. The library root (path '') is the
-                // exception: it has no header to expand it by, so it is never
-                // collapsed and its files are always shown.
-                let rootArrived = false;
-                for (const f of newFolders) {
-                    if (f && typeof f.path === 'string') {
-                        if (!f.path) {
-                            rootArrived = true;
-                        } else if (!folderFiles.has(f.path)) {
-                            collapsedDirectories.add(f.path);
-                        }
+        // Keeps the infinite-scroll sentinel at the end of the series list and
+        // loads the next page of series when it scrolls into view.
+        function ensureScrollObserver() {
+            if (scrollObserver) {
+                try { scrollObserver.disconnect(); } catch (e) { /* ignore */ }
+            }
+            const fileList = document.getElementById('fileList');
+            if (!fileList) return;
+            // The sentinel must live INSIDE the scrolling container (`.file-list`)
+            // and be observed against that container as the IO root. Otherwise the
+            // sentinel — sitting at the bottom of the viewport because `.file-list`
+            // has `flex: 1` — would be perpetually within the 400 px rootMargin and
+            // trigger an infinite "load more → re-render → re-observe" loop. That
+            // loop is what made the list flicker and items unclickable on desktop
+            // and could leave the list appearing cut off or never displayed at all
+            // on smaller viewports.
+            let sentinel = document.getElementById('libraryScrollSentinel');
+            if (!sentinel) {
+                sentinel = document.createElement('div');
+                sentinel.id = 'libraryScrollSentinel';
+            }
+            if (sentinel.parentElement !== fileList) {
+                fileList.appendChild(sentinel);
+            } else if (sentinel !== fileList.lastElementChild) {
+                fileList.appendChild(sentinel);
+            }
+            scrollObserver = new IntersectionObserver((entries) => {
+                for (const e of entries) {
+                    if (!e.isIntersecting) continue;
+                    if (!seriesLoading && seriesOffset < seriesTotal) {
+                        loadSeriesLibrary({ append: true });
                     }
                 }
-
-                // The list has arrived: stop counting as loading before drawing
-                // it, or an empty result would be drawn as "Loading files..."
-                // (finally{} clears the flag only after this render) instead
-                // of its empty state.
-                folderLoading = false;
-                renderFileList();
-                // The root's files are on screen straight away, so fetch them
-                // for the current filter/search even when a list from an
-                // earlier one is cached.
-                if (rootArrived) {
-                    ensureFolderLoaded('', true).catch(() => {});
-                }
-                reloadStaleOpenFolders(newFolders).catch(() => {});
-                updateButtonVisibility();
-                ensureScrollObserver();
-                if (refresh) {
-                    loadLibraryHealth();
-                }
-            } catch (error) {
-                if (!isAbortError(error)) {
-                    showMessage('Failed to load files: ' + error.message, 'error', { reference: error });
-                }
-            } finally {
-                if (folderLoadController === controller) {
-                    folderLoadController = null;
-                }
-                folderLoading = false;
-                if (folderReloadPending) {
-                    folderReloadPending = false;
-                    loadFolders({ refresh: false });
-                }
-            }
+            }, { root: fileList, rootMargin: '400px' });
+            scrollObserver.observe(sentinel);
         }
 
-        // Backward-compatible shim so legacy callers still work.
-        async function loadFiles(_page = 1, refresh = false) {
-            return loadFolders({ refresh });
-        }
-
-        function updatePagination() {
-            // Pagination has been replaced with infinite scroll; this is a no-op
-            // kept so any leftover callers (or browser extensions) don't error.
-        }
-        
         function updateButtonVisibility() {
             // The "… Unmarked" actions have nothing to act on without unmarked
             // files, so they are shown only while there are some.
@@ -426,13 +367,6 @@
             const controlsWrapper = document.querySelector('.controls-wrapper');
             if (controlsWrapper) controlsWrapper.style.display = '';
         }
-        
-        async function changePerPage() {
-            // Per-page selector has been removed in favor of infinite scroll.
-        }
-        
-        function nextPage() { /* deprecated: infinite scroll */ }
-        function previousPage() { /* deprecated: infinite scroll */ }
         
         async function filterFiles() {
             searchQuery = document.getElementById('headerSearchInput').value;
@@ -634,17 +568,7 @@
         async function scanUnmarkedFiles() {
             try {
                 showMessage('Scanning for unmarked files...', 'info');
-                const response = await fetch(apiUrl('/api/scan-unmarked'), {
-                    method: 'POST',
-                    headers: getAuthHeaders()
-                });
-                
-                if (handleAuthError(response)) return;
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
+                const data = await apiFetch('/api/files/scan-unmarked');
                 
                 showMessage(`Found ${data.unmarked_count} unmarked file(s) and ${data.marked_count} marked file(s) out of ${data.total_count} total files.`, 'success');
             } catch (error) {
@@ -652,29 +576,25 @@
             }
         }
 
-        function getSeriesCoverUrl(filePath) {
+        function getSeriesCoverPath(filePath) {
             // Persistent server-side cache endpoint. Falls back automatically
             // (via the protected-image fallback machinery) to the legacy page
             // extraction endpoint if the cache is unavailable.
-            return apiUrl(`/api/comicreader/cover?filePath=${encodeURIComponent(filePath)}`);
-        }
-
-        function getSeriesCoverFallbackUrl(filePath) {
-            return apiUrl(`/api/comicreader/page?filePath=${encodeURIComponent(filePath)}&page=1`);
+            return `/api/comicreader/cover?filePath=${encodeURIComponent(filePath)}`;
         }
 
         /**
-         * Resolve a `data-protected-image` token to a fetchable URL. Tokens
-         * that look like API paths (start with "/api/") are passed through to
-         * apiUrl(); anything else is treated as a comic file path and routed
-         * through the comicreader page endpoint.
+         * Resolve a `data-protected-image` token to an API path. Tokens
+         * that look like API paths (start with "/api/") are used as they are;
+         * anything else is treated as a comic file path and routed through the
+         * comicreader cover endpoint.
          */
-        function resolveProtectedImageUrl(token) {
+        function resolveProtectedImagePath(token) {
             if (!token) return null;
             if (token.startsWith('/api/')) {
-                return apiUrl(token);
+                return token;
             }
-            return getSeriesCoverUrl(token);
+            return getSeriesCoverPath(token);
         }
 
         // Lazy per-image hydration. Previously this function fetched every
@@ -738,9 +658,9 @@
             image.dataset.protectedImageLoaded = '1';
 
             const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-            const fetchOnce = async (url) => {
+            const fetchOnce = async (path) => {
                 try {
-                    const response = await fetch(url, { headers: getAuthHeaders() });
+                    const response = await apiFetch(path, { json: false });
                     return { response, errored: false };
                 } catch (error) {
                     return { response: null, errored: true, error };
@@ -752,16 +672,16 @@
                     image.src = protectedImageUrls.get(token);
                     return 'ok';
                 }
-                const url = resolveProtectedImageUrl(token);
-                if (!url) return 'missing';
+                const path = resolveProtectedImagePath(token);
+                if (!path) return 'missing';
 
-                let attempt = await fetchOnce(url);
+                let attempt = await fetchOnce(path);
                 let response = attempt.response;
                 const isTransient = attempt.errored
                     || (response && response.status >= 500);
                 if (isTransient) {
                     await sleep(250);
-                    attempt = await fetchOnce(url);
+                    attempt = await fetchOnce(path);
                     response = attempt.response;
                 }
 
@@ -863,7 +783,7 @@
                     <div class="empty-state">
                         <div class="empty-state-icon">${uiIcon('image')}</div>
                         <h2>No series found</h2>
-                        <p>${searchQuery || filterMode !== 'all' ? 'Try a different search term or filter' : 'Process and normalize comics to build your series library view.'}</p>
+                        <p>${searchQuery || filterMode !== 'all' || seriesGenreFilter || seriesStatusFilter ? 'Try a different search term or filter' : 'Process and normalize comics to build your series library view.'}</p>
                         ${renderSuwayomiSearchOffer(searchQuery)}
                     </div>
                 `);
@@ -946,19 +866,24 @@
             `;
         }
 
-        // Render the small selectable checkbox overlay shown on every series
-        // card/row. A <span role="checkbox"> is used (rather than a real
-        // <input>) so it is valid inside the surrounding <button> element; the
-        // click is stopped from bubbling so it toggles selection instead of
-        // opening the series.
+        // Render the small select box shown on every series card/row. It is a
+        // native <button> exposed as a checkbox, so it is focusable and
+        // toggles on Space and Enter without extra key handling. It sits
+        // BESIDE the button that opens the series, never inside it: a
+        // button's descendants are presentational, so a control nested in one
+        // is hidden from assistive technology.
         function renderSeriesSelectBox(series) {
             const checked = selectedSeries.has(series.id);
-            return `<span class="series-select-box${checked ? ' series-select-box--checked' : ''}"
-                role="checkbox" aria-checked="${checked ? 'true' : 'false'}" tabindex="0"
+            return `<button type="button" class="series-select-box${checked ? ' series-select-box--checked' : ''}"
+                role="checkbox" aria-checked="${checked ? 'true' : 'false'}"
                 data-series-id="${escapeHtml(series.id)}"
                 title="Select series" aria-label="Select ${escapeHtml(series.title)}"
-                onclick="event.stopPropagation(); toggleSeriesSelection('${escapeJs(series.id)}', this.getAttribute('aria-checked') !== 'true')"
-                onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault(); event.stopPropagation(); toggleSeriesSelection('${escapeJs(series.id)}', this.getAttribute('aria-checked') !== 'true');}">${checked ? '✓' : ''}</span>`;
+                onclick="toggleSeriesSelection('${escapeJs(series.id)}', this.getAttribute('aria-checked') !== 'true')">${checked ? '✓' : ''}</button>`;
+        }
+
+        // The attributes of the button that opens a series from its card/row.
+        function seriesOpenButtonAttributes(series) {
+            return `type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')"`;
         }
 
         // Fetch every file path belonging to a series (ignoring the active
@@ -966,11 +891,7 @@
         // result for the lifetime of the selection.
         async function fetchSeriesFilePaths(seriesId) {
             try {
-                const url = apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=-1&filter=all`);
-                const response = await fetch(url, {
-                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=-1&filter=all`, { json: false });
                 if (!response.ok) return [];
                 const data = await response.json();
                 const issues = Array.isArray(data.issues) ? data.issues : [];
@@ -1063,7 +984,7 @@
         // the whole grid, which would reset the scroll position). Falls back to
         // a full render only when the list hasn't been rendered yet.
         function updateSeriesSelectionUI() {
-            if (!(libraryViewMode === 'series' && !currentSeriesDetailId)) return;
+            if (currentSeriesDetailId) return;
             const boxes = document.querySelectorAll('.series-select-box[data-series-id]');
             if (!boxes.length) return;
             boxes.forEach(box => {
@@ -1084,24 +1005,29 @@
             syncSeriesSelectionControls();
         }
 
+        // Every layout renders a series as a list item holding two sibling
+        // controls: the select box and a button that opens the series.
+
         // Cover-only cards with title overlaid on the cover (original behaviour).
         function renderSeriesLibraryCompact(items = seriesLibrary) {
             return `
-                <div class="series-grid series-grid--compact">
+                <div class="series-grid series-grid--compact" role="list">
                     ${items.map(series => `
-                        <button class="series-card${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                        <div class="series-card${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" role="listitem">
                             ${renderSeriesSelectBox(series)}
-                            <div class="series-cover-wrapper">
-                                <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
-                                <div class="series-cover-overlay"></div>
-                                <span class="series-count-badge">${series.issue_count}</span>
-                                ${renderLookupStatusBadge(series)}
-                                <div class="series-card-body">
-                                    <h3 class="series-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
-                                    <div class="series-meta">${formatFileSize(series.total_size)}</div>
+                            <button class="series-card-open" ${seriesOpenButtonAttributes(series)}>
+                                <div class="series-cover-wrapper">
+                                    <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                    <div class="series-cover-overlay"></div>
+                                    <span class="series-count-badge">${series.issue_count}</span>
+                                    ${renderLookupStatusBadge(series)}
+                                    <div class="series-card-body">
+                                        <h3 class="series-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
+                                        <div class="series-meta">${formatFileSize(series.total_size)}</div>
+                                    </div>
                                 </div>
-                            </div>
-                        </button>
+                            </button>
+                        </div>
                     `).join('')}
                 </div>
             `;
@@ -1111,20 +1037,22 @@
         // allowing it to wrap onto multiple lines so long names remain readable.
         function renderSeriesLibraryGrid(items = seriesLibrary) {
             return `
-                <div class="series-grid series-grid--titled">
+                <div class="series-grid series-grid--titled" role="list">
                     ${items.map(series => `
-                        <button class="series-card series-card--titled${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                        <div class="series-card series-card--titled${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" role="listitem">
                             ${renderSeriesSelectBox(series)}
-                            <div class="series-cover-wrapper">
-                                <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
-                                <span class="series-count-badge">${series.issue_count}</span>
-                                ${renderLookupStatusBadge(series)}
-                            </div>
-                            <div class="series-card-body series-card-body--below">
-                                <h3 class="series-title series-title--below" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
-                                <div class="series-meta series-meta--below">${formatFileSize(series.total_size)}</div>
-                            </div>
-                        </button>
+                            <button class="series-card-open" ${seriesOpenButtonAttributes(series)}>
+                                <div class="series-cover-wrapper">
+                                    <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                    <span class="series-count-badge">${series.issue_count}</span>
+                                    ${renderLookupStatusBadge(series)}
+                                </div>
+                                <div class="series-card-body series-card-body--below">
+                                    <h3 class="series-title series-title--below" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
+                                    <div class="series-meta series-meta--below">${formatFileSize(series.total_size)}</div>
+                                </div>
+                            </button>
+                        </div>
                     `).join('')}
                 </div>
             `;
@@ -1137,21 +1065,23 @@
             return `
                 <div class="series-list" role="list">
                     ${items.map(series => `
-                        <button class="series-list-row${selectedSeries.has(series.id) ? ' series-list-row--selected' : ''}" type="button" role="listitem" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                        <div class="series-list-row${selectedSeries.has(series.id) ? ' series-list-row--selected' : ''}" role="listitem">
                             ${renderSeriesSelectBox(series)}
-                            <div class="series-list-thumb-wrapper">
-                                <img class="series-list-thumb" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
-                            </div>
-                            <div class="series-list-info">
-                                <h3 class="series-list-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
-                                <div class="series-list-meta">${formatFileSize(series.total_size)}</div>
-                            </div>
-                            <div class="series-list-aside">
-                                ${renderLookupStatusBadge(series)}
-                                <span class="series-list-count" aria-label="${series.issue_count} issues">${series.issue_count}</span>
-                                <span class="series-list-chevron" aria-hidden="true">›</span>
-                            </div>
-                        </button>
+                            <button class="series-list-row-open" ${seriesOpenButtonAttributes(series)}>
+                                <div class="series-list-thumb-wrapper">
+                                    <img class="series-list-thumb" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                </div>
+                                <div class="series-list-info">
+                                    <h3 class="series-list-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
+                                    <div class="series-list-meta">${formatFileSize(series.total_size)}</div>
+                                </div>
+                                <div class="series-list-aside">
+                                    ${renderLookupStatusBadge(series)}
+                                    <span class="series-list-count" aria-label="${series.issue_count} issues">${series.issue_count}</span>
+                                    <span class="series-list-chevron" aria-hidden="true">›</span>
+                                </div>
+                            </button>
+                        </div>
                     `).join('')}
                 </div>
             `;
@@ -1215,10 +1145,7 @@
             const container = document.getElementById('providerHealthWidget');
             if (!container) return;
             try {
-                const response = await fetch(apiUrl('/api/metadata/providers'), {
-                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch('/api/metadata/providers', { json: false });
                 if (!response.ok) {
                     renderHtml(container, html`<div style="color: var(--text-muted); font-size: 13px;">Unable to fetch provider status.</div>`);
                     return;
@@ -1250,6 +1177,7 @@
                 `);
                 container.dataset.loaded = 'true';
             } catch (err) {
+                if (err.authHandled) return;
                 console.warn('Provider health fetch failed', err);
                 renderHtml(container, html`<div style="color: var(--text-muted); font-size: 13px;">Unable to fetch provider status.</div>`);
             }

@@ -25,7 +25,7 @@ public partial class ComicProcessorService
             filePaths,
             "ProcessFilesAsync",
             "processing",
-            (filePath, token) => ProcessFileCoreAsync(filePath, forceReprocess, token),
+            async (filePath, token) => await ProcessFileCoreAsync(filePath, forceReprocess, token),
             "Processing failed",
             cancellationToken);
     }
@@ -41,7 +41,7 @@ public partial class ComicProcessorService
             filePaths,
             "RenameFilesAsync",
             "renaming",
-            (filePath, token) => RenameFileCoreAsync(filePath, forceReprocess, token),
+            async (filePath, token) => await RenameFileCoreAsync(filePath, forceReprocess, token),
             "Rename failed",
             cancellationToken);
     }
@@ -57,18 +57,35 @@ public partial class ComicProcessorService
             filePaths,
             "NormalizeFilesAsync",
             "normalizing",
-            (filePath, token) => NormalizeFileCoreAsync(filePath, forceReprocess, token),
+            async (filePath, token) => await NormalizeFileItemAsync(filePath, forceReprocess, token),
             "Normalize failed",
             cancellationToken);
     }
 
     public Task<Guid> UpdateMetadataAsync(IEnumerable<string> filePaths, ComicMetadata metadata, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(metadata);
+        return UpdateMetadataAsync(filePaths, metadata, ComicMetadataFields.Supplied(metadata), cancellationToken);
+    }
+
+    public Task<Guid> UpdateMetadataAsync(
+        IEnumerable<string> filePaths,
+        ComicMetadata metadata,
+        ComicMetadataFieldFlags fields,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+
+        // Every file gets the same partial edit; fields outside the mask keep each file's own value.
         return QueueBatchJobAsync(
             filePaths,
             "UpdateMetadataAsync",
             "updating metadata for",
-            (file, token) => UpdateMetadataCoreAsync(file, metadata, token),
+            async (file, token) =>
+            {
+                var result = await UpdateMetadataCoreAsync(file, metadata, fields, token, userEdit: true);
+                return new BatchItemResult(result.Succeeded, result.FailureReason);
+            },
             "Update metadata failed",
             cancellationToken);
     }
@@ -82,17 +99,17 @@ public partial class ComicProcessorService
             async (filePath, token) =>
             {
                 var removed = await RemoveMetadataCoreAsync(filePath, token);
-                if (!removed)
+                if (!removed.Succeeded)
                 {
-                    return false;
+                    return new BatchItemResult(false, removed.FailureReason);
                 }
 
-                // Mark the file as unprocessed so the rename/normalize pipeline
-                // will re-evaluate it on the next run, mirroring the per-file
-                // DELETE /api/files/{path}/metadata behavior.
+                // Mark the file (at its new path, when a CBR/RAR became a CBZ) as
+                // unprocessed so the rename/normalize pipeline will re-evaluate it on
+                // the next run, mirroring the per-file DELETE /api/files/{path}/metadata behavior.
                 try
                 {
-                    await _fileStore.ClearProcessedStatusAsync(new[] { filePath }, token);
+                    await _fileStore.ClearProcessedStatusAsync(new[] { removed.FilePath }, token);
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
@@ -180,6 +197,7 @@ public partial class ComicProcessorService
                         foreach (var storePath in storePaths)
                             await _fileStore.RemoveFileAsync(storePath, token);
                         DeleteFileInDirectory(directoryHandle, entryPath);
+                        _notifications.LibraryChanged();
                         await LogHistoryAsync(canonicalPath, "Delete", true, null, token);
                         return true;
                     }
@@ -226,211 +244,42 @@ public partial class ComicProcessorService
             "normalizing and renaming",
             async (filePath, token) =>
             {
-                var normalizeOk = await NormalizeFileCoreAsync(filePath, true, token);
-                if (!normalizeOk)
+                // Normalize can convert a CBR/RAR to a CBZ; the rename follows the file there.
+                var normalized = await NormalizeFileWithResultAsync(filePath, true, token);
+                if (!normalized.Succeeded && !normalized.ArchiveNotWritable)
                 {
-                    return false;
+                    return new BatchItemResult(false, normalized.Error);
                 }
-                return await RenameFileCoreAsync(filePath, true, token);
+
+                // A CBR/RAR/ZIP that is not rewritten while converting to CBZ is off is still
+                // renamed (a rename never rewrites the archive), but stays not normalized.
+                var renamed = await RenameFileCoreAsync(normalized.FilePath, true, token);
+                return new BatchItemResult(renamed.Success && normalized.Succeeded, renamed.Error ?? normalized.Error);
             },
             "Normalize and rename failed",
             cancellationToken);
     }
 
-    public Task<Guid> RunCustomBatchJobAsync(
-        string operationName,
-        IEnumerable<string> trackedItems,
-        Func<string, CancellationToken, Task<bool>> itemOperation,
-        string failureMessage,
-        Func<CancellationToken, Task>? postLoopAsync = null,
-        CancellationToken cancellationToken = default)
-    {
-        return QueueBatchJobAsync(
-            trackedItems,
-            operationName,
-            operationName.ToLowerInvariant(),
-            itemOperation,
-            failureMessage,
-            cancellationToken,
-            postLoopAsync);
-    }
-
+    /// <summary>
+    /// Starts a batch job in the job registry whose item operation is one of this service's
+    /// file operations. Each runs under the file's lock and a shared processing slot (see
+    /// <see cref="RunExclusiveAsync"/>), so a job never races the watcher, the API or another
+    /// job on the same archive, and concurrent jobs stay within MaxWorkers.
+    /// </summary>
     private Task<Guid> QueueBatchJobAsync(
         IEnumerable<string> filePaths,
         string operationName,
         string actionDescription,
-        Func<string, CancellationToken, Task<bool>> fileOperation,
+        Func<string, CancellationToken, Task<BatchItemResult>> fileOperation,
         string failureMessage,
-        CancellationToken cancellationToken,
-        Func<CancellationToken, Task>? postLoopAsync = null)
+        CancellationToken cancellationToken)
     {
-        var jobId = Guid.NewGuid();
-        var rawList = filePaths?.ToList() ?? new List<string>();
-        var skippedInvalid = 0;
-        var fileList = new List<string>(rawList.Count);
-        foreach (var path in rawList)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                skippedInvalid++;
-                continue;
-            }
-            fileList.Add(path);
-        }
+        var definition = new BatchJobDefinition(
+            operationName,
+            actionDescription,
+            (filePath, token) => RunExclusiveAsync(filePath, itemToken => fileOperation(filePath, itemToken), token),
+            failureMessage);
 
-        if (skippedInvalid > 0)
-        {
-            _logger.LogWarning(
-                "{OperationName}: Skipping {SkippedCount} null or empty file path(s) in job {JobId}",
-                operationName, skippedInvalid, jobId);
-        }
-
-        _logger.LogDebug("{OperationName}: Creating new {ActionDescription} job {JobId} for {FileCount} files", operationName, actionDescription, jobId, fileList.Count);
-
-        var job = new ProcessingJob
-        {
-            JobId = jobId,
-            Status = JobStatus.Queued,
-            OperationName = operationName,
-            Files = fileList,
-            TotalFiles = fileList.Count,
-            StartTime = DateTime.UtcNow
-        };
-
-        _jobs[jobId] = job;
-        var jobSyncLock = _jobSyncLocks.GetOrAdd(jobId, static _ => new object());
-        
-        // Create a CancellationTokenSource for this job that can be cancelled independently
-        var jobCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _jobCancellationTokens[jobId] = jobCts;
-
-        _logger.LogDebug("{OperationName}: Job {JobId} created and queued with {FileCount} files using up to {MaxWorkers} workers", operationName, jobId, fileList.Count, _maxWorkers);
-
-        // Broadcast initial job status
-        _ = BroadcastJobStatusAsync(job);
-
-        // Process files asynchronously using LongRunning for potentially long batch operations.
-        // StartNew gets CancellationToken.None so the delegate always runs: if jobCts is already
-        // cancelled (e.g. the request was aborted), the delegate itself must end the job as
-        // Cancelled and release jobCts, rather than StartNew skipping it and leaving it Queued.
-        _ = Task.Factory.StartNew(async () =>
-        {
-            using (jobCts)
-            {
-                try
-                {
-                    jobCts.Token.ThrowIfCancellationRequested();
-
-                    _logger.LogDebug("{OperationName}: Job {JobId} starting execution", operationName, jobId);
-                    lock (jobSyncLock)
-                    {
-                        job.Status = JobStatus.Running;
-                    }
-                    await BroadcastJobStatusAsync(job);
-
-                    var parallelOptions = new ParallelOptions
-                    {
-                        CancellationToken = jobCts.Token,
-                        MaxDegreeOfParallelism = _maxWorkers
-                    };
-
-                    await Parallel.ForEachAsync(
-                        fileList.Select((file, index) => new { file, index }),
-                        parallelOptions,
-                        async (item, token) =>
-                        {
-                            _logger.LogDebug("{OperationName}: Job {JobId} {ActionDescription} file {FileIndex}/{TotalFiles}: {FilePath}",
-                                operationName,
-                                jobId,
-                                actionDescription,
-                                item.index + 1,
-                                fileList.Count,
-                                LoggingHelper.SanitizePathForLog(item.file));
-
-                            var success = await fileOperation(item.file, token);
-                            _metrics?.RecordFileProcessed(operationName, success);
-
-                            lock (jobSyncLock)
-                            {
-                                job.CurrentFile = item.file;
-                                if (success)
-                                {
-                                    job.ProcessedFiles++;
-                                }
-                                else
-                                {
-                                    job.FailedFiles++;
-                                    job.Errors[item.file] = failureMessage;
-                                }
-                            }
-
-                            _logger.LogDebug("{OperationName}: Job {JobId} completed file {FileIndex}/{TotalFiles} with success={Success}: {FilePath}",
-                                operationName,
-                                jobId,
-                                item.index + 1,
-                                fileList.Count,
-                                success,
-                                LoggingHelper.SanitizePathForLog(item.file));
-
-                            // Broadcast progress after each file
-                            await BroadcastJobStatusAsync(job);
-
-                            // Broadcast individual file processed event
-                            if (_eventBroadcaster != null)
-                            {
-                                await _eventBroadcaster.BroadcastFileProcessedAsync(
-                                    Path.GetFileName(item.file),
-                                    success,
-                                    success ? null : failureMessage);
-                            }
-                        });
-
-                    if (postLoopAsync is not null)
-                    {
-                        _logger.LogDebug("{OperationName}: Job {JobId} running post-loop hook", operationName, jobId);
-                        await postLoopAsync(jobCts.Token);
-                    }
-
-                    lock (jobSyncLock)
-                    {
-                        job.Status = JobStatus.Completed;
-                        job.EndTime = DateTime.UtcNow;
-                    }
-                    _logger.LogInformation("{OperationName}: Job {JobId} completed - Processed: {ProcessedFiles}, Failed: {FailedFiles}, Total: {TotalFiles}",
-                        operationName, jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
-                    await BroadcastJobStatusAsync(job);
-                }
-                catch (OperationCanceledException)
-                {
-                    _logger.LogInformation("{OperationName}: Job cancelled: {JobId}", operationName, jobId);
-                    lock (jobSyncLock)
-                    {
-                        job.Status = JobStatus.Cancelled;
-                        job.EndTime = DateTime.UtcNow;
-                    }
-                    await BroadcastJobStatusAsync(job);
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    _logger.LogError(ex, "{OperationName}: Error processing batch job: {JobId}", operationName, jobId);
-                    lock (jobSyncLock)
-                    {
-                        job.Status = JobStatus.Failed;
-                        job.EndTime = DateTime.UtcNow;
-                    }
-                    await BroadcastJobStatusAsync(job);
-                }
-                finally
-                {
-                    _metrics?.RecordProcessingJob(
-                        operationName,
-                        job.Status.ToString(),
-                        (job.EndTime ?? DateTime.UtcNow) - job.StartTime);
-                    _jobCancellationTokens.TryRemove(jobId, out _);
-                }
-            }
-        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
-
-        return Task.FromResult(jobId);
+        return Task.FromResult(_jobRegistry.StartJob(definition, filePaths, cancellationToken));
     }
 }

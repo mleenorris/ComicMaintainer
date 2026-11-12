@@ -1,59 +1,28 @@
 'use strict';
 
 // Settings page (js/app/settings.js): "Save Settings" — client-side
-// validation, the sequence of per-group save requests and their exact bodies,
-// how stored secrets are kept/replaced/cleared, and the failure reported for
-// each step; plus "Reset Filename Format" and "Send Test Report".
+// validation, the single save request and its exact body, how stored secrets
+// are kept/replaced/cleared, settings pinned by the environment, and the one
+// result shown; plus "Reset Filename Format" and "Send Test Report".
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
 const { deferred } = require('./support/app');
 const {
-    bootSettings, messages, lastMessage, clearMessages, callsTo, requestLog
+    bootSettings, messages, lastMessage, clearMessages, callsTo, requestLog, settingsResponse, SERVER_FAILURE, serverFailure
 } = require('./support/settings-helpers');
 
 const networkError = () => {
     throw new TypeError('Failed to fetch');
 };
 
-const SAVE_STEPS = {
-    format: 'POST /api/settings/filename-format',
-    log: 'POST /api/settings/log-max-bytes',
-    padding: 'POST /api/settings/issue-number-padding',
-    cleanup: 'POST /api/settings/database-cleanup-interval-hours',
-    metadata: 'POST /api/settings/external-series-metadata',
-    images: 'POST /api/settings/series-image-limits',
-    email: 'PUT /api/settings/email',
-    emailRateLimit: 'PUT /api/settings/email-rate-limit',
-    suwayomi: 'PUT /api/settings/suwayomi',
-    errorReporting: 'PUT /api/settings/error-reporting'
-};
+const SAVE_ROUTE = 'PUT /api/settings';
 
-const SAVED_MESSAGE = 'Settings saved successfully! Changes to log rotation, external metadata, and database cleanup will take effect on restart.';
+const SAVED_MESSAGE = 'Settings saved. Changes to log rotation take effect after a restart.';
 
-// How a failure message names each group, in SAVE_STEPS order.
-const GROUP_NAMES = [
-    'filename format', 'log max size', 'issue number padding', 'database cleanup interval',
-    'external metadata settings', 'series image limits', 'email settings', 'email rate limit', 'Suwayomi settings',
-    'error reporting settings'
-];
-
-// The end of a failure message once `attempted` steps were sent (the last one failed).
-function savedBefore(attempted) {
-    const saved = GROUP_NAMES.slice(0, attempted - 1);
-    return saved.length ? `Only these settings were saved: ${saved.join(', ')}.` : 'No other settings were saved.';
-}
-
-// Route every save step to success (as SettingsController answers), then apply
-// per-step overrides; routes added later win.
-function routeSaveSteps(page, overrides = {}) {
-    for (const route of Object.values(SAVE_STEPS)) {
-        page.route(route, { message: 'Settings updated successfully' });
-    }
-    for (const [step, handler] of Object.entries(overrides)) {
-        page.route(SAVE_STEPS[step], handler);
-    }
+function routeSave(page, response = { message: 'Settings saved' }) {
+    page.route(SAVE_ROUTE, response);
 }
 
 async function save(page) {
@@ -64,27 +33,24 @@ async function save(page) {
     return since;
 }
 
-// Requests made by the save itself (the reload that follows a successful save excluded).
-function saveRequests(page, since) {
-    const routes = new Set(Object.values(SAVE_STEPS));
-    return page.fetchCalls.slice(since)
-        .map(call => `${call.method} ${call.path}`)
-        .filter(route => routes.has(route));
-}
-
-function body(page, step, since = 0) {
-    const calls = callsTo(page, SAVE_STEPS[step], since);
-    assert.equal(calls.length, 1, `one ${SAVE_STEPS[step]} request`);
+function saveBody(page, since = 0) {
+    const calls = callsTo(page, SAVE_ROUTE, since);
+    assert.equal(calls.length, 1, `one ${SAVE_ROUTE} request`);
     return calls[0].body;
 }
 
-test('saving sends each settings group in order with the edited values', async () => {
+test('saving sends every group in one request with the edited values', async () => {
     const page = await bootSettings();
-    routeSaveSteps(page);
+    routeSave(page);
     page.input('#filenameFormat', '  {series} #{issue}  ');
     page.input('#logMaxSize', '7.5');
     page.input('#issueNumberPadding', '2');
     page.input('#dbCleanupInterval', '0');
+    page.input('#staleCleanupMaxRemovalPercent', '25');
+    page.input('#staleCleanupMissingGraceHours', '0');
+    page.input('#staleCleanupSentinelFile', '  .library-mounted  ');
+    page.input('#processingHistoryRetentionDays', '0');
+    page.input('#processingHistoryMaxEntries', '1000');
     page.input('#enableAniListMetadata', true);
     page.input('#comicVineApiKey', ' new-key ');
     page.input('#mangaDexBaseUrl', '   ');
@@ -114,82 +80,92 @@ test('saving sends each settings group in order with the edited values', async (
     // An earlier Suwayomi probe is discarded so the new settings are re-probed.
     page.run('suwayomiStatusPromise = Promise.resolve(false)');
 
-    // Hold the Suwayomi step to observe the state between steps.
-    const suwayomiGate = deferred();
-    page.route(SAVE_STEPS.suwayomi, () => suwayomiGate.promise);
+    // Hold the Suwayomi probe to observe the state just after the save.
+    const probeGate = deferred();
+    page.route('GET /api/suwayomi/status', () => probeGate.promise);
     const since = await save(page);
     assert.equal(page.evaluate('emailStatusCache'), null, 'the cached email status is dropped once SMTP settings change');
-    assert.deepEqual(messages(page), []);
-    suwayomiGate.resolve({ message: 'Suwayomi settings updated successfully' });
+    assert.deepEqual(messages(page), [], 'one result, once everything is done');
+    probeGate.resolve({ enabled: true, connected: true });
     await page.settle();
 
     assert.deepEqual(requestLog(page, since), [
-        'POST /api/settings/filename-format',
-        'POST /api/settings/log-max-bytes',
-        'POST /api/settings/issue-number-padding',
-        'POST /api/settings/database-cleanup-interval-hours',
-        'POST /api/settings/external-series-metadata',
-        'POST /api/settings/series-image-limits',
-        'PUT /api/settings/email',
-        'PUT /api/settings/email-rate-limit',
-        'PUT /api/settings/suwayomi',
+        'PUT /api/settings',
         'GET /api/suwayomi/status',
-        'PUT /api/settings/error-reporting',
         // The saved settings are then reloaded from the server.
         'GET /api/backups',
         'GET /api/settings',
+        'GET /api/auth/api-key',
         'GET /api/email/status'
     ]);
-    assert.deepEqual(body(page, 'format', since), { format: '{series} #{issue}' });
-    assert.deepEqual(body(page, 'log', since), { maxMB: 7.5 });
-    assert.deepEqual(body(page, 'padding', since), { padding: 2 });
-    assert.deepEqual(body(page, 'cleanup', since), { hours: 0 });
-    assert.deepEqual(body(page, 'metadata', since), {
-        enabled: true,
-        comicVineApiKey: 'new-key',
-        comicVineBaseUrl: 'https://comicvine.example/api',
-        enableMangaDex: true,
-        mangaDexBaseUrl: 'https://api.mangadex.org',
-        enableAniList: true,
-        aniListBaseUrl: 'https://anilist.example/graphql'
+    assert.deepEqual(saveBody(page, since), {
+        filenameFormat: '{series} #{issue}',
+        logMaxMB: 7.5,
+        issueNumberPadding: 2,
+        databaseCleanup: {
+            intervalHours: 0,
+            staleCleanupMaxRemovalPercent: 25,
+            staleCleanupMissingGraceHours: 0,
+            staleCleanupSentinelFile: '.library-mounted',
+            processingHistoryRetentionDays: 0,
+            processingHistoryMaxEntries: 1000
+        },
+        externalSeriesMetadata: {
+            enabled: true,
+            comicVineApiKey: 'new-key',
+            comicVineBaseUrl: 'https://comicvine.example/api',
+            enableMangaDex: true,
+            mangaDexBaseUrl: 'https://api.mangadex.org',
+            enableAniList: true,
+            aniListBaseUrl: 'https://anilist.example/graphql',
+            fillComicInfoFromProviders: true
+        },
+        seriesImageLimits: { maxMB: 4, maxDownloadMB: 4, maxDimension: 1024 },
+        email: {
+            smtpHost: 'mail.example.org',
+            smtpPort: 465,
+            smtpUsername: '',
+            smtpPassword: 'smtp secret ',
+            smtpUseSsl: true,
+            smtpAllowInsecure: true,
+            emailFromAddress: '',
+            emailFromName: 'Comics',
+            emailMaxAttachmentMb: null
+        },
+        // A blank rate-limit field is 0: no limit.
+        emailRateLimit: { maxSendsPerHour: 12, maxSendsPerDay: 0, minSecondsBetweenSends: 90 },
+        // A blank password keeps the stored one (null); blank text fields are sent empty to clear them.
+        suwayomi: {
+            enabled: true,
+            baseUrl: '',
+            username: '',
+            password: null,
+            downloadsDirectory: '/suwayomi/downloads/mangas',
+            importDirectory: ''
+        },
+        // "Clear token" wins over a typed token; blank numbers fall back.
+        errorReporting: {
+            enabled: true,
+            gitHubToken: '',
+            assignee: '',
+            maxIssuesPerDay: 0,
+            dedupeWindowHours: 24,
+            commentOnRecurrence: true
+        },
+        // None of the fixture's settings are notification targets, so each is blank and off.
+        notifications: {
+            ntfy: { enabled: false, url: '', events: '', token: null, topic: '' },
+            gotify: { enabled: false, url: '', events: '', token: null },
+            discord: { enabled: false, url: null, events: '' },
+            webhook: { enabled: false, url: null, events: '' },
+            komga: { enabled: false, url: '', events: '', token: null, libraryId: '' },
+            kavita: { enabled: false, url: '', events: '', token: null, libraryId: '' }
+        },
+        opds: { enabled: true }
     });
-    assert.deepEqual(body(page, 'images', since), { maxMB: 4, maxDownloadMB: 4, maxDimension: 1024 });
-    assert.deepEqual(body(page, 'email', since), {
-        smtpHost: 'mail.example.org',
-        smtpPort: 465,
-        smtpUsername: null,
-        smtpPassword: 'smtp secret ',
-        smtpUseSsl: true,
-        smtpAllowInsecure: true,
-        emailFromAddress: null,
-        emailFromName: 'Comics',
-        emailMaxAttachmentMb: null
-    });
-    // A blank rate-limit field is 0: no limit.
-    assert.deepEqual(body(page, 'emailRateLimit', since), { maxSendsPerHour: 12, maxSendsPerDay: 0, minSecondsBetweenSends: 90 });
-    // A blank password keeps the stored one (null); blank fields are unset,
-    // and a blank import folder is sent empty to clear it.
-    assert.deepEqual(body(page, 'suwayomi', since), {
-        enabled: true,
-        baseUrl: null,
-        username: null,
-        password: null,
-        downloadsDirectory: '/suwayomi/downloads/mangas',
-        importDirectory: ''
-    });
-    // "Clear token" wins over a typed token; blank numbers fall back.
-    assert.deepEqual(body(page, 'errorReporting', since), {
-        enabled: true,
-        gitHubToken: '',
-        assignee: null,
-        maxIssuesPerDay: 0,
-        dedupeWindowHours: 24,
-        commentOnRecurrence: true
-    });
-    for (const call of page.fetchCalls.slice(since).filter(c => c.method !== 'GET')) {
-        assert.equal(call.headers['content-type'], 'application/json');
-        assert.match(call.headers.authorization, /^Bearer /);
-    }
+    const call = callsTo(page, SAVE_ROUTE, since)[0];
+    assert.equal(call.headers['content-type'], 'application/json');
+    assert.match(call.headers.authorization, /^Bearer /);
 
     assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
     // The reload shows what the server now holds and clears the secret inputs.
@@ -197,11 +173,12 @@ test('saving sends each settings group in order with the edited values', async (
     assert.equal(page.$('#smtpPassword').value, '');
     assert.equal(page.$('#errorReportingClearTokenCheckbox').checked, false);
     assert.equal(page.evaluate('settingsLoaded'), true);
+    assert.equal(page.evaluate('suwayomiAvailable'), true, 'the new probe answer is used, not the earlier one');
 });
 
 test('new secrets are sent, cleared secrets are sent empty', async () => {
     const page = await bootSettings({ settings: { smtp_port: null, email_max_attachment_mb: 12.5 } });
-    routeSaveSteps(page);
+    routeSave(page);
     page.input('#smtpPassword', 'typed but cleared');
     page.input('#smtpClearPasswordCheckbox', true);
     page.input('#suwayomiPassword', 'new-suwayomi-password');
@@ -215,7 +192,8 @@ test('new secrets are sent, cleared secrets are sent empty', async () => {
 
     const since = await save(page);
 
-    assert.deepEqual(body(page, 'email', since), {
+    const body = saveBody(page, since);
+    assert.deepEqual(body.email, {
         smtpHost: 'smtp.example.com',
         smtpPort: null,
         smtpUsername: 'mailer',
@@ -226,8 +204,8 @@ test('new secrets are sent, cleared secrets are sent empty', async () => {
         emailFromName: 'Comic Maintainer',
         emailMaxAttachmentMb: 12.5
     });
-    assert.deepEqual(body(page, 'emailRateLimit', since), { maxSendsPerHour: 20, maxSendsPerDay: 200, minSecondsBetweenSends: 30 });
-    assert.deepEqual(body(page, 'suwayomi', since), {
+    assert.deepEqual(body.emailRateLimit, { maxSendsPerHour: 20, maxSendsPerDay: 200, minSecondsBetweenSends: 30 });
+    assert.deepEqual(body.suwayomi, {
         enabled: false,
         baseUrl: 'http://suwayomi:4567',
         username: 'reader',
@@ -235,7 +213,7 @@ test('new secrets are sent, cleared secrets are sent empty', async () => {
         downloadsDirectory: '/downloads/mangas',
         importDirectory: 'Manga'
     });
-    assert.deepEqual(body(page, 'errorReporting', since), {
+    assert.deepEqual(body.errorReporting, {
         enabled: false,
         gitHubToken: 'ghp_new_token',
         assignee: 'octocat',
@@ -247,15 +225,15 @@ test('new secrets are sent, cleared secrets are sent empty', async () => {
     page.input('#comicVineBaseUrl', '');
     page.input('#aniListBaseUrl', '');
     const second = await save(page);
-    const metadata = body(page, 'metadata', second);
+    const metadata = saveBody(page, second).externalSeriesMetadata;
     assert.equal(metadata.comicVineBaseUrl, 'https://comicvine.gamespot.com/api');
     assert.equal(metadata.aniListBaseUrl, 'https://graphql.anilist.co');
     assert.equal(lastMessage(page).text, SAVED_MESSAGE);
 });
 
-test('a blank SMTP host and sender name are unset, and "clear password" clears the Suwayomi password', async () => {
+test('a blank SMTP host and sender name are sent empty, and "clear password" clears the Suwayomi password', async () => {
     const page = await bootSettings();
-    routeSaveSteps(page);
+    routeSave(page);
     page.input('#smtpHost', '   ');
     page.input('#emailFromName', '');
     page.input('#suwayomiPassword', 'typed but cleared');
@@ -263,18 +241,19 @@ test('a blank SMTP host and sender name are unset, and "clear password" clears t
 
     const since = await save(page);
 
-    assert.deepEqual(body(page, 'email', since), {
-        smtpHost: null,
+    const body = saveBody(page, since);
+    assert.deepEqual(body.email, {
+        smtpHost: '',
         smtpPort: 2525,
         smtpUsername: 'mailer',
         smtpPassword: null,
         smtpUseSsl: false,
         smtpAllowInsecure: true,
         emailFromAddress: 'comics@example.com',
-        emailFromName: null,
+        emailFromName: '',
         emailMaxAttachmentMb: 30
     });
-    assert.deepEqual(body(page, 'suwayomi', since), {
+    assert.deepEqual(body.suwayomi, {
         enabled: true,
         baseUrl: 'http://suwayomi.local:4567',
         username: 'reader',
@@ -289,64 +268,64 @@ test('a blank SMTP host and sender name are unset, and "clear password" clears t
 
 test('the stored ComicVine API key is kept unless a new key is typed or "clear" is ticked', async () => {
     const page = await bootSettings();
-    routeSaveSteps(page);
+    routeSave(page);
 
     // Untouched (or only whitespace), the key is sent as null: keep the stored one.
     let since = await save(page);
-    assert.deepEqual(body(page, 'metadata', since), {
+    assert.deepEqual(saveBody(page, since).externalSeriesMetadata, {
         enabled: true,
         comicVineApiKey: null,
         comicVineBaseUrl: 'https://comicvine.example/api',
         enableMangaDex: true,
         mangaDexBaseUrl: 'https://mangadex.example',
         enableAniList: false,
-        aniListBaseUrl: 'https://anilist.example/graphql'
+        aniListBaseUrl: 'https://anilist.example/graphql',
+        fillComicInfoFromProviders: true
     });
     page.input('#comicVineApiKey', '   ');
     since = await save(page);
-    assert.equal(body(page, 'metadata', since).comicVineApiKey, null);
+    assert.equal(saveBody(page, since).externalSeriesMetadata.comicVineApiKey, null);
 
     page.input('#comicVineApiKey', ' cv-new-key ');
     since = await save(page);
-    assert.equal(body(page, 'metadata', since).comicVineApiKey, 'cv-new-key');
+    assert.equal(saveBody(page, since).externalSeriesMetadata.comicVineApiKey, 'cv-new-key');
     assert.equal(page.$('#comicVineApiKey').value, '', 'the reload empties the input again');
 
     // "Clear" wins over a typed key.
     page.input('#comicVineApiKey', 'typed but cleared');
     page.input('#comicVineClearApiKeyCheckbox', true);
     since = await save(page);
-    assert.equal(body(page, 'metadata', since).comicVineApiKey, '');
+    assert.equal(saveBody(page, since).externalSeriesMetadata.comicVineApiKey, '');
     assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
     assert.equal(page.$('#comicVineClearApiKeyCheckbox').checked, false, 'the tick is reset by the reload');
     assert.equal(page.$('#comicVineApiKey').value, '');
 });
 
-test('groups whose controls are missing are not saved', async () => {
+test('groups whose controls are missing are left out of the request', async () => {
     const page = await bootSettings();
-    routeSaveSteps(page);
+    routeSave(page);
     page.$('#enableSuwayomiCheckbox').remove();
     page.$('#errorReportingEnabledCheckbox').remove();
 
     const since = await save(page);
 
-    assert.deepEqual(saveRequests(page, since), [
-        SAVE_STEPS.format, SAVE_STEPS.log, SAVE_STEPS.padding, SAVE_STEPS.cleanup,
-        SAVE_STEPS.metadata, SAVE_STEPS.images, SAVE_STEPS.email, SAVE_STEPS.emailRateLimit
-    ]);
+    const body = saveBody(page, since);
+    assert.equal('suwayomi' in body, false);
+    assert.equal('errorReporting' in body, false);
     assert.equal(callsTo(page, 'GET /api/suwayomi/status', since).length, 0);
     assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
 });
 
-test('the email rate limit is not saved when its controls are missing', async () => {
+test('the email rate limit is left out when its controls are missing', async () => {
     const page = await bootSettings();
-    routeSaveSteps(page);
+    routeSave(page);
     for (const id of ['emailMaxSendsPerHour', 'emailMaxSendsPerDay', 'emailMinSecondsBetweenSends']) {
         page.$(`#${id}`).closest('.form-group').remove();
     }
 
     const since = await save(page);
 
-    assert.deepEqual(saveRequests(page, since), Object.values(SAVE_STEPS).filter(step => step !== SAVE_STEPS.emailRateLimit));
+    assert.equal('emailRateLimit' in saveBody(page, since), false);
     assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
 });
 
@@ -363,6 +342,18 @@ const INVALID_FORMS = [
     ['log size above the server limit', { logMaxSize: '2048' }, 'Log max size must be 2047 MB or less'],
     ['missing cleanup interval', { dbCleanupInterval: '' }, 'Database cleanup interval must be 0 or greater'],
     ['negative cleanup interval', { dbCleanupInterval: '-2' }, 'Database cleanup interval must be 0 or greater'],
+    ['missing removal share', { staleCleanupMaxRemovalPercent: '' },
+        'Largest share removed without confirmation must be a whole number from 0 to 100'],
+    ['removal share above 100%', { staleCleanupMaxRemovalPercent: '101' },
+        'Largest share removed without confirmation must be a whole number from 0 to 100'],
+    ['fractional missing-file grace period', { staleCleanupMissingGraceHours: '1.5' },
+        'Remove missing files after must be a whole number of hours from 0 to 720'],
+    ['missing-file grace period above 30 days', { staleCleanupMissingGraceHours: '721' },
+        'Remove missing files after must be a whole number of hours from 0 to 720'],
+    ['negative history retention', { processingHistoryRetentionDays: '-1' },
+        'Processing history retention must be a whole number of days from 0 to 3650'],
+    ['history entries above the server limit', { processingHistoryMaxEntries: '10000001' },
+        'Maximum processing history entries must be a whole number from 0 to 10000000'],
     ['missing stored cover size', { seriesImageMaxMB: '' }, 'Max stored cover size must be a positive number'],
     ['zero stored cover size', { seriesImageMaxMB: '0' }, 'Max stored cover size must be a positive number'],
     ['missing download size', { seriesImageMaxDownloadMB: '' }, 'Max download size must be a positive number'],
@@ -398,7 +389,7 @@ const INVALID_FORMS = [
 
 test('invalid values are rejected before anything is saved', async t => {
     const page = await bootSettings();
-    routeSaveSteps(page);
+    routeSave(page);
 
     for (const [description, edits, expected] of INVALID_FORMS) {
         await t.test(description, async () => {
@@ -408,145 +399,278 @@ test('invalid values are rejected before anything is saved', async t => {
             const since = await save(page);
 
             assert.deepEqual(messages(page), [{ type: 'error', text: expected }]);
-            assert.deepEqual(saveRequests(page, since), []);
+            assert.equal(callsTo(page, SAVE_ROUTE, since).length, 0);
         });
     }
 });
 
-// [description, failing step, response, start of the expected message, steps attempted]
-// The message then says which groups were saved before the failure (savedBefore).
+// [description, response, expected message]
 const FAILED_SAVES = [
-    ['filename format rejected', 'format', respond(500, { error: 'Failed to update filename format' }),
-        'Failed to save filename format: Failed to update filename format.', 1],
-    ['filename format refused with a reason', 'format', { success: false, error: 'Unknown placeholder {foo}' },
-        'Failed to save filename format: Unknown placeholder {foo}.', 1],
-    ['filename format refused', 'format', { success: false }, 'Failed to save filename format.', 1],
-    ['log size rejected', 'log', respond(400, { error: 'MaxMB must be between 1 and 2047' }),
-        'Failed to save log max size: MaxMB must be between 1 and 2047.', 2],
-    ['log size refused with a reason', 'log', { success: false, error: 'Too large' }, 'Failed to save log max size: Too large.', 2],
-    ['log size refused', 'log', { success: false }, 'Failed to save log max size.', 2],
-    ['padding rejected', 'padding', 503, 'Failed to save issue number padding: HTTP error! status: 503.', 3],
-    ['padding refused with a reason', 'padding', { success: false, error: 'Padding too wide' },
-        'Failed to save issue number padding: Padding too wide.', 3],
-    ['padding refused', 'padding', { success: false }, 'Failed to save issue number padding.', 3],
-    ['cleanup interval rejected', 'cleanup', 500, 'Failed to save database cleanup interval: HTTP error! status: 500.', 4],
-    ['cleanup interval failed with a non-JSON body', 'cleanup', respond(504, 'Gateway Timeout'),
-        'Failed to save database cleanup interval: HTTP error! status: 504.', 4],
-    ['cleanup interval refused with a reason', 'cleanup', { success: false, error: 'Interval too long' },
-        'Failed to save database cleanup interval: Interval too long.', 4],
-    ['cleanup interval refused', 'cleanup', { success: false }, 'Failed to save database cleanup interval.', 4],
-    ['metadata rejected', 'metadata', 500, 'Failed to save external metadata settings: HTTP error! status: 500.', 5],
-    ['metadata failed with an HTML error page', 'metadata',
-        respond(502, '<html><body><h1>502 Bad Gateway</h1></body></html>', { 'Content-Type': 'text/html' }),
-        'Failed to save external metadata settings: HTTP error! status: 502.', 5],
-    ['metadata refused with a reason', 'metadata', { success: false, error: 'Bad ComicVine URL' },
-        'Failed to save external metadata settings: Bad ComicVine URL.', 5],
-    ['metadata refused', 'metadata', { success: false }, 'Failed to save external metadata settings.', 5],
-    ['image limits rejected with a reason', 'images',
-        respond(400, { error: 'Max download size must be greater than or equal to max stored size' }),
-        'Failed to save series image limits: Max download size must be greater than or equal to max stored size.', 6],
-    ['image limits rejected without a reason', 'images', respond(400, {}),
-        'Failed to save series image limits: HTTP error! status: 400.', 6],
-    ['image limits failed with a non-JSON body', 'images', respond(500, 'Internal Server Error'),
-        'Failed to save series image limits: HTTP error! status: 500.', 6],
-    ['image limits refused with a reason', 'images', { success: false, error: 'Dimension too large' },
-        'Failed to save series image limits: Dimension too large.', 6],
-    ['image limits refused', 'images', { success: false }, 'Failed to save series image limits.', 6],
-    ['email rejected with an error', 'email', respond(400, { error: 'SmtpPort must be between 1 and 65535' }),
-        'Failed to save email settings: SmtpPort must be between 1 and 65535.', 7],
-    ['email rejected with a message', 'email', respond(500, { message: 'Could not persist settings' }),
-        'Failed to save email settings: Could not persist settings.', 7],
-    ['email failed with a non-JSON body', 'email', respond(502, 'Bad gateway'),
-        'Failed to save email settings: HTTP error! status: 502.', 7],
-    ['email rejected without a reason', 'email', respond(500, {}),
-        'Failed to save email settings: HTTP error! status: 500.', 7],
-    ['email rate limit rejected with an error', 'emailRateLimit',
-        respond(400, { error: 'Maximum emails per hour must be between 0 and 10000' }),
-        'Failed to save email rate limit: Maximum emails per hour must be between 0 and 10000.', 8],
-    ['email rate limit rejected with a message', 'emailRateLimit', respond(500, { message: 'Storage failure' }),
-        'Failed to save email rate limit: Storage failure.', 8],
-    ['email rate limit failed with a non-JSON body', 'emailRateLimit', respond(502, 'Bad gateway'),
-        'Failed to save email rate limit: HTTP error! status: 502.', 8],
-    ['Suwayomi rejected with an error', 'suwayomi', respond(400, { error: 'Base URL must be an absolute http(s) URL' }),
-        'Failed to save Suwayomi settings: Base URL must be an absolute http(s) URL.', 9],
-    ['Suwayomi rejected with a full sentence', 'suwayomi', respond(400, { error: 'A base URL is required when Suwayomi is enabled.' }),
-        'Failed to save Suwayomi settings: A base URL is required when Suwayomi is enabled.', 9],
-    ['Suwayomi rejected with a message', 'suwayomi', respond(500, { message: 'Storage failure' }),
-        'Failed to save Suwayomi settings: Storage failure.', 9],
-    ['Suwayomi failed with a non-JSON body', 'suwayomi', respond(502, 'Bad gateway'),
-        'Failed to save Suwayomi settings: HTTP error! status: 502.', 9],
-    ['error reporting rejected with an error', 'errorReporting', respond(400, { error: 'MaxIssuesPerDay must be between 0 and 100' }),
-        'Failed to save error reporting settings: MaxIssuesPerDay must be between 0 and 100.', 10],
-    ['error reporting rejected with a message', 'errorReporting', respond(500, { message: 'Storage failure' }),
-        'Failed to save error reporting settings: Storage failure.', 10],
-    ['error reporting failed with a non-JSON body', 'errorReporting', respond(500, 'oops'),
-        'Failed to save error reporting settings: HTTP error! status: 500.', 10],
-    ['network failure', 'format', networkError, 'Failed to save filename format: Failed to fetch.', 1],
-    ['network failure part-way', 'images', networkError, 'Failed to save series image limits: Failed to fetch.', 6]
+    ['a value rejected by the server', respond(400, { error: 'MaxMB must be between 1 and 2047' }),
+        'Failed to save settings: MaxMB must be between 1 and 2047. No settings were saved.'],
+    ['a rejection that is already a full sentence', respond(400, { error: 'A base URL is required when Suwayomi is enabled.' }),
+        'Failed to save settings: A base URL is required when Suwayomi is enabled. No settings were saved.'],
+    ['a rejection with only a title (a malformed field)', respond(400, { title: 'One or more validation errors occurred.' }),
+        'Failed to save settings: One or more validation errors occurred. No settings were saved.'],
+    ['a setting pinned by the environment', respond(409, { error: 'Set by the environment and cannot be changed here: SMTP_HOST.' }),
+        'Failed to save settings: Set by the environment and cannot be changed here: SMTP_HOST. No settings were saved.'],
+    // Sent back with the request's reference, the only way to find the log line. A 5xx does
+    // not claim that nothing was saved: the file can be replaced before a later step fails.
+    ["the global handler's answer", serverFailure('corr-500'),
+        `Failed to save settings: ${SERVER_FAILURE} (ref: corr-500)`],
+    ['a refusal with a reference', respond(409, { error: 'Set by the environment and cannot be changed here: SMTP_HOST.' }, { 'X-Correlation-Id': 'corr-409' }),
+        'Failed to save settings: Set by the environment and cannot be changed here: SMTP_HOST. No settings were saved. (ref: corr-409)'],
+    ['a server error with only a message', respond(500, { message: 'Storage failure' }), 'Failed to save settings: Storage failure.'],
+    ['a server error without a reason', respond(500, {}), 'Failed to save settings: HTTP error! status: 500.'],
+    ['a bare status', 503, 'Failed to save settings: HTTP error! status: 503.'],
+    ['a proxy error page', respond(502, '<html><body><h1>502 Bad Gateway</h1></body></html>', { 'Content-Type': 'text/html' }),
+        'Failed to save settings: HTTP error! status: 502.'],
+    ['a proxy timeout', respond(504, 'Gateway Timeout'), 'Failed to save settings: HTTP error! status: 504.'],
+    ['a network failure', networkError, 'Failed to save settings: Failed to fetch.'],
 ];
 
-test('a failed step stops the save and says which group failed and which were saved', async t => {
+test('a failed save shows one error and reloads nothing', async t => {
     const page = await bootSettings();
-    const steps = Object.values(SAVE_STEPS);
 
-    for (const [description, step, response, expected, attempted] of FAILED_SAVES) {
+    for (const [description, response, expected] of FAILED_SAVES) {
         await t.test(description, async () => {
-            routeSaveSteps(page, { [step]: response });
+            routeSave(page, response);
 
             const since = await save(page);
 
-            assert.deepEqual(messages(page), [{ type: 'error', text: `${expected} ${savedBefore(attempted)}` }]);
-            assert.deepEqual(saveRequests(page, since), steps.slice(0, attempted));
+            assert.deepEqual(messages(page), [{ type: 'error', text: expected }]);
+            assert.equal(callsTo(page, SAVE_ROUTE, since).length, 1);
             assert.equal(callsTo(page, 'GET /api/settings', since).length, 0, 'the form is not reloaded');
+            assert.equal(callsTo(page, 'GET /api/suwayomi/status', since).length, 0);
         });
     }
 });
 
-test('after a partial save the page shows what was saved and keeps the edits for another try', async () => {
+test('after a failed save the form keeps the edits for another try', async () => {
     const page = await bootSettings();
     page.input('#filenameFormat', '{series} - {issue}');
     page.input('#issueNumberPadding', '4');
     page.input('#smtpPassword', 'new smtp secret');
     page.input('#emailFromAddress', 'comics@');
 
-    // A rejected format is not shown as the current one.
-    routeSaveSteps(page, { format: respond(400, { error: 'Unknown placeholder {foo}' }) });
+    routeSave(page, respond(400, { error: "'comics@' is not a valid email address" }));
     await save(page);
-    assert.equal(page.$('#currentFormat').textContent, '{series} v{volume} #{issue}');
-
-    // Only the server knows the address is invalid, so the groups before it are saved.
-    routeSaveSteps(page, { email: respond(400, { error: "'comics@' is not a valid email address (Parameter 'fromAddress')" }) });
-    const since = await save(page);
 
     assert.deepEqual(messages(page), [{
         type: 'error',
-        text: "Failed to save email settings: 'comics@' is not a valid email address (Parameter 'fromAddress'). " +
-            'Only these settings were saved: filename format, log max size, issue number padding, ' +
-            'database cleanup interval, external metadata settings, series image limits.'
+        text: "Failed to save settings: 'comics@' is not a valid email address. No settings were saved."
     }]);
-    assert.deepEqual(saveRequests(page, since), Object.values(SAVE_STEPS).slice(0, 7));
-    assert.equal(page.$('#currentFormat').textContent, '{series} - {issue}', 'the saved format is now the current one');
-    assert.equal(callsTo(page, 'GET /api/settings', since).length, 0, 'the form is not reloaded');
+    assert.equal(page.$('#currentFormat').textContent, '{series} v{volume} #{issue}', 'the refused format is not shown as the current one');
     assert.equal(page.$('#filenameFormat').value, '{series} - {issue}');
     assert.equal(page.$('#issueNumberPadding').value, '4');
     assert.equal(page.$('#smtpPassword').value, 'new smtp secret');
     assert.equal(page.$('#emailFromAddress').value, 'comics@');
 
     // Fixing the address and saving again sends everything, the typed secret included.
-    routeSaveSteps(page);
+    routeSave(page);
+    page.route('GET /api/settings', settingsResponse({ filename_format: '{series} - {issue}' }));
     page.input('#emailFromAddress', 'comics@example.org');
     const retry = await save(page);
 
-    assert.deepEqual(saveRequests(page, retry), Object.values(SAVE_STEPS));
-    assert.equal(body(page, 'email', retry).emailFromAddress, 'comics@example.org');
-    assert.equal(body(page, 'email', retry).smtpPassword, 'new smtp secret');
+    assert.equal(saveBody(page, retry).email.emailFromAddress, 'comics@example.org');
+    assert.equal(saveBody(page, retry).email.smtpPassword, 'new smtp secret');
     assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
     assert.equal(callsTo(page, 'GET /api/settings', retry).length, 1, 'the saved settings are reloaded');
+    assert.equal(page.$('#currentFormat').textContent, '{series} - {issue}', 'the saved format is now the current one');
+});
+
+test('the result is shown only after the page has reloaded the saved settings', async () => {
+    const page = await bootSettings();
+    routeSave(page);
+    const reload = deferred();
+    page.route('GET /api/settings', () => reload.promise);
+
+    await save(page);
+    assert.deepEqual(messages(page), [], 'still reloading');
+    assert.equal(page.evaluate('settingsLoaded'), false);
+
+    reload.resolve(settingsResponse({ filename_format: '{series} reloaded' }));
+    await page.settle();
+
+    assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
+    assert.equal(page.$('#filenameFormat').value, '{series} reloaded');
+});
+
+test('a save that cannot be reloaded says so once, and does not claim a clean success', async () => {
+    const page = await bootSettings();
+    routeSave(page);
+    page.route('GET /api/settings', networkError);
+
+    await save(page);
+
+    assert.deepEqual(messages(page), [{
+        type: 'warning',
+        text: 'Settings were saved, but the page could not be reloaded: Failed to fetch'
+    }]);
+});
+
+test('Settings pinned by the environment are disabled with a hint naming the variable', async () => {
+    const page = await bootSettings({
+        settings: {
+            env_locked: [
+                { field: 'smtp_host', variable: 'SMTP_HOST' },
+                { field: 'smtp_password_set', variable: 'SMTP_PASSWORD' },
+                { field: 'smtp_use_ssl', variable: 'SMTP_USE_SSL' }
+            ]
+        }
+    });
+
+    assert.equal(page.$('#smtpHost').disabled, true);
+    assert.equal(page.$('#smtpPassword').disabled, true);
+    assert.equal(page.$('#smtpClearPasswordCheckbox').disabled, true, 'both inputs of a secret');
+    assert.equal(page.$('#smtpUseSslCheckbox').disabled, true);
+    assert.equal(page.$('#smtpPort').disabled, false, 'other settings stay editable');
+    assert.equal(
+        page.$('[data-env-lock-hint="smtp_host"]').textContent,
+        'Set by the SMTP_HOST environment variable, so it cannot be changed here.');
+    assert.match(page.$('[data-env-lock-hint="smtp_password_set"]').textContent, /SMTP_PASSWORD/);
+    assert.equal(page.$$('[data-env-lock-hint="smtp_password_set"]').length, 1, 'one hint per setting');
+    // A checkbox's hint goes after its label, not inside it.
+    assert.equal(page.$('[data-env-lock-hint="smtp_use_ssl"]').previousElementSibling.getAttribute('for'), 'smtpUseSslCheckbox');
+});
+
+test('a pin on a setting whose input is not on the page is ignored', async () => {
+    const page = await bootSettings();
+    page.$('#smtpHost').closest('.form-group').remove();
+
+    page.route('GET /api/settings', settingsResponse({ env_locked: [{ field: 'smtp_host', variable: 'SMTP_HOST' }] }));
+    await page.run('loadSettings()');
+
+    assert.equal(page.$('[data-env-lock-hint="smtp_host"]'), null);
+    assert.equal(page.evaluate('settingsEnvLocks.get("smtp_host")'), 'SMTP_HOST');
+});
+
+test('a pinned setting stays disabled however often the capabilities are reapplied', async () => {
+    const page = await bootSettings({ settings: { env_locked: [{ field: 'smtp_host', variable: 'SMTP_HOST' }] } });
+
+    page.run('applyCapabilities()');
+
+    assert.equal(page.$('#smtpHost').disabled, true);
+    assert.equal(page.$('#smtpPort').disabled, false);
+});
+
+test('a setting no longer pinned becomes editable again and loses its hint', async () => {
+    const page = await bootSettings({ settings: { env_locked: [{ field: 'smtp_host', variable: 'SMTP_HOST' }] } });
+
+    page.route('GET /api/settings', settingsResponse());
+    await page.run('loadSettings()');
+
+    assert.equal(page.$('#smtpHost').disabled, false);
+    assert.equal(page.$('[data-env-lock-hint="smtp_host"]'), null);
+});
+
+test('a pinned setting is left out of the save, and its value is not validated', async () => {
+    const page = await bootSettings({
+        settings: {
+            smtp_port: 99999,
+            email_max_attachment_mb: 500,
+            series_image_max_bytes: 0,
+            error_reporting_max_issues_per_day: 900,
+            stale_cleanup_max_removal_percent: 200,
+            env_locked: [
+                { field: 'smtp_host', variable: 'SMTP_HOST' },
+                { field: 'smtp_port', variable: 'SMTP_PORT' },
+                { field: 'smtp_password_set', variable: 'SMTP_PASSWORD' },
+                { field: 'email_max_attachment_mb', variable: 'EMAIL_MAX_ATTACHMENT_MB' },
+                { field: 'series_image_max_bytes', variable: 'SERIES_IMAGE_MAX_BYTES' },
+                { field: 'error_reporting_max_issues_per_day', variable: 'ERROR_REPORTING_MAX_ISSUES_PER_DAY' },
+                { field: 'stale_cleanup_max_removal_percent', variable: 'STALE_CLEANUP_MAX_REMOVAL_PERCENT' },
+                { field: 'enable_suwayomi', variable: 'ENABLE_SUWAYOMI' }
+            ]
+        }
+    });
+    routeSave(page);
+    page.input('#smtpUsername', 'new-user');
+
+    const since = await save(page);
+
+    const body = saveBody(page, since);
+    assert.deepEqual(body.email, {
+        smtpUsername: 'new-user',
+        smtpUseSsl: false,
+        smtpAllowInsecure: true,
+        emailFromAddress: 'comics@example.com',
+        emailFromName: 'Comic Maintainer'
+    });
+    assert.equal('maxMB' in body.seriesImageLimits, false);
+    assert.equal('maxIssuesPerDay' in body.errorReporting, false);
+    assert.equal('staleCleanupMaxRemovalPercent' in body.databaseCleanup, false);
+    assert.equal('enabled' in body.suwayomi, false);
+    assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
+});
+
+test('the OPDS switch is saved with the rest of the page, unless the environment pins it', async () => {
+    const page = await bootSettings({ settings: { opds_enabled: false } });
+    routeSave(page);
+    assert.equal(page.$('#opdsEnabledCheckbox').checked, false);
+    page.input('#opdsEnabledCheckbox', true);
+
+    let since = await save(page);
+
+    assert.deepEqual(saveBody(page, since).opds, { enabled: true });
+
+    const pinned = await bootSettings({ settings: { env_locked: [{ field: 'opds_enabled', variable: 'OPDS_ENABLED' }] } });
+    routeSave(pinned);
+    since = await save(pinned);
+
+    assert.equal(pinned.$('#opdsEnabledCheckbox').disabled, true);
+    assert.deepEqual(saveBody(pinned, since).opds, {});
+});
+
+test('a pinned upload-size pair is not cross-checked', async () => {
+    const page = await bootSettings({
+        settings: {
+            series_image_max_bytes: 30 * 1048576,
+            series_image_max_download_bytes: 20 * 1048576,
+            env_locked: [{ field: 'series_image_max_bytes', variable: 'SERIES_IMAGE_MAX_BYTES' }]
+        }
+    });
+    routeSave(page);
+
+    await save(page);
+
+    assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
+});
+
+test('the pinned download-images toggle reports the server\'s refusal if the page was stale', async () => {
+    const page = await bootSettings();
+    page.route('PUT /api/settings/download-external-series-images',
+        respond(409, { error: 'Set by the environment and cannot be changed here: DOWNLOAD_EXTERNAL_SERIES_IMAGES.' }));
+    clearMessages(page);
+    const before = page.$('#downloadExternalSeriesImagesCheckbox').checked;
+
+    page.$('#downloadExternalSeriesImagesCheckbox').checked = !before;
+    await page.run('updateDownloadExternalSeriesImages()');
+
+    assert.deepEqual(lastMessage(page), {
+        type: 'error',
+        text: 'Failed to update series image download setting: Set by the environment and cannot be changed here: DOWNLOAD_EXTERNAL_SERIES_IMAGES.'
+    });
+    assert.equal(page.$('#downloadExternalSeriesImagesCheckbox').checked, before);
+});
+
+test('the download-images toggle quotes the reference of an unexpected failure', async () => {
+    const page = await bootSettings();
+    page.route('PUT /api/settings/download-external-series-images', serverFailure('corr-images'));
+    clearMessages(page);
+
+    page.$('#downloadExternalSeriesImagesCheckbox').checked = !page.$('#downloadExternalSeriesImagesCheckbox').checked;
+    await page.run('updateDownloadExternalSeriesImages()');
+
+    assert.deepEqual(lastMessage(page), {
+        type: 'error',
+        text: `Failed to update series image download setting: ${SERVER_FAILURE} (ref: corr-images)`
+    });
 });
 
 test('values at the server limits are saved', async () => {
     const page = await bootSettings();
-    routeSaveSteps(page);
+    routeSave(page);
     assert.equal(page.$('#logMaxSize').max, '2047', "the input's limit matches the server's");
     assert.equal(page.$('#emailMaxAttachmentMb').max, '200', "the input's limit matches the server's");
     page.input('#logMaxSize', '2047');
@@ -557,37 +681,41 @@ test('values at the server limits are saved', async () => {
     const since = await save(page);
 
     assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
-    assert.equal(body(page, 'log', since).maxMB, 2047);
-    assert.equal(body(page, 'email', since).emailMaxAttachmentMb, 200);
-    assert.equal(body(page, 'errorReporting', since).maxIssuesPerDay, 100);
-    assert.equal(body(page, 'errorReporting', since).dedupeWindowHours, 720);
+    const body = saveBody(page, since);
+    assert.equal(body.logMaxMB, 2047);
+    assert.equal(body.email.emailMaxAttachmentMb, 200);
+    assert.equal(body.errorReporting.maxIssuesPerDay, 100);
+    assert.equal(body.errorReporting.dedupeWindowHours, 720);
 });
 
-test('an expired session while saving any group redirects to login', async t => {
+test('an expired session while saving redirects to login', async () => {
     const page = await bootSettings();
-    const token = page.window.localStorage.getItem('jwt_token');
-    const steps = Object.values(SAVE_STEPS);
+    routeSave(page, respond(401, { error: 'Unauthorized' }));
+    const navigations = page.navigations.length;
 
-    for (const [index, step] of Object.keys(SAVE_STEPS).entries()) {
-        await t.test(step, async () => {
-            page.window.localStorage.setItem('jwt_token', token);
-            routeSaveSteps(page, { [step]: respond(401, { error: 'Unauthorized' }) });
-            const navigations = page.navigations.length;
+    const since = await save(page);
 
-            const since = await save(page);
+    assert.equal(callsTo(page, SAVE_ROUTE, since).length, 1);
+    assert.deepEqual(messages(page), []);
+    assert.equal(page.navigations.length, navigations + 1);
+    assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
+    assert.equal(page.window.localStorage.getItem('jwt_token'), null);
+});
 
-            assert.deepEqual(saveRequests(page, since), steps.slice(0, index + 1));
-            assert.deepEqual(messages(page), []);
-            assert.equal(page.navigations.length, navigations + 1);
-            assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
-            assert.equal(page.window.localStorage.getItem('jwt_token'), null);
-        });
-    }
+test('an expired session while reloading after a save shows no result', async () => {
+    const page = await bootSettings();
+    routeSave(page);
+    page.route('GET /api/settings', 401);
+
+    await save(page);
+
+    assert.deepEqual(messages(page), []);
+    assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
 });
 
 test('Save Settings does nothing until the settings have loaded', async () => {
     const page = await bootSettings({ routes: { 'GET /api/settings': respond(500, 'unavailable') } });
-    routeSaveSteps(page);
+    routeSave(page);
     assert.equal(page.$('#saveSettingsBtn').disabled, true);
 
     const since = page.fetchCalls.length;
@@ -615,7 +743,7 @@ test('Reset Filename Format puts the default format the server reports into the 
     // The built-in default, not the current format; it is saved with "Save Settings".
     assert.equal(page.$('#filenameFormat').value, '{series} - Chapter {issue}');
     assert.equal(page.$('#currentFormat').textContent, '{series} v{volume} #{issue}');
-    assert.equal(callsTo(page, 'POST /api/settings/filename-format').length, 0);
+    assert.equal(callsTo(page, 'PUT /api/settings').length, 0);
 
     // A response without a default leaves the input alone.
     page.input('#filenameFormat', '{series} edited #{issue}');
@@ -628,7 +756,12 @@ test('Reset Filename Format puts the default format the server reports into the 
     page.route(route, respond(500, { error: 'boom' }));
     page.click('#resetFilenameFormatBtn');
     await page.settle();
-    assert.deepEqual(lastMessage(page), { type: 'error', text: 'Failed to reset format: HTTP error! status: 500' });
+    assert.deepEqual(lastMessage(page), { type: 'error', text: 'Failed to reset format: boom' });
+
+    page.route(route, serverFailure('corr-format'));
+    page.click('#resetFilenameFormatBtn');
+    await page.settle();
+    assert.deepEqual(lastMessage(page), { type: 'error', text: `Failed to reset format: ${SERVER_FAILURE} (ref: corr-format)` });
 
     page.route(route, networkError);
     page.click('#resetFilenameFormatBtn');
@@ -641,7 +774,7 @@ test('Reset Filename Format puts the default format the server reports into the 
     await page.settle();
     assert.equal(messages(page).length, shown);
     assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
-    assert.equal(callsTo(page, route).length, 5);
+    assert.equal(callsTo(page, route).length, 6);
 });
 
 test('Send Test Report reports what the server said', async () => {
@@ -674,4 +807,26 @@ test('Send Test Report reports what the server said', async () => {
     await page.settle();
     assert.deepEqual(messages(page), []);
     assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
+});
+
+test('the ComicInfo fill setting is saved with the metadata group', async () => {
+    const page = await bootSettings();
+    routeSave(page);
+
+    page.input('#fillComicInfoFromProvidersCheckbox', false);
+    const since = await save(page);
+
+    assert.equal(saveBody(page, since).externalSeriesMetadata.fillComicInfoFromProviders, false);
+});
+
+test('a ComicInfo fill setting pinned by the environment is left out of the save', async () => {
+    const page = await bootSettings({
+        settings: { env_locked: [{ field: 'fill_comicinfo_from_providers', variable: 'FILL_COMICINFO_FROM_PROVIDERS' }] }
+    });
+    routeSave(page);
+
+    assert.equal(page.$('#fillComicInfoFromProvidersCheckbox').disabled, true);
+    const since = await save(page);
+
+    assert.equal(saveBody(page, since).externalSeriesMetadata.fillComicInfoFromProviders, undefined);
 });

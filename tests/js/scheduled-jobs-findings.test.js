@@ -176,6 +176,7 @@ test('findings that cannot be loaded say why in the panel', async (t) => {
     const failures = [
         { answer: h.unexpectedError(FINDINGS, 'req-500c'), message: h.UNEXPECTED_ERROR },
         { answer: 403, message: 'Only administrators can manage scheduled jobs.' },
+        { answer: respond(403, { error: 'Forbidden', message: 'Insufficient permissions' }), message: 'Only administrators can manage scheduled jobs.' },
         { answer: respond(502, 'Bad Gateway'), message: 'HTTP error! status: 502' },
         { answer: () => { throw new TypeError('Failed to fetch'); }, message: 'Failed to fetch' }
     ];

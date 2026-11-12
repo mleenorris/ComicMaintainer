@@ -454,10 +454,207 @@ test('a reconnected event stream catches up on the tracked job', async (t) => {
     h.assertProgress(page, { title: 'Completed! All 4 items processed (3 succeeded, 1 failed)', closeVisible: true, cancelVisible: false });
     await h.tick(t, page, 1000);
     assert.equal(h.progressView(page).open, false);
+    assert.equal(polls(), 7, 'the finish asks once more, for the problems the job reported');
 
     await reconnect();
-    assert.equal(polls(), 6, 'a finished job is not polled again');
+    assert.equal(polls(), 7, 'a finished job is not polled again');
     assert.deepEqual(page.errors, []);
+});
+
+// A problem a job reports with something that is not one of its items, as
+// JobsController.GetJob lists it: here, a source folder a combine had to keep.
+const KEPT_FOLDER = {
+    subject: '/comics/Saga (Digital)',
+    message: 'Source folder kept. It still holds files that are not disposable. Remaining: notes.pdf.'
+};
+const KEPT_LOOSE_FOLDER = { subject: '/comics/Saga (Loose)/', message: 'Source folder kept. It is a link; links are never removed.' };
+const NEEDS_ATTENTION = 'Completed! 1 item needs your attention (see below)';
+const finishedWith = (...reported_problems) => h.jobStatus({ status: 'completed', processed_items: 4, reported_problems });
+
+test('a job that reported problems stays open with them on top until the user closes it', async (t) => {
+    // The modal read "Completed!" and closed itself a second later, so nobody
+    // saw, for example, which source folders a combine had kept.
+    const job = h.trackedJob();
+    const page = await h.bootJobsApp(t, { routes: job.routes });
+    await h.startTrackedJob(page);
+    h.fileProcessed(page, 'Batman 001.cbz', true);
+    h.fileProcessed(page, 'Saga (Digital)', false, KEPT_FOLDER.message);
+    job.poll.answer = () => finishedWith(KEPT_FOLDER);
+
+    h.jobUpdate(page, 'completed', h.progress(4, 4));
+    await h.tick(t, page, 500);
+
+    h.assertProgress(page, {
+        open: true,
+        title: NEEDS_ATTENTION,
+        closeVisible: true,
+        cancelVisible: false,
+        succeeded: '4',
+        failed: '0',
+        // The row that came with the live event is not repeated.
+        resultsCount: '2 results',
+        results: [
+            { success: false, file: 'Saga (Digital)', detail: KEPT_FOLDER.message },
+            { success: true, file: 'Batman 001.cbz', detail: 'Completed successfully' }
+        ]
+    });
+
+    await h.tick(t, page, 60000);
+    h.assertProgress(page, { open: true, title: NEEDS_ATTENTION });
+
+    page.click('#progressCloseBtn');
+    h.assertProgress(page, { open: false, indicatorVisible: false });
+    assert.deepEqual(page.errors, []);
+});
+
+test('a reported problem nobody saw live is still listed, named after its folder', async (t) => {
+    const job = h.trackedJob();
+    const page = await h.bootJobsApp(t, { routes: job.routes });
+    await h.startTrackedJob(page);
+    job.poll.answer = () => finishedWith(KEPT_FOLDER, KEPT_LOOSE_FOLDER);
+
+    h.jobUpdate(page, 'completed', h.progress(4, 4));
+    await h.tick(t, page, 500);
+
+    h.assertProgress(page, {
+        open: true,
+        title: 'Completed! 2 items need your attention (see below)',
+        results: [
+            { success: false, file: 'Saga (Loose)', detail: KEPT_LOOSE_FOLDER.message },
+            { success: false, file: 'Saga (Digital)', detail: KEPT_FOLDER.message }
+        ]
+    });
+});
+
+test('a minimized job that reported problems comes back so they get seen', async (t) => {
+    const job = h.trackedJob();
+    const page = await h.bootJobsApp(t, { routes: job.routes, localStorage: { progressModalMinimized: 'true' } });
+    await h.startTrackedJob(page);
+    h.assertProgress(page, { open: false, indicatorVisible: true });
+    job.poll.answer = () => finishedWith(KEPT_FOLDER);
+
+    h.jobUpdate(page, 'completed', h.progress(4, 4));
+    await h.tick(t, page, 500);
+
+    h.assertProgress(page, { open: true, indicatorVisible: false, title: NEEDS_ATTENTION });
+    assert.equal(page.window.localStorage.getItem('progressModalMinimized'), null);
+    await h.tick(t, page, 60000);
+    h.assertProgress(page, { open: true, indicatorVisible: false });
+});
+
+test('a report that arrives after the modal closed itself opens it again', async (t) => {
+    const job = h.trackedJob();
+    const status = deferred();
+    const page = await h.bootJobsApp(t, { routes: job.routes });
+    await h.startTrackedJob(page);
+    job.poll.answer = () => status.promise;
+
+    h.jobUpdate(page, 'completed', h.progress(4, 4));
+    await h.tick(t, page, 500);
+    h.assertProgress(page, { open: true, title: 'Completed! All 4 items processed (4 succeeded, 0 failed)', closeVisible: true });
+    await h.tick(t, page, 1000);
+    h.assertProgress(page, { open: false });
+
+    status.resolve(finishedWith(KEPT_FOLDER));
+    await page.settle();
+
+    h.assertProgress(page, {
+        open: true,
+        title: NEEDS_ATTENTION,
+        closeVisible: true,
+        results: [{ success: false, file: 'Saga (Digital)', detail: KEPT_FOLDER.message }]
+    });
+    assert.deepEqual(page.errors, []);
+});
+
+test('a report that arrives before a slow library reload still keeps the modal open', async (t) => {
+    // The finish schedules the auto-close only once the library has reloaded,
+    // which can be after the report came in.
+    const job = h.trackedJob();
+    const reload = deferred();
+    const page = await h.bootJobsApp(t, { routes: job.routes });
+    await h.startTrackedJob(page);
+    job.poll.answer = () => finishedWith(KEPT_FOLDER);
+    page.route('GET /api/files/series', () => reload.promise);
+
+    h.jobUpdate(page, 'completed', h.progress(4, 4));
+    await h.tick(t, page, 500);
+    h.assertProgress(page, { open: true, title: NEEDS_ATTENTION });
+
+    reload.resolve({ series: [], total_series: 0, unmarked_count: 0 });
+    await page.settle();
+    await h.tick(t, page, 60000);
+
+    h.assertProgress(page, { open: true, title: NEEDS_ATTENTION });
+    assert.deepEqual(page.errors, []);
+});
+
+test('a cancelled job that reported problems stays open and still reads as cancelled', async (t) => {
+    const job = h.trackedJob();
+    const page = await h.bootJobsApp(t, { routes: job.routes });
+    await h.startTrackedJob(page);
+    job.poll.answer = () => h.jobStatus({ status: 'cancelled', processed_items: 1, reported_problems: [KEPT_FOLDER] });
+
+    h.jobUpdate(page, 'cancelled', h.progress(1, 4));
+    await h.tick(t, page, 500);
+    await h.tick(t, page, 60000);
+
+    h.assertProgress(page, {
+        open: true,
+        title: 'Cancelled - Job was cancelled',
+        results: [{ success: false, file: 'Saga (Digital)', detail: KEPT_FOLDER.message }]
+    });
+});
+
+test('a report that arrives after another job took the modal over leaves that job alone', async (t) => {
+    const job = h.trackedJob();
+    const status = deferred();
+    const page = await h.bootJobsApp(t, {
+        routes: {
+            ...job.routes,
+            'POST /api/jobs/rename-unmarked': { job_id: h.OTHER_JOB_ID, total_items: 3 },
+            [`GET /api/jobs/${h.OTHER_JOB_ID}`]: h.jobStatus({ job_id: h.OTHER_JOB_ID, total_items: 3 })
+        }
+    });
+    await h.startTrackedJob(page);
+    job.poll.answer = () => status.promise;
+    h.jobUpdate(page, 'completed', h.progress(4, 4));
+    await h.tick(t, page, 500);
+
+    h.chooseMenuItem(page, 'renameDropdown', 'Rename Unmarked');
+    await page.settle();
+    const title = h.progressView(page).title;
+    assert.equal(page.run('currentJobId'), h.OTHER_JOB_ID);
+
+    status.resolve(finishedWith(KEPT_FOLDER));
+    await page.settle();
+
+    h.assertProgress(page, { title, emptyResults: true });
+    h.jobUpdate(page, 'cancelled', h.progress(0, 3), h.OTHER_JOB_ID);
+    await h.tick(t, page, 500);
+    await h.tick(t, page, 2000);
+    h.assertProgress(page, { open: false });
+    assert.deepEqual(page.errors, []);
+});
+
+test('a job whose report cannot be fetched finishes and closes as usual', async (t) => {
+    const finish = async answer => {
+        const job = h.trackedJob();
+        const page = await h.bootJobsApp(t, { routes: job.routes });
+        await h.startTrackedJob(page);
+        job.poll.answer = answer;
+        h.jobUpdate(page, 'completed', h.progress(4, 4));
+        await h.tick(t, page, 500);
+        h.assertProgress(page, { open: true, title: 'Completed! All 4 items processed (4 succeeded, 0 failed)', closeVisible: true });
+        await h.tick(t, page, 1000);
+        h.assertProgress(page, { open: false });
+        assert.deepEqual(page.errors, []);
+        return page;
+    };
+
+    await finish(() => respond(500, 'Error'));
+    const offline = await finish(() => { throw new TypeError('Failed to fetch'); });
+    assert.ok(warnings(offline).includes(`[JOB ${JOB_ID}] Could not check for reported problems:`));
 });
 
 test('files the job has not reached yet are counted neither as succeeded nor as failed', async (t) => {
@@ -525,7 +722,7 @@ test('a bare job status still updates the modal, and a signed-out poll goes to t
     assert.deepEqual(page.errors, []);
 });
 
-test('leaving the page closes the event stream and warns only while a job runs', async (t) => {
+test('leaving the page warns only while a job runs, and staying keeps the progress updating', async (t) => {
     const job = h.trackedJob();
     const page = await h.bootJobsApp(t, { routes: job.routes });
     const leave = () => {
@@ -536,14 +733,21 @@ test('leaving the page closes the event stream and warns only while a job runs',
     const stream = page.eventSources.at(-1);
 
     assert.equal(leave().defaultPrevented, false);
-    assert.equal(stream.readyState, 2, 'the event stream is closed');
 
     await h.startTrackedJob(page);
     assert.equal(leave().defaultPrevented, true, 'the browser asks before leaving a running job');
+    // The user chose to stay: the stream was not closed by asking, so the job's updates still arrive.
+    assert.equal(page.eventSources.at(-1), stream);
+    assert.notEqual(stream.readyState, 2, 'the event stream stays open');
 
     h.jobUpdate(page, 'completed', h.progress(4, 4));
     await h.tick(t, page, 500);
+    h.assertProgress(page, { open: true, title: 'Completed! All 4 items processed (4 succeeded, 0 failed)', closeVisible: true });
     assert.equal(leave().defaultPrevented, false);
+
+    // The stream is closed when the page really goes away.
+    page.window.dispatchEvent(new page.window.Event('pagehide'));
+    assert.equal(stream.readyState, 2, 'the event stream is closed');
     assert.deepEqual(page.errors, []);
 });
 
@@ -732,6 +936,8 @@ test("a Combine Folders start waiting for the server isn't released by the auto-
         routes: {
             ...job.routes,
             ...nextJobRoutes(),
+            // Combine asks the server for its plan before it asks the user.
+            'POST /api/files/combine-folders/preview': { moves: [] },
             'POST /api/files/combine-folders': () => combine.promise,
             'GET /api/files/combinable-folders': { groups: [] }
         }
@@ -778,6 +984,8 @@ test("closing an ended job's dialog doesn't release a pending Combine Folders st
         routes: {
             ...job.routes,
             ...nextJobRoutes(),
+            // Combine asks the server for its plan before it asks the user.
+            'POST /api/files/combine-folders/preview': { moves: [] },
             'POST /api/files/combine-folders': () => combine.promise,
             'GET /api/files/combinable-folders': { groups: [] }
         }
@@ -809,6 +1017,46 @@ test("closing an ended job's dialog doesn't release a pending Combine Folders st
     await page.settle();
     h.assertProgress(page, { open: true, title: 'Combining 3 file(s)...', cancelVisible: true, closeVisible: false });
     assert.equal(page.run('currentJobId'), h.OTHER_JOB_ID);
+    assert.deepEqual(page.errors, []);
+});
+
+test("a job started while Combine Folders fetches its plan stops the Combine before it asks", async (t) => {
+    // Combine fetches the server's plan before it asks; a job started
+    // meanwhile must not be taken over by the Combine's start.
+    const job = h.trackedJob();
+    const preview = deferred();
+    const page = await h.bootJobsApp(t, {
+        routes: {
+            ...job.routes,
+            'POST /api/files/combine-folders/preview': () => preview.promise,
+            'POST /api/files/combine-folders': { jobId: h.OTHER_JOB_ID, totalItems: 3, skipped: 0 },
+            'GET /api/files/combinable-folders': { groups: [] }
+        }
+    });
+    page.run(`
+        combineFolderGroups = [{ groupKey: 'batman', totalFileCount: 2, folders: [
+            { directory: 'Batman', fileCount: 1, totalSize: 1 },
+            { directory: 'Batman (2016)', fileCount: 1, totalSize: 1 }
+        ] }];
+        combineFolderIndex = 0;
+        combineFolderSelectedDestination = 'Batman (2016)';
+    `);
+    page.run('confirmCombineFolders()');
+    await page.settle();
+    assert.equal(h.requests(page, 'POST', '/api/files/combine-folders/preview').length, 1);
+
+    await h.startTrackedJob(page);
+    assert.equal(page.run('currentJobId'), JOB_ID);
+
+    preview.resolve({ moves: [], foldersToRemove: [{ directory: 'Batman', disposableFiles: [], disposableFileCount: 0 }] });
+    await page.settle();
+
+    assert.deepEqual(h.takeConfirms(page), [], 'the Combine is not asked');
+    assert.deepEqual(h.takeMessages(page), [REFUSED]);
+    assert.equal(h.requests(page, 'POST', '/api/files/combine-folders').length, 0);
+    assert.equal(page.run('currentJobId'), JOB_ID, 'the started job is still followed');
+    assert.match(page.$('#combineFoldersPreview').textContent, /Folders removed after the move \(1\)/);
+    assert.equal(page.$('#combineFoldersConfirmBtn').disabled, false);
     assert.deepEqual(page.errors, []);
 });
 

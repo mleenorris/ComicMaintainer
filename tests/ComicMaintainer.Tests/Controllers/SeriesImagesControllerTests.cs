@@ -13,7 +13,8 @@ public class SeriesImagesControllerTests
     private readonly Mock<ISeriesLibraryService> _library = new();
     private readonly Mock<ISeriesImageStore> _imageStore = new();
     private readonly Mock<IExternalSeriesMetadataService> _externalMetadata = new();
-    private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<ISeriesCoverArtifactWriter> _coverArtifacts = new();
+    private readonly Mock<IBatchJobRegistry> _jobRegistry = new();
     private readonly SeriesImagesController _controller;
 
     public SeriesImagesControllerTests()
@@ -23,7 +24,8 @@ public class SeriesImagesControllerTests
             _library.Object,
             _imageStore.Object,
             _externalMetadata.Object,
-            _processor.Object,
+            _coverArtifacts.Object,
+            _jobRegistry.Object,
             new Mock<ILogger<SeriesImagesController>>().Object);
     }
 
@@ -42,7 +44,7 @@ public class SeriesImagesControllerTests
     {
         var jobId = Guid.NewGuid();
         List<string>? trackedItems = null;
-        _processor.Setup(p => p.RunCustomBatchJobAsync(
+        _jobRegistry.Setup(p => p.RunCustomBatchJobAsync(
                 It.IsAny<string>(),
                 It.IsAny<IEnumerable<string>>(),
                 It.IsAny<Func<string, CancellationToken, Task<bool>>>(),
@@ -104,7 +106,7 @@ public class SeriesImagesControllerTests
         Assert.Equal(Guid.Empty.ToString(), GetProp(ok.Value!, "job_id"));
         Assert.Equal(0, GetProp(ok.Value!, "total_items"));
         Assert.Equal(1, GetProp(ok.Value!, "skippedSeries"));
-        _processor.Verify(p => p.RunCustomBatchJobAsync(
+        _jobRegistry.Verify(p => p.RunCustomBatchJobAsync(
             It.IsAny<string>(), It.IsAny<IEnumerable<string>>(),
             It.IsAny<Func<string, CancellationToken, Task<bool>>>(), It.IsAny<string>(),
             It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()), Times.Never);

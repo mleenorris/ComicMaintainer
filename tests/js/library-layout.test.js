@@ -14,7 +14,6 @@ const {
     seriesPages,
     bootLibrary,
     seriesCalls,
-    savedPreferences,
     imageObserver,
     renderedTitles
 } = require('./support/library-helpers');
@@ -36,7 +35,7 @@ test('the layout buttons switch between list, grid and compact and remember the 
     page.click('#seriesLayoutListBtn');
     const rows = page.$$('#fileList .series-list[role="list"] > .series-list-row');
     assert.equal(rows.length, 2);
-    assert.equal(rows[0].getAttribute('aria-label'), 'Open series Series 001');
+    assert.equal(rows[0].querySelector('.series-list-row-open').getAttribute('aria-label'), 'Open series Series 001');
     assert.equal(rows[0].querySelector('.series-list-title').textContent, 'Series 001');
     assert.equal(rows[0].querySelector('.series-list-meta').textContent, '3.0 MB');
     assert.equal(rows[0].querySelector('.series-list-count').getAttribute('aria-label'), '3 issues');
@@ -263,34 +262,6 @@ test('the list layout shows the lookup badge beside the issue count', async () =
 
 // ── Library view mode (always "series" now) ──────────────────────────────
 
-test('requesting the removed Files view while browsing the library changes nothing', async () => {
-    const page = await bootLibrary({ series: makeSeriesList(1) });
-    const before = seriesCalls(page).length;
-
-    await page.run("setLibraryViewMode('files')");
-
-    assert.equal(page.evaluate('libraryViewMode'), 'series');
-    assert.equal(seriesCalls(page).length, before);
-    assert.deepEqual(savedPreferences(page), []);
-});
-
-test('switching to the series view from a series page closes it and reloads the library', async () => {
-    const page = await bootLibrary({ hash: '#/series/series-1', series: makeSeriesList(2), routes: ISSUES_ROUTE });
-    // Legacy view-mode buttons, if a page still has them, follow the mode.
-    page.$('.controls-wrapper').insertAdjacentHTML('beforeend',
-        '<button id="filesViewModeBtn" class="active">Files</button><button id="seriesViewModeBtn">Series</button>');
-
-    await page.run("setLibraryViewMode('series')");
-    await page.settle();
-
-    assert.equal(page.evaluate('currentSeriesDetailId'), null);
-    assert.deepEqual(savedPreferences(page), [{ libraryViewMode: 'series' }]);
-    assert.deepEqual(seriesCalls(page).at(-1).query, { offset: '0', limit: '60', refresh: 'true' });
-    assert.deepEqual(renderedTitles(page), ['Series 001', 'Series 002']);
-    assert.ok(page.$('#seriesViewModeBtn').classList.contains('active'));
-    assert.ok(!page.$('#filesViewModeBtn').classList.contains('active'));
-});
-
 test('drawing the library over a series page closes an Actions menu left open there', async () => {
     // An open menu is moved to <body> (js/app/menus.js), so it would stay on
     // screen over the library, still acting on an issue that is gone.
@@ -305,7 +276,8 @@ test('drawing the library over a series page closes an Actions menu left open th
     const pending = deferred();
     page.route('GET /api/files/series', () => pending.promise);
     openIssueMenu();
-    const switching = page.run("setLibraryViewMode('series')");
+    page.run('currentSeriesDetailId = null; currentSeriesDetailTitleKeys = null');
+    const switching = page.run('loadActiveLibraryView({ refresh: true })');
     await page.settle();
     assert.ok(page.$('#fileList > .loading'));
     assert.deepEqual(leftOpen(), []);
@@ -323,17 +295,4 @@ test('drawing the library over a series page closes an Actions menu left open th
     assert.deepEqual(renderedTitles(page), ['Series 001', 'Series 002']);
     // Only the Actions menus are closed; a redraw leaves the filter menu open.
     assert.ok(page.$('#filterDropdownMenu').classList.contains('show'));
-});
-
-test('a legacy Files mode is coerced back to the series library', async () => {
-    const page = await bootLibrary({ series: makeSeriesList(1) });
-    page.run("libraryViewMode = 'files'");
-
-    await page.run("setLibraryViewMode('files')");
-    await page.settle();
-
-    assert.equal(page.evaluate('libraryViewMode'), 'series');
-    assert.deepEqual(savedPreferences(page), [{ libraryViewMode: 'series' }]);
-    assert.equal(seriesCalls(page).at(-1).query.refresh, 'true');
-    assert.deepEqual(renderedTitles(page), ['Series 001']);
 });

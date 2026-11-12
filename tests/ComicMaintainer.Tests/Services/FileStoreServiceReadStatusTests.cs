@@ -224,52 +224,36 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     }
 
     [Fact]
-    public async Task MarkFilesReadAsync_BulkUpdateFails_FallsBackToPerFileUpdates()
+    public async Task MarkFilesReadAsync_BulkUpdateFails_ThrowsInsteadOfRetryingEveryFileOnItsOwn()
     {
         var first = Path.Join(_library, "Saga 005.cbz");
         var second = Path.Join(_library, "Saga 006.cbz");
         var service = CreateService("alice");
         _factory.FailNth(1);
 
-        await service.MarkFilesReadAsync(new[] { first, second }, read: true);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.MarkFilesReadAsync(new[] { first, second }, read: true));
 
-        Assert.True(_logger.Contains(LogLevel.Error, "falling back to per-file updates"));
-        var rows = await AllStatusesAsync();
-        Assert.Equal(2, rows.Count);
-        Assert.All(rows, r => Assert.True(r.IsRead));
-    }
-
-    [Fact]
-    public async Task SaveReadingProgressAsync_PageBelowOne_IsRejected()
-    {
-        var service = CreateService("alice");
-
-        await service.SaveReadingProgressAsync(Path.Join(_library, "Saga 001.cbz"), 0);
-
-        Assert.True(_logger.Contains(LogLevel.Warning, "Invalid page number 0"));
-        Assert.Equal(0, _factory.Created);
-    }
-
-    [Fact]
-    public async Task SaveReadingProgressAsync_NoUserInScope_WritesNothing()
-    {
-        var service = CreateService(userId: null);
-
-        await service.SaveReadingProgressAsync(Path.Join(_library, "Saga 001.cbz"), 4);
-
-        Assert.Equal(0, _factory.Created);
+        // Regression: a failed bulk save fell back to one transaction per path (thousands of
+        // writes competing with processing for a whole-library change) and the endpoint
+        // still answered 200. Now the caller is told and nothing else is attempted.
+        Assert.True(_logger.Contains(LogLevel.Error, "Error bulk-updating read status for 2 files"));
+        Assert.Equal(1, _factory.Created);
         Assert.Empty(await AllStatusesAsync());
     }
 
     [Fact]
-    public async Task SaveReadingProgressAsync_DatabaseUnavailable_LogsError()
+    public async Task MarkFilesReadAsync_Cancelled_PropagatesWithoutLoggingAnError()
     {
         var service = CreateService("alice");
-        _factory.FailAll();
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
 
-        await service.SaveReadingProgressAsync(Path.Join(_library, "Saga 001.cbz"), 4);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.MarkFilesReadAsync(new[] { Path.Join(_library, "Saga 007.cbz") }, read: true, cancelled.Token));
 
-        Assert.True(_logger.Contains(LogLevel.Error, "Error saving reading progress"));
+        Assert.False(_logger.Contains(LogLevel.Error, string.Empty));
+        Assert.Empty(await AllStatusesAsync());
     }
 
     [Fact]
@@ -294,7 +278,7 @@ public sealed class FileStoreServiceReadStatusTests : IDisposable
     }
 
     private FileStoreService CreateService(string? userId, IMemoryCache? cache = null) =>
-        new(
+        TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings
             {
                 WatchedDirectory = _library,

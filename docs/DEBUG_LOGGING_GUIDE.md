@@ -1,297 +1,106 @@
-# Debug Logging and Error Reporting Guide
+# Logging, Diagnostics and Error Reports
 
-## Overview
+Where to look when something goes wrong, and what automated error reporting sends.
 
-This guide explains the extensive debug logging and automatic error reporting features that have been added to the ComicMaintainer application.
+## Log files
 
-## Features
+Log files are in the config directory, `/Config` by default. There is no debug mode to turn on: `debug` logs are always
+written.
 
-### 1. Debug Logging
+| File | Contents | Lowest level | Days kept |
+| --- | --- | --- | --- |
+| `app<date>.log` | General application messages, leaving out the three specialist logs below | Information | 7 |
+| `debug<date>.log` | Everything, with source and correlation id | Debug | 3 |
+| `watcher<date>.log` | File watcher | Debug | 7 |
+| `metadata<date>.log` | Metadata providers, the metadata cache, refresh jobs and series images | Debug | 7 |
+| `auth<date>.log` | Sign-ins, failed attempts, tokens, API keys and Authelia | Debug | 7 |
 
-The application now supports comprehensive debug logging that can be enabled via the `DEBUG_MODE` environment variable.
+A new file starts each day, named like `app20261109.log`. Each file is capped at the size set at **Settings > Log Rotation**
+(10 MiB by default, read at startup). When a file reaches its cap, nothing more is written to it until the next day, so raise
+the size if the day's `debug` log runs out before you need it.
 
-**Enable Debug Mode:**
+The console, which is what `docker logs` shows, carries Information and above.
+
+### Reading logs
+
+Administrators can open **View Logs** from the menu and pick a log. The same is available with
+`GET /api/logs?type=debug&lines=500` and `GET /api/logs/files?type=debug`, where `type` is `app`, `debug`, `watcher`, `metadata`
+or `auth`. Logs name users, client addresses and paths, so they are admin-only.
+
 ```bash
-docker run -e DEBUG_MODE=true ...
+docker logs -f comicmaintainer-dotnet
+tail -f /path/to/config/debug$(date +%Y%m%d).log
 ```
 
-**Log Files:**
+### Following one request
 
-When `DEBUG_MODE` is enabled, the application creates two separate log files:
+Every response has an `X-Correlation-Id` header, and each `debug` log line carries the id of the request that wrote it. Work
+outside a request, such as the watcher or a scheduled job, shows `-`. When the web interface reports a failure, it shows
+`(ref: <id>)`. Search `debug` for that id.
 
-- **`ComicMaintainer.log`** - Regular application log (INFO, WARNING, ERROR levels)
-  - Location: `/Config/Log/ComicMaintainer.log`
-  - Contains standard operational messages
-  
-- **`ComicMaintainer_debug.log`** - Debug-specific log (all levels including DEBUG)
-  - Location: `/Config/Log/ComicMaintainer_debug.log`
-  - Contains detailed debug messages plus all regular messages
-  - Only created when `DEBUG_MODE=true`
+### More detail
 
-Both log files use **rotating file handlers** with the same configuration:
-- **Max Size:** Configurable via `LOG_MAX_BYTES` environment variable (default: 5MB)
-- **Backup Count:** 3 backup files (e.g., `.log.1`, `.log.2`, `.log.3`)
-- **Rotation:** Automatic when max size is reached
+- **SQL.** Set `EFCORE_QUERY_LOGGING=true` to print EF Core's SQL to the console. It is slow, so use it briefly.
+- **Browser requests.** Run `localStorage.setItem('debug_api', 'true')` in the browser console to log each API request.
+- **Instance snapshot.** Administrators can open **System Diagnostics** from the menu for uptime, health checks, watcher
+  state, disk space and database size, and copy it into a bug report.
 
-**What gets logged in debug mode:**
-- Function entry and exit with parameters and return values
-- Detailed operation tracking (file checks, cache operations, metadata processing)
-- Variable values and state at key decision points
-- Performance insights for troubleshooting
-- Context information for every operation
+## Automated error report
 
-**Example debug output:**
-```
-DEBUG: ENTER process_file with params: {"filepath": "/path/to/file.cbz", "fixtitle": true, "fixseries": true, "fixfilename": true}
-DEBUG: Opening comic archive | Context: {"filepath": "/path/to/file.cbz"}
-DEBUG: Read tags from archive | Context: {"filepath": "/path/to/file.cbz", "has_tags": true}
-DEBUG: Checking title normalization | Context: {"filepath": "/path/to/file.cbz"}
-DEBUG: EXIT process_file -> /path/to/renamed_file.cbz
-```
+ComicMaintainer can file errors it logs as issues on the project's GitHub repository, `mleenorris/ComicMaintainer`. It is off
+by default, and nothing leaves your server until you turn it on and supply a token. The destination is fixed.
 
-### 2. Automatic GitHub Issue Creation
+**Issues on that repository are public.** Read [what is sent](#what-is-sent) before you turn this on.
 
-When errors occur, the application can automatically create GitHub issues with full context and stack traces.
+### Turning it on
 
-**Setup:**
-1. Create a GitHub Personal Access Token with `repo` scope
-2. Set environment variables:
-   ```bash
-   -e GITHUB_TOKEN=ghp_your_token_here
-   -e GITHUB_ISSUE_ASSIGNEE=your_username  # Optional, defaults to "copilot"
-   ```
+1. Create a fine-grained GitHub token with `issues: write` on that repository only.
+2. At **Settings > Automated Error Reporting**, turn it on, paste the token and save.
+3. Click **Send Test Report** to check the token works.
 
-**What gets reported:**
-- Full exception type and message
-- Complete stack trace
-- Operation context (what was being done when error occurred)
-- Additional diagnostic information (file paths, parameters, etc.)
-- Timestamp and unique error ID
-- Automatic assignment to configured user
-- Tagged with `bug` and `auto-generated` labels
+You can set it with environment variables instead, which keeps the token out of `user-settings.json`:
 
-**Example auto-generated issue:**
-```markdown
-## Automated Error Report
-**Error ID:** `ValueError:1234`
-**Error Type:** `ValueError`
-**Timestamp:** 2025-10-20T08:24:23.624Z
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ERROR_REPORTING_ENABLED` | `false` | File issues |
+| `ERROR_REPORTING_GITHUB_TOKEN` | _(empty)_ | The token |
+| `ERROR_REPORTING_ASSIGNEE` | _(empty)_ | GitHub login to assign new issues to |
+| `ERROR_REPORTING_MAX_ISSUES_PER_DAY` | `10` | New issues in a rolling 24 hours |
+| `ERROR_REPORTING_DEDUPE_WINDOW_HOURS` | `24` | Time between "still happening" comments |
+| `ERROR_REPORTING_COMMENT_ON_RECURRENCE` | `true` | Comment on an existing issue when it recurs |
 
-### Error Message
-```
-Invalid file format: expected .cbz or .cbr
-```
+### What is sent
 
-### Context
-Processing file: /watched_dir/comics/test.txt
+Errors and fatal errors logged by the server, and errors caught in the browser. Each report has the app version, the
+exception type, the message and message template, the source, the correlation id and the leading stack frames. Conditions
+that are about your own setup, such as a refused administrator password, are logged but not filed.
 
-### Additional Information
-```json
-{
-  "filepath": "/watched_dir/comics/test.txt",
-  "operation": "process_file"
-}
-```
+Everything is scrubbed first:
 
-### Traceback
-```python
-Traceback (most recent call last):
-  File "/app/process_file.py", line 298, in process_file
-    ca = ComicArchive(filepath)
-ValueError: Invalid file format: expected .cbz or .cbr
-```
+| Found | Becomes |
+| --- | --- |
+| Configured passwords, tokens and API keys | `[redacted]` |
+| `password=...`, `token: ...` and similar values, and `Bearer` or `Basic` credentials | `[redacted]` |
+| Credentials inside a URL | `[redacted]` |
+| Email addresses | `[redacted]` |
+| A file path | `<path>/` followed by the last part only |
 
----
-*This issue was automatically created by the error handling system.*
-```
+The last part of a path survives, so a comic's **file name, which usually contains the series title, can appear in a public
+issue**. Leave reporting off if that matters to you.
 
-**Duplicate Prevention:**
-- The system caches error IDs to prevent creating multiple issues for the same error
-- Cache holds up to 100 unique errors
-- Error ID is generated from error type and message hash
+### How issues are filed
 
-## Implementation Details
+- **One issue per defect.** A failure is identified by its type, message template and stack, so the same bug on many comics
+  files one issue. The record is kept in the database, so a restart does not file it again.
+- **Daily cap.** Past the daily limit, errors are only counted.
+- **Recurrences** add a comment, at most once per the interval above, if comments are on.
+- **Lost responses.** If a request to create an issue may have reached GitHub but the answer was lost, the repository is
+  searched for that fingerprint after a short wait. The issue is linked if found, and filed only if not.
+- **Rate limits.** `Retry-After`, a rate-limit reset, or a secondary rate limit pauses reporting for as long as GitHub asks.
+  Repeated temporary failures pause it for 15 minutes.
+- **A rejected configuration**, such as a bad token, stops reporting until the configuration changes.
 
-### Core Module: `error_handler.py`
+Administrators can list reported failures, and mute one, through `/api/error-reports`. A muted failure is still counted but
+never filed.
 
-The centralized error handling module provides:
-
-#### Functions:
-
-**`setup_debug_logging(logger_name=None)`**
-- Configures debug logging for a specific logger or root logger
-- Respects DEBUG_MODE environment variable
-- Returns configured logger instance
-
-**`log_debug(message, **kwargs)`**
-- Logs debug message with optional context
-- Only logs if DEBUG_MODE is enabled
-- Context is serialized as JSON
-
-**`log_error_with_context(error, context="", additional_info=None, create_github_issue=True)`**
-- Logs error with full context and traceback
-- Optionally creates GitHub issue
-- Generates unique error ID for tracking
-- Prevents duplicate issue creation
-
-**`log_function_entry(func_name, **kwargs)`**
-- Logs function entry with parameters (debug only)
-- Useful for tracing execution flow
-
-**`log_function_exit(func_name, result=None)`**
-- Logs function exit with result (debug only)
-- Useful for tracking return values
-
-**`safe_execute(func, *args, context="", create_issue=True, **kwargs)`**
-- Wrapper that executes function with error handling
-- Automatically logs errors with context
-- Returns None on error instead of raising
-
-### Modified Modules
-
-The following modules have been enhanced with debug logging:
-
-#### `watcher.py`
-- File event logging (created, modified, deleted, moved)
-- Stability check details
-- Processing decision logging
-- Cache update tracking
-
-#### `process_file.py`
-- File normalization checks
-- Tag reading and writing
-- Chapter number parsing
-- Filename formatting
-- Duplicate detection
-- All exception handlers wrapped with context
-
-#### `job_manager.py`
-- Job creation and lifecycle
-- Worker pool operations
-- Item processing progress
-- Success/failure tracking
-- Error handling in concurrent operations
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DEBUG_MODE` | `false` | Enable extensive debug logging |
-| `LOG_MAX_BYTES` | `5242880` (5MB) | Maximum size of each log file before rotation |
-| `GITHUB_TOKEN` | - | GitHub Personal Access Token for issue creation |
-| `GITHUB_REPOSITORY` | `mleenorris/ComicMaintainer` | Repository for issue creation |
-| `GITHUB_ISSUE_ASSIGNEE` | `copilot` | Username to assign auto-generated issues |
-| `GITHUB_API_URL` | `https://api.github.com` | GitHub API endpoint |
-
-## Usage Examples
-
-### Example 1: Enable Debug Mode Only
-```bash
-docker run -d \
-  -v /host/comics:/watched_dir \
-  -v /host/config:/Config \
-  -e WATCHED_DIR=/watched_dir \
-  -e DEBUG_MODE=true \
-  -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
-```
-
-View logs:
-```bash
-# View container console output
-docker logs -f <container_id>
-
-# View regular application log
-docker exec <container_id> tail -f /Config/Log/ComicMaintainer.log
-
-# View debug log (only when DEBUG_MODE=true)
-docker exec <container_id> tail -f /Config/Log/ComicMaintainer_debug.log
-
-# View all debug log files (including rotated backups)
-docker exec <container_id> ls -lh /Config/Log/
-```
-
-### Example 2: Enable Debug Mode + GitHub Issues
-```bash
-docker run -d \
-  -v /host/comics:/watched_dir \
-  -v /host/config:/Config \
-  -e WATCHED_DIR=/watched_dir \
-  -e DEBUG_MODE=true \
-  -e GITHUB_TOKEN=ghp_xxxxxxxxxxxx \
-  -e GITHUB_ISSUE_ASSIGNEE=myusername \
-  -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
-```
-
-### Example 3: GitHub Issues Only (No Debug Logging)
-```bash
-docker run -d \
-  -v /host/comics:/watched_dir \
-  -v /host/config:/Config \
-  -e WATCHED_DIR=/watched_dir \
-  -e GITHUB_TOKEN=ghp_xxxxxxxxxxxx \
-  -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
-```
-
-## Troubleshooting
-
-### Debug logs not appearing
-- Verify `DEBUG_MODE=true` is set (case-insensitive)
-- Check that `ComicMaintainer_debug.log` file exists in `/Config/Log/`
-- Verify the debug log file has content: `docker exec <container_id> cat /Config/Log/ComicMaintainer_debug.log`
-- View container console logs: `docker logs <container_id>`
-
-### GitHub issues not being created
-- Verify `GITHUB_TOKEN` is set and valid
-- Token must have `repo` scope
-- Check container logs for "Failed to create GitHub issue" warnings
-- Verify repository name is correct in `GITHUB_REPOSITORY`
-
-### Too many debug logs
-- Debug mode is very verbose - use only for troubleshooting
-- Adjust log rotation settings with `LOG_MAX_BYTES` environment variable (e.g., `-e LOG_MAX_BYTES=10485760` for 10MB)
-- Debug logs are automatically rotated to keep up to 3 backup files
-- Filter logs: `docker logs <container_id> | grep ERROR`
-- View only ERROR level messages: `docker exec <container_id> grep ERROR /Config/Log/ComicMaintainer.log`
-
-### Duplicate issues being created
-- System caches up to 100 unique error IDs
-- If cache fills, oldest entries are removed
-- Restart container to clear cache
-- Different error messages generate different error IDs
-
-## Best Practices
-
-1. **Use debug mode selectively**: Only enable when troubleshooting issues
-2. **Monitor log file size**: Debug mode generates significantly more logs (stored in separate file)
-3. **Check debug log location**: Debug logs are written to `/Config/Log/ComicMaintainer_debug.log`
-4. **Leverage log rotation**: Both log files automatically rotate with configurable size limits
-5. **Secure your GitHub token**: Store in Docker secrets or environment files
-6. **Review auto-generated issues**: They provide valuable diagnostic information
-7. **Disable GitHub issues in development**: Set `GITHUB_TOKEN` only in production
-8. **Use error IDs for tracking**: Reference the error ID when investigating issues
-9. **Persist logs**: Mount `/Config` volume to preserve logs across container restarts
-
-## Performance Impact
-
-- **Debug logging**: Minimal CPU overhead, increased I/O for log writes
-- **GitHub issue creation**: Network request on error (rate-limited internally)
-- **Normal operation**: No performance impact when DEBUG_MODE is disabled
-
-## Security Considerations
-
-- **GitHub Token**: Keep secure, use environment variables, never commit to code
-- **Sensitive data**: Error logs may contain file paths and parameters
-- **Issue visibility**: Auto-generated issues are public in public repositories
-- **Rate limiting**: GitHub API has rate limits - error cache helps prevent abuse
-
-## Future Enhancements
-
-Potential future improvements:
-- Configurable error cache size
-- Error severity levels for issue creation
-- Email notifications in addition to GitHub issues
-- Metrics and error rate tracking
-- Integration with monitoring services (Sentry, DataDog, etc.)
+Reporting never affects the app: if GitHub is unavailable, your server carries on.

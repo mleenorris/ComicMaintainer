@@ -16,70 +16,84 @@ public partial class SeriesLibraryService
     /// representative (the series id surfaced to the API).
     /// </summary>
     /// <remarks>
-    /// Cache-only builds (<paramref name="allowDiskRead"/> = false) are served
-    /// from a <see cref="GroupsSnapshot"/> that is reused until the file store,
-    /// read state, metadata cache or relevant settings change. The returned
-    /// dictionary and its accumulators are shared between requests and MUST be
-    /// treated as read-only by callers.
+    /// Built from the database only: every file's archive metadata comes from the cache
+    /// in <c>ComicFiles.Metadata</c> (filled by the processor's writes and the background
+    /// archive-metadata scan), so a request never opens an archive. Builds are served from
+    /// a <see cref="GroupsSnapshot"/> that is reused until the file store, metadata cache
+    /// or relevant settings change. The returned dictionary and
+    /// its accumulators are shared between requests and MUST be treated as
+    /// read-only by callers; per-user read state is applied when issues are
+    /// projected (see <see cref="ProjectIssue"/>).
     /// </remarks>
     private async Task<Dictionary<string, SeriesAccumulator>> BuildGroupsAsync(
         string? filter,
-        bool allowDiskRead,
         CancellationToken cancellationToken)
-        => (await GetGroupsSnapshotAsync(filter, allowDiskRead, cancellationToken)).Groups;
+        => (await GetGroupsSnapshotAsync(filter, cancellationToken)).Groups;
 
     /// <summary>
     /// Returns the grouped library for <paramref name="filter"/>, reusing a
     /// cached snapshot when the inputs have not changed since it was built.
     /// </summary>
+    /// <remarks>
+    /// When the file store keeps read state apart from the file list
+    /// (<see cref="IUserReadStateSource"/>), snapshots carry no read state at
+    /// all, so one snapshot per file filter serves every user and one user
+    /// marking an issue read invalidates nobody else's library. Only the
+    /// "read"/"unread" filters, whose file selection depends on the user, are
+    /// cached per user, keyed by that user's own read-state version. A store
+    /// without a separate read-state source bakes read state into the files it
+    /// returns, so its snapshots are kept per user.
+    /// </remarks>
     private async Task<GroupsSnapshot> GetGroupsSnapshotAsync(
         string? filter,
-        bool allowDiskRead,
         CancellationToken cancellationToken)
     {
-        // Disk reads make the result depend on archive contents we don't
-        // version, and sources that don't report change versions (e.g. test
-        // doubles) can't be validated — build fresh in both cases. Snapshots
-        // carry per-user read state, so without a user context to key on we
-        // can't tell users apart and must not share them either.
-        if (allowDiskRead
-            || _userContext is null
-            || _fileStore is not IChangeVersionSource fileVersions
+        // Filters the file store does not know select everything, so they share the unfiltered
+        // snapshot; the client-supplied text never becomes a cache or build-lock key.
+        var normalizedFilter = FileStoreService.NormalizeFileFilter(filter);
+        var bakeReadState = _fileStore is not IUserReadStateSource;
+        var perUser = bakeReadState || IsReadStateFilter(normalizedFilter);
+
+        // Sources that don't report change versions (e.g. test doubles) can't be
+        // validated, so they are built fresh.
+        if (_fileStore is not IChangeVersionSource fileVersions
             || _metadataCache is not IChangeVersionSource metadataVersions)
         {
-            return await BuildGroupsSnapshotAsync(filter, allowDiskRead, default, cancellationToken);
+            return await BuildGroupsSnapshotAsync(filter, bakeReadState, default, cancellationToken);
         }
 
-        var cacheKey = new GroupsCacheKey(
-            string.IsNullOrWhiteSpace(filter) ? null : filter.Trim().ToLowerInvariant(),
-            _userContext.UserId);
+        var cacheKey = new GroupsCacheKey(normalizedFilter, perUser ? _userContext.UserId : null);
 
         // Capture versions BEFORE reading any inputs: a write that lands while
         // we build bumps the version afterwards, so the stored snapshot is
         // detected as stale on the next request instead of being served forever.
-        var versions = CaptureSnapshotVersions(fileVersions, metadataVersions);
+        var versions = CaptureSnapshotVersions(cacheKey, fileVersions, metadataVersions);
         if (TryGetFreshSnapshot(cacheKey, versions, out var cached))
         {
             return cached;
         }
 
-        await _snapshotBuildLock.WaitAsync(cancellationToken);
+        var buildLock = _snapshotBuildLocks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
+        await buildLock.WaitAsync(cancellationToken);
         try
         {
             // Another request may have rebuilt it while we waited.
-            versions = CaptureSnapshotVersions(fileVersions, metadataVersions);
+            versions = CaptureSnapshotVersions(cacheKey, fileVersions, metadataVersions);
             if (TryGetFreshSnapshot(cacheKey, versions, out cached))
             {
                 return cached;
             }
 
-            var snapshot = await BuildGroupsSnapshotAsync(filter, allowDiskRead: false, versions, cancellationToken);
+            var snapshot = await BuildGroupsSnapshotAsync(normalizedFilter, bakeReadState, versions, cancellationToken);
 
-            // Drop snapshots that can never be served again so memory stays
-            // bounded to (filters x active users) live entries.
+            // Drop snapshots that can never be served again, each judged by its own
+            // versions (another user's read-filtered view survives as long as that
+            // user's read state is unchanged), so memory stays bounded to the live
+            // entries: one per file filter plus the read/unread views of active users.
+            var now = DateTime.UtcNow;
             foreach (var entry in _snapshotCache.Where(entry =>
-                         !entry.Value.Versions.Equals(versions)
-                         || DateTime.UtcNow - entry.Value.BuiltAtUtc >= SnapshotMaxAge))
+                         !entry.Value.Versions.Equals(CaptureSnapshotVersions(entry.Key, fileVersions, metadataVersions))
+                         || now - entry.Value.BuiltAtUtc >= SnapshotMaxAge))
             {
                 _snapshotCache.TryRemove(entry);
             }
@@ -88,15 +102,66 @@ public partial class SeriesLibraryService
         }
         finally
         {
-            _snapshotBuildLock.Release();
+            buildLock.Release();
         }
     }
 
-    private SnapshotVersions CaptureSnapshotVersions(IChangeVersionSource fileVersions, IChangeVersionSource metadataVersions)
+    /// <summary>True for the file filters whose selection depends on the requesting user's read state.</summary>
+    private static bool IsReadStateFilter(string? normalizedFilter)
+        => normalizedFilter is "read" or "unread";
+
+    private SnapshotVersions CaptureSnapshotVersions(
+        GroupsCacheKey key,
+        IChangeVersionSource fileVersions,
+        IChangeVersionSource metadataVersions)
         => new(
             fileVersions.ChangeVersion,
             metadataVersions.ChangeVersion,
-            _settings.CurrentValue?.DefaultPreferredLanguage);
+            _settings.CurrentValue?.DefaultPreferredLanguage,
+            key.UserId is not null && _fileStore is IUserReadStateSource readState
+                ? readState.GetReadStateVersion(key.UserId)
+                : 0);
+
+    /// <summary>
+    /// The read set to apply when projecting issues for the current request, or
+    /// <c>null</c> when the snapshot already carries read state (a store without a
+    /// separate read-state source). Background work with no user sees everything unread.
+    /// </summary>
+    private async Task<IReadOnlySet<string>?> GetReadPathsForProjectionAsync(CancellationToken cancellationToken)
+    {
+        if (_fileStore is not IUserReadStateSource readState)
+        {
+            return null;
+        }
+
+        var userId = _userContext.UserId;
+        return string.IsNullOrEmpty(userId)
+            ? NoReadPaths
+            : await readState.GetReadFilePathsAsync(userId, cancellationToken);
+    }
+
+    /// <summary>
+    /// The issue as the requesting user sees it. Snapshot issues are shared by every
+    /// user and carry no read state, so a copy is made only for the issues this user
+    /// has read; the shared instance is never modified.
+    /// </summary>
+    private static SeriesIssueDto ProjectIssue(SeriesIssueDto issue, IReadOnlySet<string>? readPaths)
+    {
+        if (readPaths is null)
+        {
+            return issue;
+        }
+
+        var read = readPaths.Contains(issue.FilePath);
+        if (issue.Read == read)
+        {
+            return issue;
+        }
+
+        var copy = issue.ShallowCopy();
+        copy.Read = read;
+        return copy;
+    }
 
     private bool TryGetFreshSnapshot(GroupsCacheKey key, SnapshotVersions versions, out GroupsSnapshot snapshot)
     {
@@ -112,9 +177,14 @@ public partial class SeriesLibraryService
         return false;
     }
 
+    /// <param name="bakeReadState">
+    /// Copy each file's read flag into its issue. Only for stores without a separate
+    /// read-state source; otherwise the snapshot is shared by every user and must not carry
+    /// the read state of whichever user happened to trigger the build.
+    /// </param>
     private async Task<GroupsSnapshot> BuildGroupsSnapshotAsync(
         string? filter,
-        bool allowDiskRead,
+        bool bakeReadState,
         SnapshotVersions versions,
         CancellationToken cancellationToken)
     {
@@ -125,14 +195,9 @@ public partial class SeriesLibraryService
 
         foreach (var file in files)
         {
-            // Reuse metadata already loaded from the database when available so we
-            // don't have to open every archive on disk just to render the library.
-            var metadata = BuildSeriesMetadataFromCache(file);
-            if (metadata is null && allowDiskRead)
-            {
-                metadata = await _processor.GetSeriesMetadataAsync(file.FilePath, cancellationToken);
-            }
-            metadata ??= BuildSeriesMetadataFromFileName(file);
+            // The archive metadata cached in the database; a file the background scan has
+            // not read yet falls back to what its folder and file name say.
+            var metadata = BuildSeriesMetadataFromCache(file) ?? BuildSeriesMetadataFromFileName(file);
             var groupingTitle = ResolveGroupingTitle(metadata, file);
             var metadataAliases = ResolveMetadataAliases(metadata, groupingTitle);
             fileEntries.Add((file, metadata, groupingTitle, metadataAliases));
@@ -150,7 +215,7 @@ public partial class SeriesLibraryService
 
         foreach (var entry in fileEntries)
         {
-            var fileKey = NormalizeKey(entry.GroupingTitle);
+            var fileKey = SeriesKey.Normalize(entry.GroupingTitle);
             unionFind.Add(fileKey);
 
             UnionWithCacheKey(unionFind, fileKey, entry.GroupingTitle, aliasIndex);
@@ -176,7 +241,7 @@ public partial class SeriesLibraryService
             // path.
             var titleKeys = EnumerateAllRecordTitles(record)
                 .Where(title => !string.IsNullOrWhiteSpace(title))
-                .Select(NormalizeKey);
+                .Select(SeriesKey.Normalize);
             foreach (var titleKey in titleKeys)
             {
                 unionFind.Add(titleKey);
@@ -229,9 +294,7 @@ public partial class SeriesLibraryService
             }
             else if (!displayTitleByRecordKey.TryGetValue(record.NormalizedKey, out displayTitle!))
             {
-                displayTitle = (_seriesNameResolver is not null
-                    ? _seriesNameResolver.ResolveForRecord(record)
-                    : SeriesDisplayTitleResolver.Resolve(record, _settings.CurrentValue.DefaultPreferredLanguage)) ?? string.Empty;
+                displayTitle = _seriesNameResolver.ResolveForRecord(record);
                 displayTitleByRecordKey[record.NormalizedKey] = displayTitle;
             }
             if (string.IsNullOrWhiteSpace(displayTitle))
@@ -279,7 +342,10 @@ public partial class SeriesLibraryService
                     Aliases = new List<string>(),
                     HasExternalImage = imageRecord is not null,
                     ImageNormalizedKey = imageRecord?.NormalizedKey ?? record?.NormalizedKey,
-                    Synopsis = record?.Synopsis
+                    Synopsis = record?.Synopsis,
+                    Genres = record?.Genres ?? new List<string>(),
+                    PublicationStatus = record?.PublicationStatus,
+                    SiteUrl = record?.SiteUrl
                 };
 
                 if (record is not null)
@@ -331,7 +397,7 @@ public partial class SeriesLibraryService
                 Renamed = file.IsRenamed,
                 Normalized = file.IsNormalized,
                 Duplicate = file.IsDuplicate,
-                Read = file.IsRead
+                Read = bakeReadState && file.IsRead
             });
         }
 
@@ -390,7 +456,7 @@ public partial class SeriesLibraryService
             var titleForDedup = !string.IsNullOrWhiteSpace(accumulator.CanonicalTitle)
                 ? accumulator.CanonicalTitle
                 : accumulator.DisplayTitle;
-            var key = NormalizeKey(titleForDedup);
+            var key = SeriesKey.Normalize(titleForDedup);
             if (IsAmbiguousNormalizedKey(key))
             {
                 // Don't merge on degenerate keys (e.g. "unknown-series" or
@@ -472,6 +538,8 @@ public partial class SeriesLibraryService
                     survivor.MetadataSource = other.MetadataSource;
                 }
 
+                PromoteProviderDetails(survivor, other);
+
                 dropped.Add(other);
 
                 _logger.LogDebug(
@@ -492,6 +560,21 @@ public partial class SeriesLibraryService
         return groups
             .Where(kvp => !dropped.Contains(kvp.Value))
             .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Gives a merged series card the provider details it lacks from the card being merged
+    /// into it, so the card keeps appearing under the genre and status filters.
+    /// </summary>
+    private static void PromoteProviderDetails(SeriesAccumulator survivor, SeriesAccumulator other)
+    {
+        if (survivor.Genres.Count == 0)
+        {
+            survivor.Genres = other.Genres;
+        }
+
+        survivor.PublicationStatus ??= other.PublicationStatus;
+        survivor.SiteUrl ??= other.SiteUrl;
     }
 
     /// <summary>
@@ -598,13 +681,20 @@ public partial class SeriesLibraryService
         return true;
     }
 
+    /// <param name="UserId">The user a read-dependent view belongs to, or <c>null</c> for a view shared by every user.</param>
     private readonly record struct GroupsCacheKey(string? Filter, string? UserId);
 
-    private readonly record struct SnapshotVersions(long FileVersion, long MetadataVersion, string? DefaultPreferredLanguage);
+    /// <param name="ReadStateVersion">The owning user's read-state version for a per-user view; 0 for shared views.</param>
+    private readonly record struct SnapshotVersions(
+        long FileVersion,
+        long MetadataVersion,
+        string? DefaultPreferredLanguage,
+        long ReadStateVersion);
 
     /// <summary>
     /// An immutable (by convention) grouped view of the library for one file
-    /// filter and user. Shared across concurrent requests.
+    /// filter (and, for the read/unread filters, one user). Shared across
+    /// concurrent requests.
     /// </summary>
     private sealed class GroupsSnapshot
     {
@@ -707,6 +797,15 @@ public partial class SeriesLibraryService
 
         /// <summary>Plain-text synopsis from the matched external metadata record, if any.</summary>
         public string? Synopsis { get; set; }
+
+        /// <summary>Genres from the matched external metadata record; empty when none.</summary>
+        public List<string> Genres { get; set; } = new();
+
+        /// <summary>Publication status from the matched external metadata record, if any.</summary>
+        public string? PublicationStatus { get; set; }
+
+        /// <summary>The series' page at the provider, from the matched record, if any.</summary>
+        public string? SiteUrl { get; set; }
 
         /// <summary>True when a series-level cover image is cached locally.</summary>
         public bool HasExternalImage { get; set; }

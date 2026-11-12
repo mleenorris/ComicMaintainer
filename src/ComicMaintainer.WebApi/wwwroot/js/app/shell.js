@@ -19,15 +19,7 @@
             libraryHealthRequestInFlight = true;
 
             try {
-                const response = await fetch(apiUrl('/api/files/counts'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const stats = await response.json();
+                const stats = await apiFetch('/api/files/counts');
                 const total = stats.total || 0;
                 const processed = stats.processed || 0;
                 const unprocessed = stats.unprocessed || 0;
@@ -72,6 +64,7 @@
                     combineFoldersBtn.disabled = combinableFolders === 0;
                 }
             } catch (error) {
+                if (error.authHandled) return;
                 console.error('Failed to load library health:', error);
                 if (summary) {
                     summary.textContent = 'Unable to load library health right now.';
@@ -173,10 +166,7 @@
         
         async function getActiveJobFromServer() {
             try {
-                const response = await fetch(apiUrl('/api/active-job'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return null;
+                const response = await apiFetch('/api/active-job', { json: false });
                 if (!response.ok) {
                     console.error('Failed to get active job:', response.status);
                     return null;
@@ -279,6 +269,11 @@
         // default to true so the UI stays fully functional if the capability
         // lookup fails — the API is the real enforcement point.
         let userCapabilities = { canModifyLibrary: true, canAdminister: true };
+        // How the current user signed in (authMethod of GET /api/auth/user:
+        // 'jwt', 'authelia' or 'api_key'), or null until it is known. The
+        // Users page asks for the administrator's own password unless they
+        // signed in through Authelia.
+        let currentUserAuthMethod = null;
         let settingsLoaded = false;
         let settingsLoadRequest = 0;
 
@@ -287,10 +282,7 @@
         // this only avoids showing actions that would fail with a 403.
         async function loadCurrentUser() {
             try {
-                const response = await fetch(apiUrl('/api/auth/user'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(response)) return;
+                const response = await apiFetch('/api/auth/user', { json: false });
                 if (!response.ok) {
                     console.error('Failed to load current user:', response.status);
                     return;
@@ -300,6 +292,7 @@
                     canModifyLibrary: user.canModifyLibrary !== false,
                     canAdminister: user.canAdminister !== false
                 };
+                currentUserAuthMethod = typeof user.authMethod === 'string' ? user.authMethod : null;
                 applyCapabilities();
             } catch (error) {
                 console.error('Error loading current user:', error);
@@ -313,12 +306,16 @@
             document.body.classList.toggle('user-read-only', !userCapabilities.canModifyLibrary);
 
             // /api/diagnostics reports host paths, disk space and process
-            // memory, and scheduled jobs are server administration (backups,
-            // library-wide scans and auto-corrections), so both APIs are
+            // memory, the raw logs (/api/logs) name every user, role and
+            // failed sign-in, scheduled jobs are server administration
+            // (backups, library-wide scans and auto-corrections) and the
+            // Users page creates and changes accounts, so these APIs are
             // administrator-only. Hide the entry points rather than let them
             // open a page or panel that can only say "403".
             [
+                'usersMenuItem', 'sidebarUsersBtn', 'usersShortcutItem',
                 'diagnosticsMenuItem', 'sidebarDiagnosticsItem',
+                'logsMenuItem', 'sidebarLogsItem',
                 'scheduledJobsMenuItem', 'sidebarJobsBtn', 'scheduledJobsShortcutItem'
             ].forEach(id => {
                 const adminItem = document.getElementById(id);
@@ -345,7 +342,8 @@
                         el.disabled = !userCapabilities.canAdminister;
                         return;
                     }
-                    el.disabled = !settingsLoaded || (!isUserSetting && !userCapabilities.canAdminister);
+                    // A setting an environment variable pins stays read-only (see applySettingsEnvLocks).
+                    el.disabled = !settingsLoaded || (!isUserSetting && !userCapabilities.canAdminister) || el.hasAttribute('data-env-locked');
                 });
             }
 
@@ -354,9 +352,11 @@
                 if (button) button.disabled = !settingsLoaded || !userCapabilities.canAdminister;
             });
 
-            // Scheduled jobs are administrator-only (see the entry points
-            // above); anyone else who reaches the page gets a notice instead.
+            // Scheduled jobs and users are administrator-only (see the entry
+            // points above); anyone else who reaches those pages gets a notice
+            // instead.
             applyScheduledJobsCapabilities();
+            applyUsersCapabilities();
         }
 
         // =================================================================

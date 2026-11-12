@@ -9,21 +9,25 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class FileStoreService
 {
-    private static string ReadPathsCacheKey(string userId, long changeVersion) =>
-        $"FileStore.ReadPaths.{userId}|{changeVersion}";
+    private static string ReadPathsCacheKey(string userId, long readStateVersion) =>
+        $"FileStore.ReadPaths.{userId}|{readStateVersion}";
+
+    /// <inheritdoc />
+    public async Task<IReadOnlySet<string>> GetReadFilePathsAsync(string userId, CancellationToken cancellationToken = default)
+        => await GetUserReadPathsAsync(userId, cancellationToken);
 
     /// <summary>
     /// Paths the given user has marked read. Cached because the in-memory file list
     /// (<see cref="GetFilteredFilesAsync"/>) has no way to join against the database, so
-    /// without a cache every library render would re-read the whole set.
+    /// without a cache every library render would re-read the whole set. The cache key is
+    /// the user's own read-state version, so another user's changes never evict it.
     /// </summary>
     private async Task<HashSet<string>> GetUserReadPathsAsync(string userId, CancellationToken cancellationToken)
     {
-        var changeVersion = ChangeVersion;
-        var cacheKey = ReadPathsCacheKey(userId, changeVersion);
-        if (_memoryCache != null &&
-            _memoryCache.TryGetValue(cacheKey, out HashSet<string>? cached) &&
-            cached != null)
+        // Captured before reading: a change committed while we read bumps the version, so
+        // whatever we cache here is never served for the newer version.
+        var cacheKey = ReadPathsCacheKey(userId, GetReadStateVersion(userId));
+        if (_memoryCache.TryGetValue(cacheKey, out HashSet<string>? cached) && cached != null)
         {
             return cached;
         }
@@ -36,18 +40,20 @@ public partial class FileStoreService
             .ToListAsync(cancellationToken);
 
         var set = new HashSet<string>(paths, StringComparer.Ordinal);
-        _memoryCache?.Set(cacheKey, set, ReadPathsCacheTtl);
+        _memoryCache.Set(cacheKey, set, ReadPathsCacheTtl);
         return set;
     }
 
     /// <summary>
-    /// Drops the cached read-path set for a user after their read state changes, so the
-    /// next library render reflects the change immediately rather than after the TTL.
+    /// Records that a user's read state changed (after the change was committed). Only that
+    /// user's read-state version moves: the shared <see cref="ChangeVersion"/>, and with it
+    /// every other user's cached library and ETag, is left alone.
     /// </summary>
     private void InvalidateUserReadPaths(string userId)
     {
-        _memoryCache?.Remove(ReadPathsCacheKey(userId, ChangeVersion));
-        MarkChanged();
+        var stale = ReadPathsCacheKey(userId, GetReadStateVersion(userId));
+        MarkReadStateChanged(userId);
+        _memoryCache.Remove(stale);
     }
 
     /// <summary>
@@ -218,6 +224,12 @@ public partial class FileStoreService
                 "Updated read status for {FilePath} to {Status} for user {UserId}",
                 SanitizeForLogging(filePath), read, SanitizeForLogging(userId));
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller gave up (for example the request was aborted); that is not a
+            // database error and must not be logged as one.
+            throw;
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _logger.LogError(ex, "Error updating read status in database for {FilePath}", SanitizeForLogging(filePath));
@@ -239,6 +251,9 @@ public partial class FileStoreService
             return;
         }
 
+        // One transaction, no per-file fallback: a fallback that retried every path in its own
+        // transaction turned one failed (or cancelled) bulk save into thousands of writes
+        // competing with the processing workers, and one logged error per file.
         try
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -289,48 +304,135 @@ public partial class FileStoreService
             InvalidateUserReadPaths(userId);
             _logger.LogDebug("Bulk-updated read status for {Total} files for user {UserId}", paths.Count, SanitizeForLogging(userId));
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _logger.LogError(ex, "Error bulk-updating read status; falling back to per-file updates");
-            foreach (var filePath in paths)
-            {
-                await MarkFileReadAsync(filePath, read, cancellationToken);
-            }
+            _logger.LogError(ex, "Error bulk-updating read status for {Total} files", paths.Count);
+            throw;
         }
     }
 
-    public async Task SaveReadingProgressAsync(string filePath, int currentPage, CancellationToken cancellationToken = default)
+    public async Task<int> MarkScopeReadAsync(FileReadScope scope, bool read, CancellationToken cancellationToken = default)
     {
-        if (currentPage < 1)
-        {
-            _logger.LogWarning("Invalid page number {Page} for {FilePath}, must be >= 1", currentPage, SanitizeForLogging(filePath));
-            return;
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
         var userId = CurrentUserId;
         if (userId == null)
         {
-            _logger.LogDebug(
-                "Ignoring reading-progress update for {FilePath}: no user in scope",
-                SanitizeForLogging(filePath));
-            return;
+            _logger.LogDebug("Ignoring {Scope} read-status update: no user in scope", scope.Kind);
+            return 0;
         }
 
-        try
-        {
-            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var scopedFiles = await ScopeFilesAsync(dbContext, scope, cancellationToken);
+        var scopedPaths = scopedFiles.Select(f => f.FilePath);
+        var now = DateTime.UtcNow;
 
-            await UpsertUserReadStatusAsync(dbContext, userId, filePath, status =>
+        // Every statement runs in one transaction: a failure or a cancellation part-way rolls
+        // the whole change back instead of leaving the scope half read.
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+        var fileCount = await scopedFiles.CountAsync(cancellationToken);
+
+        if (read)
+        {
+            await dbContext.UserFileReadStatuses
+                .Where(s => s.UserId == userId && scopedPaths.Contains(s.FilePath))
+                .ExecuteUpdateAsync(set => set
+                    .SetProperty(s => s.IsRead, true)
+                    .SetProperty(s => s.LastReadDate, now)
+                    .SetProperty(s => s.UpdatedAt, now), cancellationToken);
+
+            // Files this user has never touched have no row yet; only their paths are read.
+            var missing = await scopedPaths
+                .Where(path => !dbContext.UserFileReadStatuses.Any(s => s.UserId == userId && s.FilePath == path))
+                .ToListAsync(cancellationToken);
+            dbContext.UserFileReadStatuses.AddRange(missing.Select(path => new UserFileReadStatusEntity
             {
-                status.CurrentPage = currentPage;
-                status.LastReadDate = DateTime.UtcNow;
-                status.UpdatedAt = DateTime.UtcNow;
-            }, cancellationToken);
-            _logger.LogDebug("Updated reading progress for {FilePath} to page {Page}", SanitizeForLogging(filePath), currentPage);
+                UserId = userId,
+                FilePath = path,
+                IsRead = true,
+                CurrentPage = 1,
+                LastReadDate = now,
+                CreatedAt = now,
+                UpdatedAt = now,
+            }));
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            // Keep "Continue Reading" (ReadingProgress) in step, as MarkFilesReadAsync does.
+            await dbContext.ReadingProgresses
+                .Where(p => p.UserId == userId && scopedPaths.Contains(p.ContentId))
+                .ExecuteUpdateAsync(set => set
+                    .SetProperty(p => p.CurrentPage, p => p.TotalPages > 0 ? p.TotalPages : p.CurrentPage)
+                    .SetProperty(p => p.PercentComplete, 100)
+                    .SetProperty(p => p.CompletedAt, p => p.CompletedAt ?? now)
+                    .SetProperty(p => p.LastReadAt, now)
+                    .SetProperty(p => p.UpdatedAt, now), cancellationToken);
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        else
         {
-            _logger.LogError(ex, "Error saving reading progress for {FilePath}", SanitizeForLogging(filePath));
+            // A missing row already means unread, so only existing rows change.
+            await dbContext.UserFileReadStatuses
+                .Where(s => s.UserId == userId && scopedPaths.Contains(s.FilePath))
+                .ExecuteUpdateAsync(set => set
+                    .SetProperty(s => s.IsRead, false)
+                    .SetProperty(s => s.UpdatedAt, now), cancellationToken);
+
+            await dbContext.ReadingProgresses
+                .Where(p => p.UserId == userId && scopedPaths.Contains(p.ContentId))
+                .ExecuteUpdateAsync(set => set
+                    .SetProperty(p => p.CurrentPage, 1)
+                    .SetProperty(p => p.PercentComplete, 0)
+                    .SetProperty(p => p.CompletedAt, (DateTime?)null)
+                    .SetProperty(p => p.LastReadAt, now)
+                    .SetProperty(p => p.UpdatedAt, now), cancellationToken);
+        }
+
+        // The resume page of a file with reading progress follows that progress.
+        await dbContext.UserFileReadStatuses
+            .Where(s => s.UserId == userId
+                && scopedPaths.Contains(s.FilePath)
+                && dbContext.ReadingProgresses.Any(p => p.UserId == userId && p.ContentId == s.FilePath))
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(s => s.CurrentPage, s => dbContext.ReadingProgresses
+                    .Where(p => p.UserId == userId && p.ContentId == s.FilePath)
+                    .Select(p => p.CurrentPage)
+                    .First())
+                .SetProperty(s => s.UpdatedAt, now), cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
+        InvalidateUserReadPaths(userId);
+
+        _logger.LogInformation(
+            "Marked {Count} file(s) in scope {Scope} as {Status} for user {UserId}",
+            fileCount, scope.Kind, read ? "read" : "unread", SanitizeForLogging(userId));
+        return fileCount;
+    }
+
+    /// <summary>The tracked rows a <see cref="FileReadScope"/> selects, as a query.</summary>
+    private async Task<IQueryable<ComicFileEntity>> ScopeFilesAsync(
+        ComicMaintainerDbContext dbContext,
+        FileReadScope scope,
+        CancellationToken cancellationToken)
+    {
+        var files = dbContext.ComicFiles.AsNoTracking();
+        switch (scope.Kind)
+        {
+            case FileReadScopeKind.Library:
+                return files;
+            case FileReadScopeKind.Folder:
+                // The same folder-key mapping the folder's file list uses.
+                var watchedDir = _settings.CurrentValue?.WatchedDirectory;
+                var directories = (await GetDistinctDirectoriesAsync(dbContext, cancellationToken))
+                    .Where(d => string.Equals(ComputeFolderKeyFromDirectory(d, watchedDir), scope.FolderKey, StringComparison.Ordinal))
+                    .ToList();
+                return files.Where(f => directories.Contains(f.Directory));
+            default:
+                var paths = scope.FilePaths ?? Array.Empty<string>();
+                return files.Where(f => paths.Contains(f.FilePath));
         }
     }
 

@@ -264,7 +264,7 @@ public class EmailDeliveryUiTests
 
         Assert.Contains("/api/email/deliveries?limit=${EMAIL_DELIVERY_HISTORY_PAGE_SIZE}&offset=${offset}", js);
         Assert.Contains("/api/email/deliveries/${encodeURIComponent(id)}/cancel", js);
-        Assert.Contains("'/api/email/deliveries/cancel-pending'", js);
+        Assert.Contains("`/api/email/deliveries/cancel-pending$", js);
         Assert.Matches(
             new Regex(@"<button[^>]*data-requires-write[^>]*onclick=""cancelEmailDelivery\('\$\{jsArg\(delivery\.id\)\}', this\)"""),
             js);
@@ -278,7 +278,7 @@ public class EmailDeliveryUiTests
         Assert.Matches(new Regex(@"id=""emailMaxSendsPerHour""[^>]*min=""0""[^>]*max=""10000"""), html);
         Assert.Matches(new Regex(@"id=""emailMaxSendsPerDay""[^>]*min=""0""[^>]*max=""100000"""), html);
         Assert.Matches(new Regex(@"id=""emailMinSecondsBetweenSends""[^>]*min=""0""[^>]*max=""86400"""), html);
-        Assert.Contains("/api/settings/email-rate-limit", WwwrootFiles.ReadAppScripts());
+        Assert.Contains("settingsUpdate.emailRateLimit = {", WwwrootFiles.ReadAppScripts());
     }
 
     [Fact]
@@ -311,7 +311,7 @@ public class EmailDeliveryUiTests
         var js = WwwrootFiles.ReadAppScripts();
 
         Assert.Matches(
-            new Regex(@"path: '/api/settings/email',.*?saved: \(\) => \{\s*emailStatusCache = null;", RegexOptions.Singleline),
+            new Regex(@"await saveAllSettings\(settingsUpdate\);.*?emailStatusCache = null;", RegexOptions.Singleline),
             js);
     }
 
@@ -390,7 +390,7 @@ public class EmailDeliveryUiTests
             new Regex(@"if \(error\?\.status != null\) return;", RegexOptions.Singleline),
             js);
         Assert.Matches(
-            new Regex(@"if \(handleAuthError\(response\)\) \{\s*const error = new Error\('Authentication required'\);\s*error.status = response.status;", RegexOptions.Singleline),
+            new Regex(@"function apiSessionEndedError\(status = 401\) \{\s*const error = new Error\('Authentication required'\);\s*error.status = status;", RegexOptions.Singleline),
             js);
     }
 }

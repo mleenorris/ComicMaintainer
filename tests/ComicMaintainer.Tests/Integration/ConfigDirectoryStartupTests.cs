@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -60,6 +61,41 @@ public sealed class ConfigDirectoryStartupTests : IDisposable
         Assert.NotEmpty(Directory.GetFiles(configDir, "app*.log"));
         // CONFIG_DIR wins over AppSettings:ConfigDirectory, so nothing is written there.
         Assert.False(Directory.Exists(ConfiguredDirectory));
+    }
+
+    [Fact]
+    public async Task Upgrade_BacksTheDatabaseUpBeforeApplyingItsMigrations()
+    {
+        var configDir = Path.Join(_root, "config-dir");
+        _environment.Set("CONFIG_DIR", configDir);
+        Directory.CreateDirectory(configDir);
+        var database = Path.Join(configDir, "comicmaintainer.db");
+        string previous;
+        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+            .UseSqlite(new SqliteConnectionStringBuilder { DataSource = database, Pooling = false }.ToString())
+            .Options;
+        await using (var older = new ComicMaintainerDbContext(options))
+        {
+            // The database as the previous version left it: every migration but the newest applied.
+            previous = older.Database.GetMigrations().ToList()[^2];
+            await older.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>().MigrateAsync(previous);
+        }
+
+        await using var factory = CreateFactory();
+        _ = factory.Services;
+
+        var backup = Assert.Single(Directory.GetFiles(Path.Join(configDir, "backups"), "comicmaintainer-*-premigrate.db"));
+        // The migrations finished, so the next upgrade is not mistaken for a retry of this one.
+        Assert.Empty(Directory.GetFiles(configDir, "*.migration-attempt"));
+        await using (var backedUp = new ComicMaintainerDbContext(
+            new DbContextOptionsBuilder<ComicMaintainerDbContext>().UseSqlite($"Data Source={backup};Pooling=False").Options))
+        {
+            Assert.Equal(previous, (await backedUp.Database.GetAppliedMigrationsAsync()).Last());
+        }
+        await using (var migrated = new ComicMaintainerDbContext(options))
+        {
+            Assert.Empty(await migrated.Database.GetPendingMigrationsAsync());
+        }
     }
 
     [Fact]

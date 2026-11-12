@@ -4,6 +4,7 @@ using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Controllers;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -59,7 +60,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
     private FilesController CreateController(
         IEventBroadcaster? broadcaster = null,
         ISeriesNameResolver? resolver = null,
-        ScheduledJobsHostedService? scheduledJobs = null) =>
+        IScheduledJobRunner? scheduledJobs = null) =>
         new(
             _fileStore.Object,
             _processor.Object,
@@ -67,9 +68,12 @@ public sealed class FilesControllerMetadataTests : IDisposable
             _seriesLibrary.Object,
             NullLogger<FilesController>.Instance,
             _settings.Object,
-            eventBroadcaster: broadcaster,
-            seriesNameResolver: resolver,
-            scheduledJobsHostedService: scheduledJobs);
+            TestFolderCombineService.Create(_fileStore.Object, _processor.Object, Mock.Of<IBatchJobRegistry>(), _history.Object, _seriesLibrary.Object, _settings.Object),
+            broadcaster ?? Mock.Of<IEventBroadcaster>(),
+            resolver ?? Mock.Of<ISeriesNameResolver>(),
+            scheduledJobs ?? Mock.Of<IScheduledJobRunner>(),
+            new FileOperationLock(),
+            Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
 
     private string InRoot(params string[] parts) => Path.Join(new[] { _root }.Concat(parts).ToArray());
 
@@ -140,15 +144,13 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
-    public async Task GetMetadata_ProcessorThrows_Returns500()
+    public async Task GetMetadata_ProcessorThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _processor.Setup(p => p.GetMetadataAsync(path, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("archive is corrupt"));
 
-        var result = await CreateController().GetMetadata(path);
-
-        AssertStatus(result.Result, 500, "Error retrieving metadata");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().GetMetadata(path));
     }
 
     // ---------------------------------------------------------- GetSeriesResolution
@@ -171,15 +173,6 @@ public sealed class FilesControllerMetadataTests : IDisposable
 
         AssertStatus(result.Result, 400, "File path is outside the allowed directory");
         _resolver.VerifyNoOtherCalls();
-    }
-
-    [Fact]
-    public async Task GetSeriesResolution_NoResolverRegistered_Returns503()
-    {
-        var result = await CreateController().GetSeriesResolution(InRoot("Saga 001.cbz"), CancellationToken.None);
-
-        AssertStatus(result.Result, 503, "Series name resolver not available");
-        _processor.Verify(p => p.GetMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -256,16 +249,14 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
-    public async Task GetSeriesResolution_ResolverThrows_Returns500()
+    public async Task GetSeriesResolution_ResolverThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _resolver
             .Setup(r => r.ResolveAsync(path, It.IsAny<ComicMetadata?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("resolver offline"));
 
-        var result = await CreateController(resolver: _resolver.Object).GetSeriesResolution(path, CancellationToken.None);
-
-        AssertStatus(result.Result, 500, "Error resolving series");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController(resolver: _resolver.Object).GetSeriesResolution(path, CancellationToken.None));
     }
 
     // -------------------------------------------------------------- UpdateMetadata
@@ -387,19 +378,33 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateMetadata_ProcessorThrows_Returns500AndRecordsException()
+    public async Task UpdateMetadata_ProcessorThrows_EscapesAndRecordsTheFailure()
     {
         var path = InRoot("Saga 001.cbz");
         _processor.Setup(p => p.UpdateMetadataAsync(path, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("disk full"));
 
-        var result = await CreateController(_broadcaster.Object).UpdateMetadata(path, new ComicMetadata());
-
-        AssertStatus(result, 500, "Error updating metadata");
+        await Assert.ThrowsAsync<IOException>(() => CreateController(_broadcaster.Object).UpdateMetadata(path, new ComicMetadata()));
         var entry = SingleHistoryEntry();
         Assert.False(entry.Success);
         Assert.Equal("disk full", entry.ErrorMessage);
         _broadcaster.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateMetadata_ProcessorThrowsAndHistoryFails_StillReportsTheOriginalFailure()
+    {
+        var path = InRoot("Saga 001.cbz");
+        var failure = new IOException("disk full");
+        _processor.Setup(p => p.UpdateMetadataAsync(path, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(failure);
+        _history
+            .Setup(h => h.AddHistoryEntryAsync(It.IsAny<ProcessingHistoryEntry>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        var thrown = await Assert.ThrowsAsync<IOException>(() => CreateController(_broadcaster.Object).UpdateMetadata(path, new ComicMetadata()));
+
+        Assert.Same(failure, thrown);
     }
 
     // --------------------------------------------------------------- PatchMetadata
@@ -553,7 +558,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
             .UseInMemoryDatabase($"fc-n2a-patch-{Guid.NewGuid():N}")
             .Options);
         var jobService = new ScheduledJobService(dbFactory, new[] { handler.Object }, NullLogger<ScheduledJobService>.Instance);
-        var hostedService = new ScheduledJobsHostedService(jobService, NullLogger<ScheduledJobsHostedService>.Instance);
+        var hostedService = new ScheduledJobsHostedService(jobService, NullLogger<ScheduledJobsHostedService>.Instance, Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
         _fileStore.Setup(f => f.GetFileAsync(path, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ComicFile { FilePath = path, MetadataVersion = 7 });
 
@@ -631,27 +636,27 @@ public sealed class FilesControllerMetadataTests : IDisposable
         var finishFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var writes = 0;
         _processor
-            .Setup(p => p.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
-            .Returns(async () =>
+            .Setup(p => p.WriteMetadataAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string path, ComicMetadata _, ComicMetadataFieldFlags _, CancellationToken _) =>
             {
                 if (Interlocked.Increment(ref writes) == 1)
                 {
                     writingFirst.TrySetResult();
                     await finishFirst.Task;
                 }
-                return true;
+                return new MetadataWriteResult(MetadataWriteOutcome.Written, path);
             });
         _resolver
             .Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesNameResolution());
         var backfill = new MetadataBackfillJobHandler(
-            _fileStore.Object, _processor.Object, _resolver.Object, NullLogger<MetadataBackfillJobHandler>.Instance);
+            _fileStore.Object, _processor.Object, _resolver.Object, new ComicMaintainer.Core.Notifications.LibraryActivityTracker(), NullLogger<MetadataBackfillJobHandler>.Instance);
         var dbFactory = new InMemoryDbFactory(new DbContextOptionsBuilder<ComicMaintainerDbContext>()
             .UseInMemoryDatabase($"fc-n2a-patch-{Guid.NewGuid():N}")
             .Options);
         var jobService = new ScheduledJobService(dbFactory, new IScheduledJobHandler[] { backfill }, NullLogger<ScheduledJobService>.Instance);
         var controller = CreateController(
-            scheduledJobs: new ScheduledJobsHostedService(jobService, NullLogger<ScheduledJobsHostedService>.Instance));
+            scheduledJobs: new ScheduledJobsHostedService(jobService, NullLogger<ScheduledJobsHostedService>.Instance, Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>()));
 
         var firstResult = await controller.PatchMetadata(
             first, new PatchMetadataRequest { Metadata = new ComicMetadata { Title = "One" } }, CancellationToken.None);
@@ -663,8 +668,8 @@ public sealed class FilesControllerMetadataTests : IDisposable
         Assert.IsType<AcceptedResult>(firstResult);
         Assert.IsType<AcceptedResult>(secondResult);
         await secondWrittenBack.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        _processor.Verify(p => p.UpdateMetadataAsync(
-            second, It.Is<ComicMetadata>(m => m.Title == "Two"), It.IsAny<CancellationToken>()), Times.Once);
+        _processor.Verify(p => p.WriteMetadataAsync(
+            second, It.Is<ComicMetadata>(m => m.Title == "Two"), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()), Times.Once);
         lock (pending)
         {
             Assert.Empty(pending);
@@ -700,17 +705,15 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
-    public async Task PatchMetadata_UnexpectedFailure_Returns500()
+    public async Task PatchMetadata_UnexpectedFailure_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _fileStore
             .Setup(f => f.ApplyUserMetadataEditAsync(path, It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("db locked"));
 
-        var result = await CreateController()
-            .PatchMetadata(path, new PatchMetadataRequest { Metadata = new ComicMetadata { Title = "One" } }, CancellationToken.None);
-
-        AssertStatus(result, 500, "Error patching metadata");
+        await Assert.ThrowsAsync<IOException>(() => CreateController()
+            .PatchMetadata(path, new PatchMetadataRequest { Metadata = new ComicMetadata { Title = "One" } }, CancellationToken.None));
     }
 
     // ------------------------------------------------------------- GetFileTags
@@ -739,14 +742,12 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
-    public async Task GetFileTags_ProcessorThrows_Returns500()
+    public async Task GetFileTags_ProcessorThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _processor.Setup(p => p.GetMetadataAsync(path, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("corrupt"));
 
-        var result = await CreateController().GetFileTags(Encode(path));
-
-        AssertStatus(result.Result, 500, "Error getting tags");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().GetFileTags(Encode(path)));
     }
 
     // ---------------------------------------------------------- UpdateFileTags
@@ -813,15 +814,13 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateFileTags_ProcessorThrows_Returns500()
+    public async Task UpdateFileTags_ProcessorThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _processor.Setup(p => p.UpdateMetadataAsync(path, It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("read-only"));
 
-        var result = await CreateController().UpdateFileTags(Encode(path), new ComicMetadata());
-
-        AssertStatus(result, 500, "Error updating tags");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().UpdateFileTags(Encode(path), new ComicMetadata()));
     }
 
     // ------------------------------------------------------- RemoveFileMetadata
@@ -869,7 +868,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
     public async Task RemoveFileMetadata_ProcessorReportsFailure_ReturnsBadRequestAndRecordsFailure()
     {
         var path = CreateRealFile("Saga 001.cbz");
-        _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(MetadataWriteResult.Failed(path));
 
         var result = await CreateController(_broadcaster.Object).RemoveFileMetadata(Encode(path));
 
@@ -885,7 +884,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
     {
         var path = CreateRealFile("Saga 001.cbz");
         using var cts = new CancellationTokenSource();
-        _processor.Setup(p => p.RemoveMetadataAsync(path, cts.Token)).ReturnsAsync(true);
+        _processor.Setup(p => p.RemoveMetadataAsync(path, cts.Token)).ReturnsAsync(new MetadataWriteResult(MetadataWriteOutcome.Written, path));
         _fileStore
             .Setup(f => f.ClearProcessedStatusAsync(It.Is<IEnumerable<string>>(paths => paths.SequenceEqual(new[] { path })), cts.Token))
             .ReturnsAsync(1);
@@ -901,10 +900,31 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
+    public async Task RemoveFileMetadata_ArchiveConvertedToCbz_UsesTheNewPathForStateHistoryAndBroadcast()
+    {
+        var path = CreateRealFile("Saga 005.cbr");
+        var converted = Path.ChangeExtension(path, ".cbz");
+        _processor
+            .Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MetadataWriteResult(MetadataWriteOutcome.ConvertedToCbz, converted));
+        _fileStore
+            .Setup(f => f.ClearProcessedStatusAsync(It.Is<IEnumerable<string>>(paths => paths.SequenceEqual(new[] { converted })), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+
+        var result = await CreateController(_broadcaster.Object).RemoveFileMetadata(Encode(path));
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(1, Prop(ok.Value, "cleared"));
+        Assert.Equal(converted, Prop(ok.Value, "filePath"));
+        Assert.Equal(converted, SingleHistoryEntry().FilePath);
+        _broadcaster.Verify(b => b.BroadcastFileProcessedAsync("Saga 005.cbz", true, null), Times.Once);
+    }
+
+    [Fact]
     public async Task RemoveFileMetadata_SuccessWithoutBroadcaster_ReturnsOk()
     {
         var path = CreateRealFile("Saga 002.cbz");
-        _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(new MetadataWriteResult(MetadataWriteOutcome.Written, path));
         _fileStore.Setup(f => f.ClearProcessedStatusAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>())).ReturnsAsync(0);
 
         var result = await CreateController().RemoveFileMetadata(Encode(path));
@@ -918,7 +938,7 @@ public sealed class FilesControllerMetadataTests : IDisposable
     public async Task RemoveFileMetadata_SuccessButBroadcastThrows_StillReturnsOk()
     {
         var path = CreateRealFile("Saga 003.cbz");
-        _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(new MetadataWriteResult(MetadataWriteOutcome.Written, path));
         _broadcaster
             .Setup(b => b.BroadcastFileProcessedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
             .ThrowsAsync(new InvalidOperationException("hub down"));
@@ -929,15 +949,30 @@ public sealed class FilesControllerMetadataTests : IDisposable
     }
 
     [Fact]
-    public async Task RemoveFileMetadata_ProcessorThrows_Returns500AndRecordsException()
+    public async Task RemoveFileMetadata_ProcessorThrows_EscapesAndRecordsTheFailure()
     {
         var path = CreateRealFile("Saga 004.cbz");
         _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("locked"));
 
-        var result = await CreateController().RemoveFileMetadata(Encode(path));
-
-        AssertStatus(result, 500, "Error removing metadata");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().RemoveFileMetadata(Encode(path)));
         var entry = SingleHistoryEntry();
         Assert.Equal((path, "RemoveMetadata", false, "locked"), (entry.FilePath, entry.Action, entry.Success, entry.ErrorMessage));
+    }
+
+    [Fact]
+    public async Task RemoveFileMetadata_CancelledByTheClient_EscapesWithoutRecordingAFailure()
+    {
+        var path = CreateRealFile("Saga 005.cbz");
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        _processor.Setup(p => p.RemoveMetadataAsync(path, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => CreateController().RemoveFileMetadata(Encode(path), cts.Token));
+
+        lock (_historyEntries)
+        {
+            Assert.Empty(_historyEntries);
+        }
     }
 }

@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -14,12 +15,14 @@ public class FileNamingAuditJobHandlerTests
 
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<IBatchJobRegistry> _jobRegistry = new();
     private readonly Guid _renameJobId = Guid.NewGuid();
     private List<string>? _queuedPaths;
     private bool? _queuedWithForce;
 
     public FileNamingAuditJobHandlerTests()
     {
+        _jobRegistry.SetupWaitForAnyJobHonoursCancellation();
         SetupTrackedFiles(
             new ComicFile { FilePath = Renamed, IsRenamed = true },
             new ComicFile { FilePath = Unrenamed1, IsRenamed = false },
@@ -35,13 +38,13 @@ public class FileNamingAuditJobHandlerTests
     }
 
     private FileNamingAuditJobHandler CreateHandler() =>
-        new(_fileStore.Object, _processor.Object, NullLogger<FileNamingAuditJobHandler>.Instance);
+        new(_fileStore.Object, _processor.Object, _jobRegistry.Object, NullLogger<FileNamingAuditJobHandler>.Instance);
 
     private void SetupTrackedFiles(params ComicFile[] files) =>
         _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(files);
 
     private void SetupRenameJob(JobStatus status, int processed, int failed) =>
-        _processor.Setup(p => p.GetJob(_renameJobId)).Returns(new ProcessingJob
+        _jobRegistry.Setup(p => p.WaitForCompletionAsync(_renameJobId, It.IsAny<CancellationToken>())).ReturnsAsync(new ProcessingJob
         {
             JobId = _renameJobId,
             Status = status,
@@ -114,7 +117,7 @@ public class FileNamingAuditJobHandlerTests
         Assert.Equal($"Evaluated 2/3 file(s): 2 processed, 0 failed (status: {finalStatus}).", summary);
         Assert.Equal(new[] { Unrenamed1, Unrenamed2 }, _queuedPaths);
         Assert.False(_queuedWithForce);
-        _processor.Verify(p => p.GetJob(_renameJobId), Times.Once);
+        _jobRegistry.Verify(p => p.WaitForCompletionAsync(_renameJobId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -133,7 +136,7 @@ public class FileNamingAuditJobHandlerTests
     [Fact]
     public async Task ExecuteAsync_RenameJobRecordEvicted_ReportsQueuedCount()
     {
-        _processor.Setup(p => p.GetJob(_renameJobId)).Returns(default(ProcessingJob?));
+        _jobRegistry.Setup(p => p.WaitForCompletionAsync(_renameJobId, It.IsAny<CancellationToken>())).ReturnsAsync(default(ProcessingJob?));
 
         var summary = await CreateHandler().ExecuteAsync("""{"autoCorrect":true}""", CancellationToken.None);
 
@@ -144,18 +147,18 @@ public class FileNamingAuditJobHandlerTests
     public async Task ExecuteAsync_CancelledWhileWaitingForTheRenameJob_Throws()
     {
         using var cts = new CancellationTokenSource();
-        _processor.Setup(p => p.GetJob(_renameJobId))
+        _jobRegistry.Setup(p => p.WaitForCompletionAsync(_renameJobId, It.IsAny<CancellationToken>()))
             .Callback(() => cts.Cancel())
-            .Returns(new ProcessingJob { JobId = _renameJobId, Status = JobStatus.Running });
+            .ThrowsAsync(new OperationCanceledException());
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => CreateHandler().ExecuteAsync("""{"autoCorrect":true}""", cts.Token));
 
-        _processor.Verify(p => p.GetJob(_renameJobId), Times.Once);
+        _jobRegistry.Verify(p => p.WaitForCompletionAsync(_renameJobId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task ExecuteAsync_CancelledWhileQueueingTheRename_ThrowsWithoutPolling()
+    public async Task ExecuteAsync_CancelledWhileQueueingTheRename_Throws()
     {
         using var cts = new CancellationTokenSource();
         _processor
@@ -165,8 +168,6 @@ public class FileNamingAuditJobHandlerTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => CreateHandler().ExecuteAsync("""{"autoCorrect":true}""", cts.Token));
-
-        _processor.Verify(p => p.GetJob(It.IsAny<Guid>()), Times.Never);
     }
 
     [Fact]

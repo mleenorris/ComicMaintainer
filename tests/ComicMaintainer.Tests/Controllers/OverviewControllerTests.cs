@@ -1,24 +1,21 @@
 using System.Security.Claims;
-using System.Text.Json;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
 using Moq;
 
 namespace ComicMaintainer.Tests.Controllers;
 
 /// <summary>
 /// The overview page is per user (Continue Reading), so the controller must
-/// refuse callers without an identity and hide service failures behind a
-/// generic 500.
+/// refuse callers without an identity and let service failures reach the
+/// global exception handler.
 /// </summary>
 public class OverviewControllerTests
 {
     private readonly Mock<IOverviewService> _overview = new();
-    private readonly Mock<ILogger<OverviewController>> _logger = new();
 
     [Fact]
     public async Task Get_ReturnsTheOverviewOfTheCallingUser()
@@ -51,28 +48,19 @@ public class OverviewControllerTests
     }
 
     [Fact]
-    public async Task Get_ServiceFailureIsAGenericServerErrorAndLogged()
+    public async Task Get_ServiceFailureEscapes()
     {
         var failure = new InvalidOperationException("SELECT failed: secret connection detail");
         _overview.Setup(o => o.GetOverviewAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(failure);
 
-        var result = await CreateController(new Claim(ClaimTypes.NameIdentifier, "user-7")).Get();
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => CreateController(new Claim(ClaimTypes.NameIdentifier, "user-7")).Get());
 
-        var error = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(500, error.StatusCode);
-        var json = JsonSerializer.SerializeToElement(error.Value);
-        Assert.Equal("Error building overview", json.GetProperty("error").GetString());
-        Assert.DoesNotContain("secret", json.GetRawText());
-        _logger.Verify(l => l.Log(
-            LogLevel.Error,
-            It.IsAny<EventId>(),
-            It.IsAny<It.IsAnyType>(),
-            failure,
-            (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()), Times.Once);
+        Assert.Same(failure, thrown);
     }
 
     private OverviewController CreateController(params Claim[] claims) =>
-        new(_overview.Object, _logger.Object)
+        new(_overview.Object)
         {
             ControllerContext = new ControllerContext
             {

@@ -17,7 +17,9 @@ namespace ComicMaintainer.Core.Services;
 /// Security:
 /// - Only http and https remote URLs are accepted.
 /// - Hostnames that resolve to private / loopback / link-local IPs are
-///   rejected to mitigate SSRF (consistent with project security review).
+///   rejected to mitigate SSRF, before the request and again when the
+///   connection is made (DNS rebinding); redirects are followed here, up to
+///   three, and each hop is checked the same way (see <see cref="PublicNetworkGuard"/>).
 /// - Content-type must be one of <see cref="AllowedContentTypes"/>.
 /// - First bytes are checked against the corresponding image magic numbers
 ///   to prevent HTML / SVG / executable payloads from being served back as
@@ -44,6 +46,9 @@ public class SeriesImageStore : ISeriesImageStore
         };
 
     private static readonly TimeSpan DownloadTimeout = TimeSpan.FromSeconds(15);
+
+    // Redirects followed per download; each hop is checked like the first URL (see SendFollowingCheckedRedirectsAsync).
+    private const int MaxRedirects = 3;
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IOptionsMonitor<AppSettings> _settings;
@@ -76,19 +81,12 @@ public class SeriesImageStore : ISeriesImageStore
 
         var settings = _settings.CurrentValue;
         ValidateRemoteUrl(remoteImageUrl, out var uri);
-        await EnsurePublicHostAsync(uri, cancellationToken);
 
         using var httpClient = _httpClientFactory.CreateClient(HttpClientName);
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(DownloadTimeout);
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("image/*"));
-        // Decline redirects we can't re-validate; HttpClient follows by default
-        // but each redirect target is re-resolved by the underlying socket
-        // layer using the original DNS, so we can't easily re-check the host
-        // here. Disabling cross-origin redirects entirely is the safest stance.
-        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        using var response = await SendFollowingCheckedRedirectsAsync(httpClient, uri, cancellationToken, cts.Token);
         if (!response.IsSuccessStatusCode)
         {
             throw new InvalidOperationException(
@@ -369,83 +367,106 @@ public class SeriesImageStore : ISeriesImageStore
     }
 
     /// <summary>
-    /// Resolve the URL's host and reject any address that points at a private,
-    /// loopback, link-local, multicast or otherwise non-public range. This
-    /// blocks SSRF against internal services (metadata endpoints,
-    /// http://localhost, http://169.254.169.254, etc.).
+    /// Sends the GET for <paramref name="uri"/>, following up to <see cref="MaxRedirects"/> redirects itself: the
+    /// client follows none (see <see cref="PublicNetworkGuard.CreateHandler"/>), so that every hop's URL and host are
+    /// checked like the first one's. An https URL may not redirect to http.
     /// </summary>
-    private static async Task EnsurePublicHostAsync(Uri uri, CancellationToken cancellationToken)
+    private static async Task<HttpResponseMessage> SendFollowingCheckedRedirectsAsync(
+        HttpClient httpClient,
+        Uri uri,
+        CancellationToken callerToken,
+        CancellationToken requestToken)
     {
-        IPAddress[] addresses;
-        try
+        for (var redirects = 0; ; redirects++)
         {
-            addresses = await Dns.GetHostAddressesAsync(uri.Host, cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // The request was cancelled or timed out; the host isn't unresolvable.
-            throw;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            throw new InvalidOperationException($"Cannot resolve image host: {ex.Message}", ex);
-        }
+            await EnsurePublicHostAsync(uri, callerToken);
 
-        if (addresses.Length == 0)
-        {
-            throw new InvalidOperationException("Image host did not resolve to any address");
-        }
-
-        foreach (var addr in addresses)
-        {
-            if (IsBlockedAddress(addr))
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("image/*"));
+            HttpResponseMessage response;
+            try
             {
+                response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, requestToken);
+            }
+            catch (HttpRequestException ex) when (FindNonPublicAddressRejection(ex) is { } rejection)
+            {
+                // The host resolved to a public address for the check above and to another one when connecting.
                 throw new InvalidOperationException(
-                    $"Image host '{LoggingHelper.SanitizeForLog(uri.Host)}' resolves to a non-public address");
+                    $"Image host '{LoggingHelper.SanitizeForLog(uri.Host)}' {PublicNetworkGuard.NonPublicAddressMessage}", rejection);
+            }
+
+            if (!IsRedirect(response.StatusCode))
+            {
+                return response;
+            }
+
+            using (response)
+            {
+                if (redirects >= MaxRedirects)
+                {
+                    throw new InvalidOperationException($"Image download failed: more than {MaxRedirects} redirects");
+                }
+
+                var location = response.Headers.Location
+                    ?? throw new InvalidOperationException(
+                        $"Image download failed: HTTP {(int)response.StatusCode} redirect without a Location");
+                var next = location.IsAbsoluteUri ? location : new Uri(uri, location);
+                ValidateRemoteUrl(next.ToString(), out var validated);
+                if (uri.Scheme == Uri.UriSchemeHttps && validated.Scheme != Uri.UriSchemeHttps)
+                {
+                    throw new InvalidOperationException("Image download failed: an https URL redirected to http");
+                }
+
+                uri = validated;
             }
         }
     }
 
-    private static bool IsBlockedAddress(IPAddress address)
+    private static bool IsRedirect(HttpStatusCode status) => status is
+        HttpStatusCode.MovedPermanently or HttpStatusCode.Found or HttpStatusCode.SeeOther
+        or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect;
+
+    private static NonPublicAddressException? FindNonPublicAddressRejection(Exception exception)
     {
-        if (IPAddress.IsLoopback(address)) return true;
-
-        if (address.AddressFamily == AddressFamily.InterNetwork)
+        for (Exception? current = exception; current is not null; current = current.InnerException)
         {
-            var bytes = address.GetAddressBytes();
-            // 0.0.0.0/8
-            if (bytes[0] == 0) return true;
-            // 10.0.0.0/8
-            if (bytes[0] == 10) return true;
-            // 100.64.0.0/10 (CGNAT)
-            if (bytes[0] == 100 && (bytes[1] & 0xC0) == 64) return true;
-            // 127.0.0.0/8 (covered by IsLoopback but be explicit)
-            if (bytes[0] == 127) return true;
-            // 169.254.0.0/16 (link-local + AWS metadata 169.254.169.254)
-            if (bytes[0] == 169 && bytes[1] == 254) return true;
-            // 172.16.0.0/12
-            if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true;
-            // 192.0.0.0/24, 192.0.2.0/24, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24
-            if (bytes[0] == 192 && bytes[1] == 0) return true;
-            // 192.168.0.0/16
-            if (bytes[0] == 192 && bytes[1] == 168) return true;
-            // 224.0.0.0/4 (multicast) and above
-            if (bytes[0] >= 224) return true;
-        }
-        else if (address.AddressFamily == AddressFamily.InterNetworkV6)
-        {
-            if (address.IsIPv6LinkLocal || address.IsIPv6SiteLocal || address.IsIPv6Multicast) return true;
-            // ::1, ::, ::ffff:127.0.0.1 etc are caught by IsLoopback / IsIPv4MappedToIPv6.
-            if (address.IsIPv4MappedToIPv6)
+            if (current is NonPublicAddressException rejection)
             {
-                var v4 = address.MapToIPv4();
-                if (IsBlockedAddress(v4)) return true;
+                return rejection;
             }
-            // fc00::/7 (unique local addresses)
-            var bytes = address.GetAddressBytes();
-            if ((bytes[0] & 0xFE) == 0xFC) return true;
         }
 
-        return false;
+        return null;
+    }
+
+    /// <summary>
+    /// Resolve the URL's host and reject any address that points at a private,
+    /// loopback, link-local, multicast or otherwise non-public range (see
+    /// <see cref="PublicNetworkGuard.IsBlockedAddress"/>), before any request is
+    /// sent. This blocks SSRF against internal services (metadata endpoints,
+    /// http://localhost, http://169.254.169.254, etc.) with a clear error. The
+    /// client's handler checks the addresses again when it connects, which is what
+    /// defeats DNS rebinding.
+    /// </summary>
+    private static async Task EnsurePublicHostAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            await PublicNetworkGuard.ResolvePublicAddressesAsync(uri.Host, resolver: null, cancellationToken);
+        }
+        catch (NonPublicAddressException ex)
+        {
+            throw new InvalidOperationException(
+                $"Image host '{LoggingHelper.SanitizeForLog(uri.Host)}' {PublicNetworkGuard.NonPublicAddressMessage}", ex);
+        }
+        catch (HttpRequestException ex) when (ex.InnerException is not null)
+        {
+            throw new InvalidOperationException($"Cannot resolve image host: {ex.InnerException.Message}", ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new InvalidOperationException("Image host did not resolve to any address", ex);
+        }
     }
 }

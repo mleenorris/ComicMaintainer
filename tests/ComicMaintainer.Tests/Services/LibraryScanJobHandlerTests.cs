@@ -13,6 +13,7 @@ public class LibraryScanJobHandlerTests : IDisposable
     private readonly string _watchDir;
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<IBatchJobRegistry> _jobRegistry = new();
     private readonly Mock<ISeriesMetadataCacheService> _cache = new();
     private readonly Mock<IOptionsMonitor<AppSettings>> _options = new();
     private readonly AppSettings _settings;
@@ -25,6 +26,8 @@ public class LibraryScanJobHandlerTests : IDisposable
         _options.Setup(o => o.CurrentValue).Returns(_settings);
         _cache.Setup(c => c.NormalizeKey(It.IsAny<string?>()))
               .Returns<string?>(s => string.IsNullOrWhiteSpace(s) ? "unknown-series" : s.ToLowerInvariant().Replace(' ', '-'));
+        _fileStore.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Completed });
     }
 
     public void Dispose()
@@ -32,12 +35,14 @@ public class LibraryScanJobHandlerTests : IDisposable
         try { Directory.Delete(_watchDir, recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort */ }
     }
 
-    private LibraryScanJobHandler BuildHandler() => new(
+    private LibraryScanJobHandler BuildHandler(ComicMaintainer.Core.Notifications.INotificationPublisher? notifications = null) => new(
         _options.Object,
         _fileStore.Object,
         _processor.Object,
+        _jobRegistry.Object,
         new Mock<ILogger<LibraryScanJobHandler>>().Object,
-        _cache.Object);
+        _cache.Object,
+        notifications ?? Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
 
     private static ProcessingJob CompletedJob(int requested) => new()
     {
@@ -62,7 +67,7 @@ public class LibraryScanJobHandlerTests : IDisposable
         var jobId = Guid.NewGuid();
         _processor.Setup(p => p.NormalizeAndRenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
                   .ReturnsAsync(jobId);
-        _processor.Setup(p => p.GetJob(jobId)).Returns(CompletedJob(1));
+        _jobRegistry.Setup(p => p.WaitForCompletionAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(CompletedJob(1));
 
         var handler = BuildHandler();
         var summary = await handler.ExecuteAsync(null, CancellationToken.None);
@@ -72,6 +77,46 @@ public class LibraryScanJobHandlerTests : IDisposable
             It.Is<IEnumerable<string>>(paths => paths.Contains(newFile)),
             It.IsAny<CancellationToken>()), Times.Once);
         Assert.Contains("+1 added", summary);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ANewFileProcessedByTheScan_IsAnnouncedAsANewChapter()
+    {
+        var seriesDir = Path.Join(_watchDir, "One Piece");
+        Directory.CreateDirectory(seriesDir);
+        var newFile = Path.Join(seriesDir, "c001.cbz");
+        await File.WriteAllBytesAsync(newFile, new byte[] { 0x50, 0x4B });
+        _fileStore.Setup(f => f.FileExistsAsync(newFile, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<ComicFile>());
+        var jobId = Guid.NewGuid();
+        _processor.Setup(p => p.NormalizeAndRenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>())).ReturnsAsync(jobId);
+        _jobRegistry.Setup(p => p.WaitForCompletionAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(CompletedJob(1));
+        var notifications = new Mock<ComicMaintainer.Core.Notifications.INotificationPublisher>();
+
+        await BuildHandler(notifications.Object).ExecuteAsync(null, CancellationToken.None);
+
+        notifications.Verify(n => n.NewChapter("One Piece", "c001", null), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ANewFileTheJobFailed_IsNotAnnounced()
+    {
+        var seriesDir = Path.Join(_watchDir, "One Piece");
+        Directory.CreateDirectory(seriesDir);
+        var newFile = Path.Join(seriesDir, "c001.cbz");
+        await File.WriteAllBytesAsync(newFile, new byte[] { 0x50, 0x4B });
+        _fileStore.Setup(f => f.FileExistsAsync(newFile, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<ComicFile>());
+        var jobId = Guid.NewGuid();
+        var failed = CompletedJob(1);
+        failed.Errors[newFile] = "bad archive";
+        _processor.Setup(p => p.NormalizeAndRenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>())).ReturnsAsync(jobId);
+        _jobRegistry.Setup(p => p.WaitForCompletionAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(failed);
+        var notifications = new Mock<ComicMaintainer.Core.Notifications.INotificationPublisher>();
+
+        await BuildHandler(notifications.Object).ExecuteAsync(null, CancellationToken.None);
+
+        notifications.Verify(n => n.NewChapter(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
     }
 
     [Fact]
@@ -92,9 +137,9 @@ public class LibraryScanJobHandlerTests : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteAsync_ReconcileDeletions_RemovesGhostFiles()
+    public async Task ExecuteAsync_ReconcileDeletions_RemovesGhostFilesThroughTheGuardedCleanup()
     {
-        // No disk files, but DB has one tracked file -> should be removed.
+        // No disk files, but DB has one tracked file -> the guarded cleanup removes it.
         var ghostPath = Path.Join(_watchDir, "Ghost", "missing.cbz");
         _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new[]
         {
@@ -104,11 +149,14 @@ public class LibraryScanJobHandlerTests : IDisposable
         _fileStore.Setup(f => f.GetFilesWithStaleSeriesMetadataAsync(
             It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<string>());
+        _fileStore.Setup(f => f.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Completed, RemovedCount = 1 });
 
         var handler = BuildHandler();
         var summary = await handler.ExecuteAsync(null, CancellationToken.None);
 
-        _fileStore.Verify(f => f.RemoveFileAsync(ghostPath, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Contains("-1 removed", summary);
     }
 
@@ -140,7 +188,7 @@ public class LibraryScanJobHandlerTests : IDisposable
         _processor.Setup(p => p.NormalizeFilesAsync(
             It.Is<IEnumerable<string>>(p => p.Contains(trackedFile)), true, It.IsAny<CancellationToken>()))
             .ReturnsAsync(jobId);
-        _processor.Setup(p => p.GetJob(jobId)).Returns(CompletedJob(1));
+        _jobRegistry.Setup(p => p.WaitForCompletionAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(CompletedJob(1));
 
         var handler = BuildHandler();
         var summary = await handler.ExecuteAsync(null, CancellationToken.None);
@@ -203,7 +251,7 @@ public class LibraryScanJobHandlerTests : IDisposable
         var jobId = Guid.NewGuid();
         _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
                   .ReturnsAsync(jobId);
-        _processor.Setup(p => p.GetJob(jobId)).Returns(CompletedJob(1));
+        _jobRegistry.Setup(p => p.WaitForCompletionAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(CompletedJob(1));
         return jobId;
     }
 

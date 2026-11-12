@@ -1,11 +1,9 @@
 using System.Text.Json;
-using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -15,37 +13,30 @@ namespace ComicMaintainer.Core.Services;
 /// row for any file with a missing chapter number or a series tag that
 /// disagrees with the resolved expected series.
 /// </summary>
-public class MetadataAuditJobHandler : IScheduledJobHandler
+public class MetadataAuditJobHandler : IScheduledJobFindingsHandler
 {
     public const string Key = "metadata-audit";
 
-    // Poll the spawned normalize batch job at this cadence while waiting for completion
-    // during an autoCorrect run, mirroring FileNamingAuditJobHandler's pattern.
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
-
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
+    private readonly IBatchJobRegistry _jobRegistry;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
-    private readonly ISeriesMetadataCacheService? _seriesCache;
-    private readonly ISeriesNameResolver? _seriesNameResolver;
-    private readonly IOptionsMonitor<AppSettings> _appSettings;
+    private readonly ISeriesNameResolver _seriesNameResolver;
     private readonly ILogger<MetadataAuditJobHandler> _logger;
 
     public MetadataAuditJobHandler(
         IFileStoreService fileStore,
         IComicProcessorService processor,
+        IBatchJobRegistry jobRegistry,
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
-        IOptionsMonitor<AppSettings> appSettings,
         ILogger<MetadataAuditJobHandler> logger,
-        ISeriesMetadataCacheService? seriesCache = null,
-        ISeriesNameResolver? seriesNameResolver = null)
+        ISeriesNameResolver seriesNameResolver)
     {
         _fileStore = fileStore;
         _processor = processor;
+        _jobRegistry = jobRegistry;
         _dbContextFactory = dbContextFactory;
-        _appSettings = appSettings;
         _logger = logger;
-        _seriesCache = seriesCache;
         _seriesNameResolver = seriesNameResolver;
     }
 
@@ -58,7 +49,10 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
     public ScheduledJobDefaults Defaults =>
         new(Enabled: false, IntervalMinutes: 60 * 24 * 7, OptionsJson: """{"autoCorrect":false}""");
 
-    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
+    public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken) =>
+        (await ExecuteWithFindingsAsync(optionsJson, cancellationToken)).Summary;
+
+    public async Task<ScheduledJobResult> ExecuteWithFindingsAsync(string? optionsJson, CancellationToken cancellationToken)
     {
         var options = ParseOptions(optionsJson);
 
@@ -66,7 +60,6 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
         _logger.LogInformation("Metadata audit starting for {Count} file(s)", files.Count);
 
         var findings = new List<MetadataAuditFindingEntity>();
-        var globalPreferred = _appSettings.CurrentValue.DefaultPreferredLanguage;
         var seriesMismatch = 0;
         var missingChapter = 0;
         var unreadable = 0;
@@ -115,7 +108,7 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
             }
 
             // Check 2: Series tag must match the expected resolved name.
-            var (expected, explanation) = await ResolveExpectedSeriesWithExplanationAsync(file.FilePath, metadata, globalPreferred, cancellationToken);
+            var (expected, explanation) = await ResolveExpectedSeriesWithExplanationAsync(file.FilePath, metadata, cancellationToken);
             if (!string.IsNullOrWhiteSpace(expected)
                 && !string.IsNullOrWhiteSpace(metadata.Series)
                 && !SeriesMatchesExpected(metadata.Series, expected))
@@ -174,24 +167,7 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
                 _logger.LogInformation("Metadata audit auto-correct: queueing {Count} file(s) for normalization", toFix.Count);
                 var jobId = await _processor.NormalizeFilesAsync(toFix, forceReprocess: true, cancellationToken);
 
-                ProcessingJob? job = null;
-                while (!cancellationToken.IsCancellationRequested)
-                {
-                    job = _processor.GetJob(jobId);
-                    if (job is null)
-                    {
-                        // Job record was evicted before we observed completion; treat as success
-                        // since the normalize pipeline only persists state on success.
-                        break;
-                    }
-                    if (job.Status is JobStatus.Completed or JobStatus.Failed or JobStatus.Cancelled)
-                    {
-                        break;
-                    }
-                    await Task.Delay(PollInterval, cancellationToken);
-                }
-
-                cancellationToken.ThrowIfCancellationRequested();
+                var job = await _jobRegistry.WaitForCompletionAsync(jobId, cancellationToken);
 
                 correctedSummary = job is null
                     ? $" Auto-correct queued {toFix.Count} file(s); job record no longer available."
@@ -203,7 +179,9 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
             }
         }
 
-        return $"Scanned {files.Count}: {seriesMismatch} series mismatch, {missingChapter} missing chapter, {unreadable} unreadable.{correctedSummary}";
+        return new ScheduledJobResult(
+            $"Scanned {files.Count}: {seriesMismatch} series mismatch, {missingChapter} missing chapter, {unreadable} unreadable.{correctedSummary}",
+            findings.Count);
     }
 
 
@@ -273,43 +251,12 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
     private async Task<(string? Expected, string? Explanation)> ResolveExpectedSeriesWithExplanationAsync(
         string filePath,
         ComicMetadata? metadata,
-        string? globalPreferredLanguage,
         CancellationToken cancellationToken)
     {
-        if (_seriesNameResolver is not null)
-        {
-            // mutateCache:false so the audit doesn't side-effect the alias
-            // index just by looking at files.
-            var resolution = await _seriesNameResolver.ResolveAsync(filePath, metadata, mutateCache: false, cancellationToken);
-            return (resolution.ResolvedSeries, resolution.Explanation);
-        }
-
-        // Legacy fallback used only when no ISeriesNameResolver is registered.
-        var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
-        if (string.IsNullOrWhiteSpace(folderName)) return (null, null);
-        var folderSeries = ComicFileProcessor.NormalizeSeriesName(folderName, forComparison: false);
-        if (string.IsNullOrWhiteSpace(folderSeries)) return (null, null);
-
-        if (_seriesCache is not null)
-        {
-            try
-            {
-                var key = _seriesCache.NormalizeKey(folderSeries);
-                var record = string.IsNullOrEmpty(key) ? null : await _seriesCache.GetAsync(key, cancellationToken);
-                if (record is not null && !string.IsNullOrWhiteSpace(record.CanonicalTitle))
-                {
-                    var resolved = SeriesDisplayTitleResolver.Resolve(record, globalPreferredLanguage);
-                    if (!string.IsNullOrWhiteSpace(resolved)) return (resolved.Trim(), null);
-                    return (record.CanonicalTitle.Trim(), null);
-                }
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                _logger.LogDebug(ex, "Series cache lookup failed for '{Folder}'", folderSeries);
-            }
-        }
-
-        return (folderSeries, null);
+        // mutateCache:false so the audit doesn't side-effect the alias
+        // index just by looking at files.
+        var resolution = await _seriesNameResolver.ResolveAsync(filePath, metadata, mutateCache: false, cancellationToken);
+        return (resolution.ResolvedSeries, resolution.Explanation);
     }
 
     /// <summary>

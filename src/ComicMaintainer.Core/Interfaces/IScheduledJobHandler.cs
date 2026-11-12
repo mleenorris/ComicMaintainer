@@ -42,6 +42,25 @@ public interface IScheduledJobHandler
 }
 
 /// <summary>
+/// A job that can report something an administrator should look at, as an audit that found
+/// problems does, on top of the summary every run ends with.
+/// </summary>
+public interface IScheduledJobFindingsHandler : IScheduledJobHandler
+{
+    /// <summary>Runs the job, as <see cref="IScheduledJobHandler.ExecuteAsync"/> does, and reports its findings.</summary>
+    Task<ScheduledJobResult> ExecuteWithFindingsAsync(string? optionsJson, CancellationToken cancellationToken);
+}
+
+/// <summary>What a run of an <see cref="IScheduledJobFindingsHandler"/> ended with.</summary>
+/// <param name="Summary">The last-run summary shown in the UI.</param>
+/// <param name="Findings">How many things the run found to report; 0 when there is nothing to look at.</param>
+public sealed record ScheduledJobResult(string Summary, int Findings = 0)
+{
+    /// <summary>True when the run found something to report.</summary>
+    public bool HasFindings => Findings > 0;
+}
+
+/// <summary>
 /// Defaults supplied by an <see cref="IScheduledJobHandler"/> when its row is
 /// first created in the <c>ScheduledJobs</c> table.
 /// </summary>

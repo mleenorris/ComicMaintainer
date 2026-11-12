@@ -6,6 +6,7 @@
 // page produces.
 
 const { bootApp } = require('./app');
+const { respond } = require('./dom');
 
 const MB = 1048576;
 
@@ -18,8 +19,14 @@ function settingsResponse(overrides = {}) {
         issue_number_padding: 3,
         watcher_enable_rename: true,
         watcher_enable_normalize: false,
+        convert_rar_to_cbz_on_write: false,
         log_max_bytes: 10 * MB,
         database_cleanup_interval_hours: 12,
+        stale_cleanup_max_removal_percent: 15,
+        stale_cleanup_missing_grace_hours: 24,
+        stale_cleanup_sentinel_file: '.mounted',
+        processing_history_retention_days: 30,
+        processing_history_max_entries: 20000,
         enable_external_series_metadata: true,
         comicvine_api_key_set: true,
         comicvine_base_url: 'https://comicvine.example/api',
@@ -27,14 +34,14 @@ function settingsResponse(overrides = {}) {
         mangadex_base_url: 'https://mangadex.example',
         enable_anilist_metadata: false,
         anilist_base_url: 'https://anilist.example/graphql',
+        fill_comicinfo_from_providers: true,
         enable_suwayomi: true,
         suwayomi_base_url: 'http://suwayomi.local:4567',
         suwayomi_username: 'reader',
         suwayomi_password_set: true,
         suwayomi_downloads_directory: '/suwayomi/downloads/mangas',
         suwayomi_import_directory: 'Manga',
-        default_library_view: 'series',
-        allow_registration: true,
+        opds_enabled: true,
         default_preferred_language: 'ja',
         write_cover_to_first_archive: true,
         write_cover_to_series_folder: false,
@@ -76,6 +83,7 @@ function settingsRoutes(settings = {}) {
         'GET /api/settings': settingsResponse(settings),
         'GET /api/backups': { backups: [], restore_pending: false },
         'GET /api/email/status': { configured: true, from_address: 'comics@example.com', max_attachment_mb: 30 },
+        'GET /api/auth/api-key': { hasApiKey: false, createdAt: null, lastUsedAt: null, header: 'X-API-Key' },
         'GET /api/suwayomi/status': { enabled: false, connected: false }
     };
 }
@@ -135,8 +143,20 @@ function clickRendered(page, target) {
     return element;
 }
 
+// The answer GlobalExceptionHandler gives to an unexpected failure.
+const SERVER_FAILURE = 'The request could not be completed. Quote the reference below when reporting this.';
+
+function serverFailure(reference) {
+    return respond(
+        500,
+        { title: 'An error occurred while processing your request.', status: 500, detail: SERVER_FAILURE, error: SERVER_FAILURE, correlationId: reference },
+        { 'X-Correlation-Id': reference });
+}
+
 module.exports = {
     MB,
+    SERVER_FAILURE,
+    serverFailure,
     settingsResponse,
     settingsRoutes,
     bootSettings,

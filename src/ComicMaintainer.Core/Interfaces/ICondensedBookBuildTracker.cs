@@ -19,11 +19,13 @@ public interface ICondensedBookBuildTracker
     /// <summary>
     /// Validates the request, registers a build and starts it in the
     /// background. Throws the same argument exceptions a synchronous build
-    /// would, so an impossible request still fails fast.
+    /// would, so an impossible request still fails fast. The build belongs to
+    /// the user of <paramref name="scope"/>, and the request's device is used
+    /// only if that scope may use it.
     /// </summary>
     Task<CondensedBookBuildDto> StartAsync(
         CondensedBookBuildRequest request,
-        string? ownerUserId,
+        EmailAccessScope scope,
         CancellationToken cancellationToken = default);
 
     /// <summary>The build with this id, or null when it is unknown or not the caller's.</summary>

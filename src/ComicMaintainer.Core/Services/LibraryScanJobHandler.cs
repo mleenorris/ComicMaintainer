@@ -2,6 +2,7 @@ using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -20,7 +21,10 @@ namespace ComicMaintainer.Core.Services;
 ///     </item>
 ///   <item><b>Reconcile deletions</b> — when enabled, removes tracked rows
 ///     whose files no longer exist on disk (replacing the live
-///     <c>OnFileDeleted</c> handler).</item>
+///     <c>OnFileDeleted</c> handler) through the guarded
+///     <see cref="IFileStoreService.CleanupStaleEntriesAsync"/>, so an
+///     unmounted share never empties the library and a row is only
+///     deleted once its file has been missing on two runs.</item>
 ///   <item><b>Stale-metadata retag</b> — when enabled, compares each
 ///     tracked file's <c>SeriesMetadataVersion</c> stamp to the matching
 ///     cache record's current <c>MetadataVersion</c> and forces a
@@ -48,24 +52,28 @@ public class LibraryScanJobHandler : IScheduledJobHandler
 {
     public const string Key = "library-scan";
 
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
-
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
-    private readonly ISeriesMetadataCacheService? _seriesCache;
+    private readonly IBatchJobRegistry _jobRegistry;
+    private readonly ISeriesMetadataCacheService _seriesCache;
     private readonly ILogger<LibraryScanJobHandler> _logger;
+    private readonly INotificationPublisher _notifications;
 
     public LibraryScanJobHandler(
         IOptionsMonitor<AppSettings> settings,
         IFileStoreService fileStore,
         IComicProcessorService processor,
+        IBatchJobRegistry jobRegistry,
         ILogger<LibraryScanJobHandler> logger,
-        ISeriesMetadataCacheService? seriesCache = null)
+        ISeriesMetadataCacheService seriesCache,
+        INotificationPublisher notifications)
     {
+        _notifications = notifications;
         _settings = settings;
         _fileStore = fileStore;
         _processor = processor;
+        _jobRegistry = jobRegistry;
         _logger = logger;
         _seriesCache = seriesCache;
     }
@@ -102,7 +110,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         // a full ProcessFileAsync for additions (the watcher's scan path
         // only adds rows; live FS events were what triggered processing).
         HashSet<string>? diskPaths = null;
-        if (options.ScanForNew || options.ReconcileDeletions || options.ReprocessModified)
+        if (options.ScanForNew || options.ReprocessModified)
         {
             diskPaths = new HashSet<string>(
                 Directory.EnumerateFiles(watchedDir, "*.*", SearchOption.AllDirectories)
@@ -146,29 +154,28 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         }
 
         // Pass 2: reconcile deletions. Drop rows whose files no longer
-        // exist on disk so the in-memory store and DB don't accumulate
-        // ghosts when the live watcher is off.
-        if (options.ReconcileDeletions && diskPaths is not null)
+        // exist on disk so the DB doesn't accumulate ghosts when the live
+        // watcher is off. This is the guarded stale-entry cleanup, not a
+        // diff against the enumeration above: an empty or unmounted share
+        // enumerates as "no files", and must not delete the library.
+        var deletionNote = string.Empty;
+        if (options.ReconcileDeletions)
         {
-            foreach (var path in tracked.Keys.ToList())
+            var cleanup = await _fileStore.CleanupStaleEntriesAsync(StaleCleanupOptions.Scheduled, cancellationToken);
+            if (cleanup.Status == StaleCleanupStatus.Cancelled)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (diskPaths.Contains(path)) continue;
-                try
-                {
-                    await _fileStore.RemoveFileAsync(path, cancellationToken);
-                    tracked.Remove(path);
-                    removedCount++;
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    _logger.LogWarning(ex, "Library scan: failed to remove deleted file {Path}",
-                        LoggingHelper.SanitizePathForLog(path));
-                }
+            }
+
+            removedCount = cleanup.RemovedCount;
+            if (cleanup.Status != StaleCleanupStatus.Completed)
+            {
+                deletionNote = $" Deletions not reconciled ({cleanup.Status}).";
+            }
+
+            if (removedCount > 0)
+            {
+                tracked = await LoadTrackedSnapshotAsync(cancellationToken);
             }
         }
 
@@ -180,7 +187,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         // and ask the file store which files in that group have a stamp
         // older than the current version. Force-normalize the result.
         var staleToFix = new List<string>();
-        if (options.RetagStale && _seriesCache is not null)
+        if (options.RetagStale)
         {
             try
             {
@@ -277,7 +284,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         }
 
         var modifiedPart = options.ReprocessModified ? $", {modifiedCount} modified reprocessed" : string.Empty;
-        return $"Library scan: +{addedCount} added, -{removedCount} removed, {staleCount} stale retagged{modifiedPart}.{newProcessedSummary}{staleProcessedSummary}{modifiedProcessedSummary}";
+        return $"Library scan: +{addedCount} added, -{removedCount} removed, {staleCount} stale retagged{modifiedPart}.{deletionNote}{newProcessedSummary}{staleProcessedSummary}{modifiedProcessedSummary}";
     }
 
     /// <summary>
@@ -347,7 +354,18 @@ public class LibraryScanJobHandler : IScheduledJobHandler
             _logger.LogWarning(ex, "Library scan: failed to queue {Count} added file(s)", files.Count);
             return " [added: queue failed]";
         }
-        return (await WaitForJobAsync(jobId, files.Count, "added", cancellationToken)).Summary;
+
+        var (summary, job) = await WaitForJobAsync(jobId, files.Count, "added", cancellationToken);
+
+        // These files were not tracked before this scan, so they are new by definition.
+        foreach (var file in SucceededFiles(files, job))
+        {
+            _notifications.NewChapter(
+                Path.GetFileName(Path.GetDirectoryName(file)) ?? Path.GetFileNameWithoutExtension(file),
+                Path.GetFileNameWithoutExtension(file));
+        }
+
+        return summary;
     }
 
     private async Task<string> NormalizeFilesAndWaitAsync(
@@ -387,16 +405,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
 
     private async Task<(string Summary, ProcessingJob? Job)> WaitForJobAsync(Guid jobId, int requested, string label, CancellationToken cancellationToken)
     {
-        ProcessingJob? job = null;
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            job = _processor.GetJob(jobId);
-            if (job is null) break;
-            if (job.Status is JobStatus.Completed or JobStatus.Failed or JobStatus.Cancelled) break;
-            await Task.Delay(PollInterval, cancellationToken);
-        }
-        // A cancelled scan throws rather than reporting a job it never polled as "evicted".
-        cancellationToken.ThrowIfCancellationRequested();
+        var job = await _jobRegistry.WaitForCompletionAsync(jobId, cancellationToken);
         var summary = job switch
         {
             null => $" [{label}: queued (job record evicted)]",

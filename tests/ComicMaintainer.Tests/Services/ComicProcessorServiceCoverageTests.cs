@@ -12,6 +12,7 @@ using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.Core.Telemetry;
 using ComicMaintainer.Tests.Helpers;
 using Microsoft.EntityFrameworkCore;
@@ -44,6 +45,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     private readonly ConcurrentQueue<ProcessingHistoryEntry> _historyEntries = new();
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<string>> _jobSignals = new();
     private readonly List<ComicProcessorService> _services = new();
+    private readonly Dictionary<ComicProcessorService, BatchJobRegistry> _jobRegistries = new();
 
     public ComicProcessorServiceCoverageTests()
     {
@@ -431,27 +433,58 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Assert.Equal("Pub", info.Element("Publisher")?.Value);
         Assert.Equal("2022", info.Element("Year")?.Value);
         Assert.Equal("Summary", info.Element("Summary")?.Value);
-        Assert.Equal(new[] { "Alice", "Bob" }, info.Elements("Writer").Select(e => e.Value));
-        Assert.Equal(new[] { "t1", "t2" }, info.Elements("Tag").Select(e => e.Value));
+        // Credits and tags are written the way the ComicInfo schema defines them: one
+        // comma-separated element each.
+        Assert.Equal(new[] { "Alice, Bob" }, info.Elements("Writer").Select(e => e.Value));
+        Assert.Equal(new[] { "t1, t2" }, info.Elements("Tags").Select(e => e.Value));
+        Assert.Empty(info.Elements("Tag"));
         Assert.Contains("page001.jpg", EntryNames(path));
         _fileStore.Verify(
             f => f.RefreshFileStatsAsync(
                 It.Is<IEnumerable<string>>(paths => paths.Single().EndsWith("round.cbz")),
                 It.IsAny<CancellationToken>()),
             Times.Once);
+        // What was written is cached for the library, so it never has to reopen the archive.
+        _fileStore.Verify(
+            f => f.RecordArchiveMetadataAsync(
+                It.Is<string>(p => p.EndsWith("round.cbz")),
+                It.Is<ComicMetadata>(m => m.Series == "New Series" && m.Issue == "2" && m.Publisher == "Pub"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
-    public async Task UpdateMetadataAsync_EmptyMetadata_WritesComicInfoWithoutElements()
+    public async Task WriteMetadataAsync_PartialWrite_CachesEverythingTheArchiveHolds()
+    {
+        var service = CreateService();
+        var path = WriteCbz("Series/partial.cbz", Xml("Old", "1", "Old Title"));
+
+        var result = await service.WriteMetadataAsync(
+            path,
+            new ComicMetadata { Series = "New Series" },
+            ComicMetadataFieldFlags.Series);
+
+        Assert.True(result.Succeeded);
+        _fileStore.Verify(
+            f => f.RecordArchiveMetadataAsync(
+                It.Is<string>(p => p.EndsWith("partial.cbz")),
+                It.Is<ComicMetadata>(m => m.Series == "New Series" && m.Issue == "1" && m.Title == "Old Title"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateMetadataAsync_EmptyMetadata_LeavesTheArchiveUntouched()
     {
         var service = CreateService();
         var path = WriteCbz("Series/blank.cbz", Xml("Old", "1", "Old Title"));
+        var before = await File.ReadAllBytesAsync(path);
 
         var result = await service.UpdateMetadataAsync(path, new ComicMetadata());
 
+        // No field carries a value, so there is nothing to apply and nothing is cleared.
         Assert.True(result);
-        var info = ReadComicInfo(path)!;
-        Assert.Empty(info.Elements());
+        Assert.Equal(before, await File.ReadAllBytesAsync(path));
     }
 
     [Fact]
@@ -496,7 +529,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var before = SnapshotEntries(path);
         Assert.Contains(before, e => e.Name == "big.bin" && e.Length == LargeEntrySize);
 
-        var result = await service.RemoveMetadataAsync(path);
+        var result = (await service.RemoveMetadataAsync(path)).Succeeded;
 
         Assert.True(result);
         Assert.Equal(before.Where(e => e.Name != "ComicInfo.xml"), SnapshotEntries(path));
@@ -513,15 +546,15 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var before = await File.ReadAllBytesAsync(path);
 
         var result = removeMetadata
-            ? await service.RemoveMetadataAsync(path)
+            ? (await service.RemoveMetadataAsync(path)).Succeeded
             : await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "Updated" });
 
         Assert.False(result);
         Assert.Equal(before, await File.ReadAllBytesAsync(path));
         var error = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Error);
         Assert.Equal(removeMetadata ? "Error removing metadata for {FilePath}" : "Error updating metadata for {FilePath}", error.Template);
-        Assert.IsType<NotSupportedException>(error.Exception);
-        Assert.Empty(Directory.GetFiles(_settings.TempFileDirectory));
+        Assert.IsType<InvalidDataException>(error.Exception);
+        Assert.Empty(TempFilesNextTo(path));
         _fileStore.Verify(
             f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()),
             Times.Never);
@@ -537,7 +570,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var before = await File.ReadAllBytesAsync(path);
 
         var result = removeMetadata
-            ? await service.RemoveMetadataAsync(path)
+            ? (await service.RemoveMetadataAsync(path)).Succeeded
             : await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "Updated" });
 
         Assert.False(result);
@@ -545,28 +578,39 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var error = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Error);
         Assert.Equal(removeMetadata ? "Error removing metadata for {FilePath}" : "Error updating metadata for {FilePath}", error.Template);
         Assert.NotNull(error.Exception);
-        Assert.Empty(Directory.GetFiles(_settings.TempFileDirectory));
+        Assert.Empty(TempFilesNextTo(path));
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task MetadataRewrite_EntryWithoutName_FailsAndLeavesArchiveUntouched(bool removeMetadata)
+    [Fact]
+    public async Task MetadataRewrite_FileThatIsNotAZipOrRar_FailsAndLeavesItUntouched()
     {
+        // ArchiveFactory would open this gzip file; the shared reader only opens ZIP and RAR.
         var service = CreateService();
-        var path = WriteNamelessGzipCbz("Series/nameless.cbz");
+        var path = WriteGzipNamedCbz("Series/gzip.cbz");
         var before = await File.ReadAllBytesAsync(path);
 
-        var result = removeMetadata
-            ? await service.RemoveMetadataAsync(path)
-            : await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "Updated" });
+        var result = await service.UpdateMetadataAsync(path, new ComicMetadata { Series = "Updated" });
 
         Assert.False(result);
         Assert.Equal(before, await File.ReadAllBytesAsync(path));
         var error = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Error);
-        Assert.Equal(removeMetadata ? "Error removing metadata for {FilePath}" : "Error updating metadata for {FilePath}", error.Template);
-        Assert.IsType<InvalidDataException>(error.Exception);
-        Assert.Empty(Directory.GetFiles(_settings.TempFileDirectory));
+        Assert.Equal("Error updating metadata for {FilePath}", error.Template);
+        Assert.IsType<ComicArchiveFormatException>(error.Exception);
+        Assert.Empty(TempFilesNextTo(path));
+    }
+
+    [Fact]
+    public async Task RemoveMetadataAsync_ArchiveWithoutComicInfo_SucceedsWithoutRewritingIt()
+    {
+        var service = CreateService();
+        var path = WriteCbz("Series/untagged.cbz", null);
+        var before = await File.ReadAllBytesAsync(path);
+
+        var result = (await service.RemoveMetadataAsync(path)).Succeeded;
+
+        Assert.True(result);
+        Assert.Equal(before, await File.ReadAllBytesAsync(path));
+        Assert.DoesNotContain(_logger.Entries, e => e.Level == LogLevel.Error);
     }
 
     [Fact]
@@ -575,7 +619,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var service = CreateService();
         var path = WriteCorrupt("Series/bad.cbz");
 
-        var result = await service.RemoveMetadataAsync(path);
+        var result = (await service.RemoveMetadataAsync(path)).Succeeded;
 
         Assert.False(result);
         Assert.True(_logger.Has(LogLevel.Error, "Error removing metadata for {FilePath}"));
@@ -589,7 +633,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var outside = WriteCbzAt(Path.Join(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
         var before = await File.ReadAllBytesAsync(outside);
 
-        var result = await service.RemoveMetadataAsync(outside);
+        var result = (await service.RemoveMetadataAsync(outside)).Succeeded;
 
         Assert.False(result);
         Assert.True(_logger.Has(LogLevel.Warning, "Cannot remove metadata: file is outside the allowed directories: {FilePath}"));
@@ -613,7 +657,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var before = await File.ReadAllBytesAsync(outside);
         Directory.CreateSymbolicLink(Path.Join(_library, "linked"), outsideDir);
 
-        var result = await service.RemoveMetadataAsync(Path.Join(_library, "linked", "book.cbz"));
+        var result = (await service.RemoveMetadataAsync(Path.Join(_library, "linked", "book.cbz"))).Succeeded;
 
         Assert.False(result);
         Assert.True(_logger.Has(LogLevel.Warning, "Cannot remove metadata: file is outside the allowed directories: {FilePath}"));
@@ -633,15 +677,17 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var alias = Path.Join(_library, "alias");
         Directory.CreateSymbolicLink(alias, Path.Join(_library, "Series"));
 
-        var result = await service.RemoveMetadataAsync(Path.Join(alias, "book.cbz"));
+        var result = (await service.RemoveMetadataAsync(Path.Join(alias, "book.cbz"))).Succeeded;
 
         Assert.True(result);
         Assert.Null(ReadComicInfo(physical));
         Assert.Contains("page001.jpg", EntryNames(physical));
         Assert.NotNull(new DirectoryInfo(alias).LinkTarget);
+        // The physical file is rewritten, but records stay under the path that was requested.
+        var requested = Path.Join(alias, "book.cbz");
         _fileStore.Verify(
             f => f.RefreshFileStatsAsync(
-                It.Is<IEnumerable<string>>(paths => paths.Single() == physical),
+                It.Is<IEnumerable<string>>(paths => paths.Single() == requested),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -722,8 +768,10 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
 
         _fileStore.Verify(f => f.MarkFileNormalizedAsync(path, false, It.IsAny<CancellationToken>()), Times.Once);
         _fileStore.Verify(f => f.MarkFileRenamedAsync(path, false, It.IsAny<CancellationToken>()), Times.Once);
-        Assert.Contains(_historyEntries, e => e.Action == "Rename" && !e.Success && e.ErrorMessage == "No metadata or series information");
-        Assert.Contains(_historyEntries, e => e.Action == "Process" && !e.Success);
+        const string reason = "'bad.cbz' is not a readable ZIP or RAR archive.";
+        Assert.Contains(_historyEntries, e => e.Action == "Normalize" && !e.Success && e.ErrorMessage == reason);
+        Assert.Contains(_historyEntries, e => e.Action == "Rename" && !e.Success && e.ErrorMessage == reason);
+        Assert.Contains(_historyEntries, e => e.Action == "Process" && !e.Success && e.ErrorMessage == reason);
         Assert.True(File.Exists(path));
     }
 
@@ -767,7 +815,8 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Assert.Equal(expectInfoLog,
             _logger.Has(LogLevel.Information, "Queued {Count} automatic ereader delivery/deliveries for {FilePath}"));
         Assert.Contains(_historyEntries, e => e.Action == "Rename" && e.Success && e.ErrorMessage == "Rename disabled");
-        Assert.Contains(_historyEntries, e => e.Action == "Process" && e.Success);
+        // Nothing about the file changed, so the run leaves no summary row.
+        Assert.DoesNotContain(_historyEntries, e => e.Action == "Process");
     }
 
     [Fact]
@@ -1053,7 +1102,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         services.AddDbContextFactory<ComicMaintainerDbContext>(options =>
             options.UseInMemoryDatabase(Guid.NewGuid().ToString()));
         using var provider = services.BuildServiceProvider();
-        var fileStore = new FileStoreService(
+        var fileStore = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(_settings),
             NullLogger<FileStoreService>.Instance,
             provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>());
@@ -1563,7 +1612,23 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Assert.True(File.Exists(numberOnly));
         _fileStore.Verify(f => f.MarkFileRenamedAsync(corrupt, false, It.IsAny<CancellationToken>()), Times.Once);
         _fileStore.Verify(f => f.MarkFileRenamedAsync(numberOnly, false, It.IsAny<CancellationToken>()), Times.Once);
-        Assert.Equal(2, _historyEntries.Count(e => e.ErrorMessage == "No metadata or series information found"));
+        Assert.Single(_historyEntries, e => e.ErrorMessage == "No metadata or series information found");
+        Assert.Single(_historyEntries, e => e.ErrorMessage == "'bad.cbz' is not a readable ZIP or RAR archive.");
+        Assert.Equal("'bad.cbz' is not a readable ZIP or RAR archive.", job.Errors[corrupt]);
+    }
+
+    [Fact]
+    public async Task RenameFilesAsync_FileOutsideTheLibrary_IsRefusedAndLeftWhereItIs()
+    {
+        var service = CreateService();
+        var outside = WriteCbzAt(Path.Join(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
+
+        var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { outside }));
+
+        Assert.Equal(1, job.FailedFiles);
+        Assert.True(File.Exists(outside));
+        Assert.True(_logger.Has(LogLevel.Warning, "RenameFileAsync: File is outside the allowed directories: {FilePath}"));
+        Assert.Contains(_historyEntries, e => e.Action == "Rename" && !e.Success && e.ErrorMessage == "File is outside the allowed directories");
     }
 
     [Fact]
@@ -1761,11 +1826,10 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     [Fact]
     public async Task RenameFilesAsync_RecoveredChapterCannotBeWritten_WarnsAndStillRenames()
     {
-        var tempAsFile = Path.Join(_root, "temp-is-a-file");
-        await File.WriteAllTextAsync(tempAsFile, "blocking");
-        _settings.TempFileDirectory = tempAsFile;
+        // The archive's ComicInfo.xml is readable, but one of its entries cannot be copied, so
+        // writing the recovered chapter into it fails.
         var service = CreateService();
-        var path = WriteCbz("Series/Series - Ch 5.cbz", Xml("Series", number: null, title: null));
+        var path = WriteCbzWithUnreadableEntry("Series/Series - Ch 5.cbz", Xml("Series", number: null, title: null));
 
         var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }));
 
@@ -1807,7 +1871,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task NormalizeFilesAsync_UnreadableArchive_ReportsNoMetadata()
+    public async Task NormalizeFilesAsync_UnreadableArchive_ReportsWhyItCouldNotBeRead()
     {
         var service = CreateService();
         var path = WriteCorrupt("Series/bad.cbz");
@@ -1815,7 +1879,8 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var job = await RunJobAsync(service, s => s.NormalizeFilesAsync(new[] { path }));
 
         Assert.Equal(1, job.FailedFiles);
-        Assert.Contains(_historyEntries, e => e.Action == "Normalize" && e.ErrorMessage == "No metadata found");
+        Assert.Equal("'bad.cbz' is not a readable ZIP or RAR archive.", job.Errors[path]);
+        Assert.Contains(_historyEntries, e => e.Action == "Normalize" && e.ErrorMessage == "'bad.cbz' is not a readable ZIP or RAR archive.");
         _fileStore.Verify(f => f.MarkFileNormalizedAsync(path, false, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -1837,18 +1902,19 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     [Fact]
     public async Task NormalizeFilesAsync_MetadataWriteFails_ReportsFailure()
     {
-        var tempAsFile = Path.Join(_root, "temp-is-a-file");
-        await File.WriteAllTextAsync(tempAsFile, "blocking");
-        _settings.TempFileDirectory = tempAsFile;
+        // An entry stored with a compression method nothing can decompress: the rewrite fails
+        // after the file has been read and found to need normalizing.
         var service = CreateService();
-        var path = WriteCbz("Series X/book.cbz", Xml("Series X", "5", "Wrong"));
+        var path = WriteCbzWithUnreadableEntry("Series X/Series X Ch 7.cbz", Xml(null, "7", null));
+        var before = await File.ReadAllBytesAsync(path);
 
         var job = await RunJobAsync(service, s => s.NormalizeFilesAsync(new[] { path }));
 
         Assert.Equal(1, job.FailedFiles);
         Assert.True(_logger.Has(LogLevel.Warning, "NormalizeFileAsync: Failed to normalize file: {FilePath}"));
-        Assert.Contains(_historyEntries, e => e.Action == "Normalize" && e.ErrorMessage == "Failed to update metadata");
-        Assert.Equal("Wrong", ReadComicInfo(path)!.Element("Title")?.Value);
+        Assert.Contains("unsupported compression method", job.Errors[path]);
+        Assert.Contains(_historyEntries, e => e.Action == "Normalize" && e.ErrorMessage == job.Errors[path]);
+        Assert.Equal(before, await File.ReadAllBytesAsync(path));
     }
 
     [Fact]
@@ -1878,7 +1944,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var info = ReadComicInfo(path)!;
         Assert.Equal("Series X", info.Element("Series")?.Value);
         Assert.Equal("7", info.Element("Number")?.Value);
-        Assert.Equal("Chapter 7", info.Element("Title")?.Value);
+        Assert.Equal("Something", info.Element("Title")?.Value);
     }
 
     [Fact]
@@ -1893,7 +1959,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var info = ReadComicInfo(path)!;
         Assert.Equal("Series X", info.Element("Series")?.Value);
         Assert.Equal("5", info.Element("Number")?.Value);
-        Assert.Equal("Chapter 5", info.Element("Title")?.Value);
+        Assert.Equal("Some Title", info.Element("Title")?.Value);
     }
 
     [Fact]
@@ -1913,7 +1979,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Assert.Equal(1, job.ProcessedFiles);
         var info = ReadComicInfo(path)!;
         Assert.Equal("Unknown Series", info.Element("Series")?.Value);
-        Assert.Equal("Chapter 5", info.Element("Title")?.Value);
+        Assert.Equal("Some Title", info.Element("Title")?.Value);
     }
 
     // -------------------------------------------------------- series resolution
@@ -1934,10 +2000,13 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         var record = userSelectedRecord
             ? new SeriesMetadataCacheRecord { CanonicalTitle = string.Empty, SeriesName = "Pinned Name", LocalizedTitles = localized }
             : new SeriesMetadataCacheRecord { CanonicalTitle = "Canonical Title", LookupStatus = "success", LocalizedTitles = localized };
+        // The folder record is only reached by the localized-title step when the
+        // earlier steps could not read it (a transient cache failure).
         var folderLookups = 0;
         cache.Setup(c => c.GetAsync("folder name", It.IsAny<CancellationToken>()))
-            .Returns(() => Task.FromResult<SeriesMetadataCacheRecord?>(
-                Interlocked.Increment(ref folderLookups) >= 3 ? record : null));
+            .Returns(() => Interlocked.Increment(ref folderLookups) >= 3
+                ? Task.FromResult<SeriesMetadataCacheRecord?>(record)
+                : Task.FromException<SeriesMetadataCacheRecord?>(new InvalidOperationException("cache busy")));
         var service = CreateService(cache: cache.Object);
         var path = WriteCbz("Folder Name/source.cbz", Xml("Titre Local", "1", "Chapter 1"));
         var expectedSeries = userSelectedRecord ? "Pinned Name" : "Canonical Title";
@@ -2105,7 +2174,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Callback(() => cts.Cancel())
             .ThrowsAsync(new OperationCanceledException(cts.Token));
-        var resolver = new SeriesNameResolver(
+        var resolver = TestServices.CreateSeriesNameResolver(
             new TestOptionsMonitor<AppSettings>(_settings), NullLogger<SeriesNameResolver>.Instance, cache.Object, external.Object);
         var service = CreateService(cache: cache.Object, resolver: resolver, external: external.Object);
         var path = WriteCbz("Kaibutsu/source.cbz", Xml("Kaibutsu", "1", "Chapter 1"));
@@ -2147,10 +2216,11 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         IFileStoreService? fileStore = null)
     {
         var settings = new TestOptionsMonitor<AppSettings>(_settings);
+        var jobRegistry = TestServices.CreateBatchJobRegistry(settings, NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: _broadcaster.Object, metrics: metrics);
 
         // Series resolution goes through the real SeriesNameResolver, logging to the same
         // logger, so its warnings can be asserted alongside the processor's.
-        var service = new ComicProcessorService(
+        var service = TestServices.CreateComicProcessor(
             settings,
             _logger,
             fileStore ?? _fileStore.Object,
@@ -2158,10 +2228,12 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
             eventBroadcaster: _broadcaster.Object,
             externalSeriesMetadata: external,
             seriesMetadataCache: cache,
-            seriesNameResolver: resolver ?? new SeriesNameResolver(settings, _logger, cache, external),
+            seriesNameResolver: resolver ?? TestServices.CreateSeriesNameResolver(settings, _logger, cache, external),
+            jobRegistry: jobRegistry,
             comicEmail: email,
             metrics: metrics);
         _services.Add(service);
+        _jobRegistries[service] = jobRegistry;
         return service;
     }
 
@@ -2169,17 +2241,20 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         Action? beforeFallbackRename = null,
         int linkError = 0)
     {
+        var jobRegistry = TestServices.CreateBatchJobRegistry(new TestOptionsMonitor<AppSettings>(_settings), NullLogger<BatchJobRegistry>.Instance, eventBroadcaster: _broadcaster.Object);
         var service = new UnsupportedRenameAt2ComicProcessorService(
             _settings,
             _logger,
             _fileStore.Object,
             _history.Object,
-            _broadcaster.Object)
+            _broadcaster.Object,
+            jobRegistry)
         {
             BeforeFallbackRename = beforeFallbackRename,
             LinkError = linkError
         };
         _services.Add(service);
+        _jobRegistries[service] = jobRegistry;
         return service;
     }
 
@@ -2200,7 +2275,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     {
         var jobId = await start(service);
         await JobSignal(jobId).Task.WaitAsync(TimeSpan.FromSeconds(30));
-        return service.GetJob(jobId)!;
+        return _jobRegistries[service].GetJob(jobId)!;
     }
 
     private string WriteCbz(string relativePath, string? comicInfoXml) =>
@@ -2249,19 +2324,19 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     /// A valid archive whose "unreadable.bin" entry declares the reserved compression method 11
     /// in its local and central directory headers, so no reader can decompress it.
     /// </summary>
-    private string WriteCbzWithUnreadableEntry(string relativePath)
+    private string WriteCbzWithUnreadableEntry(string relativePath, string? comicInfo = null, string unreadableEntry = "unreadable.bin")
     {
         var path = Path.Join(_library, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
         {
-            AddEntry(zip, "ComicInfo.xml", Encoding.UTF8.GetBytes(Xml("Old", "1", "Chapter 1")), FixtureTimestamp);
+            AddEntry(zip, "ComicInfo.xml", Encoding.UTF8.GetBytes(comicInfo ?? Xml("Old", "1", "Chapter 1")), FixtureTimestamp);
             AddEntry(zip, "page001.jpg", new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 }, FixtureTimestamp);
             AddEntry(zip, "unreadable.bin", new byte[] { 1, 2, 3, 4 }, FixtureTimestamp, CompressionLevel.NoCompression);
         }
 
         var bytes = File.ReadAllBytes(path);
-        var name = Encoding.UTF8.GetBytes("unreadable.bin");
+        var name = Encoding.UTF8.GetBytes(unreadableEntry);
         var patched = 0;
         for (var i = 0; i + 46 + name.Length <= bytes.Length; i++)
         {
@@ -2321,7 +2396,7 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
     /// A ".cbz" that really is a gzip stream without a stored file name: SharpCompress opens it as
     /// an archive with a single entry whose Key is null.
     /// </summary>
-    private string WriteNamelessGzipCbz(string relativePath)
+    private string WriteGzipNamedCbz(string relativePath)
     {
         var path = Path.Join(_library, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -2454,6 +2529,10 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
         return XElement.Load(stream);
     }
 
+    /// <summary>Unfinished rewritten archives left next to <paramref name="path"/>.</summary>
+    private static string[] TempFilesNextTo(string path) =>
+        Directory.GetFiles(Path.GetDirectoryName(path)!).Where(ArchiveWriteRecoveryService.IsTempPath).ToArray();
+
     private static List<string> EntryNames(string path)
     {
         using var zip = ZipFile.OpenRead(path);
@@ -2483,8 +2562,20 @@ public partial class ComicProcessorServiceCoverageTests : IDisposable
             ILogger<ComicProcessorService> logger,
             IFileStoreService fileStore,
             IProcessingHistoryService history,
-            IEventBroadcaster eventBroadcaster)
-            : base(new TestOptionsMonitor<AppSettings>(settings), logger, fileStore, history, eventBroadcaster)
+            IEventBroadcaster eventBroadcaster,
+            IBatchJobRegistry jobRegistry)
+            : base(
+                  new TestOptionsMonitor<AppSettings>(settings),
+                  logger,
+                  fileStore,
+                  history,
+                  eventBroadcaster,
+                  Mock.Of<ISeriesMetadataCacheService>(),
+                  TestServices.CreateSeriesNameResolver(new TestOptionsMonitor<AppSettings>(settings), NullLogger<SeriesNameResolver>.Instance),
+                  jobRegistry,
+                  Mock.Of<IComicEmailService>(),
+                  new FileOperationLock(),
+                  Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>())
         {
         }
 

@@ -4,9 +4,11 @@
 // script the offline-capable documents load), activate (old cache cleanup,
 // taking control of open pages) and the control messages pages send it.
 
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { htmlScripts } = require('./support/sandbox');
+const { htmlScripts, WWWROOT } = require('./support/sandbox');
 const {
     APP_VERSION,
     VERSIONED_CACHE,
@@ -14,25 +16,40 @@ const {
     IMAGE_CACHE,
     OFFLINE_CACHE,
     OFFLINE_PAGE,
+    PRECACHED_READER_PAGE,
     absolute,
     reply,
     html,
     image,
     script,
+    navigationRequest,
     loadServiceWorker,
     installRoutes,
     installedWorker,
+    routeComic,
     offlineKey
 } = require('./support/sw-helpers');
 
+const OFFLINE_DOCUMENTS = ['index.html', 'reader.html', 'offline.html'];
+
 // Every script index.html, reader.html and offline.html load, as the server
 // links them (?v=<version>).
-function scriptsOfflineDocumentsLoad() {
-    const scripts = new Set(['index.html', 'reader.html', 'offline.html'].flatMap(page => htmlScripts(page)));
+function scriptsOfflineDocumentsLoad(pages = OFFLINE_DOCUMENTS) {
+    const scripts = new Set(pages.flatMap(page => htmlScripts(page)));
     return [...scripts].map(path => absolute(`/${path}?v=${APP_VERSION}`)).sort();
 }
 
+// Every stylesheet those documents link, as the server links them (?v=<version>).
+function stylesheetsOfflineDocumentsLink(pages = OFFLINE_DOCUMENTS) {
+    const sheets = new Set(pages.flatMap(page =>
+        [...fs.readFileSync(path.join(WWWROOT, page), 'utf8')
+            .matchAll(/<link\s+rel="stylesheet"\s+href="__BASE_PATH__\/(css\/[^"?]+\.css)\?v=__APP_VERSION__"/g)]
+            .map(match => match[1])));
+    return [...sheets].map(path => absolute(`/${path}?v=${APP_VERSION}`)).sort();
+}
+
 const isScript = url => new URL(url).pathname.startsWith('/js/');
+const isStylesheet = url => new URL(url).pathname.startsWith('/css/');
 
 // Where install and activate record the cache they set up, for the next
 // time the browser wakes the worker up.
@@ -50,15 +67,18 @@ test('install names its cache after the server version and precaches the shell a
     assert.deepEqual(sw.caches.names(), [VERSIONED_CACHE, STATE_CACHE]);
 
     const cached = sw.caches.urls(VERSIONED_CACHE);
-    const shell = cached.filter(url => !isScript(url));
-    assert.deepEqual(shell.slice(0, 2), [absolute('/manifest.json'), absolute('/offline.html')]);
-    assert.ok(shell.length > 2);
-    assert.ok(shell.slice(2).every(url => url.startsWith(absolute('/icons/'))), shell.join('\n'));
+    const shell = cached.filter(url => !isScript(url) && !isStylesheet(url));
+    assert.deepEqual(shell.slice(0, 3), [absolute('/manifest.json'), absolute('/offline.html'), absolute('/reader.html')]);
+    assert.ok(shell.length > 3);
+    assert.ok(shell.slice(3).every(url => url.startsWith(absolute('/icons/'))), shell.join('\n'));
     assert.equal(await sw.caches.text(VERSIONED_CACHE, '/offline.html'), OFFLINE_PAGE);
+    assert.equal(await sw.caches.text(VERSIONED_CACHE, '/reader.html'), PRECACHED_READER_PAGE);
 
     // The same versioned URLs the pages request, so an offline launch finds them.
     assert.deepEqual(cached.filter(isScript).sort(), scriptsOfflineDocumentsLoad());
     assert.ok(cached.includes(absolute(`/js/pages/offline.js?v=${APP_VERSION}`)));
+    assert.deepEqual(cached.filter(isStylesheet).sort(), stylesheetsOfflineDocumentsLink());
+    assert.ok(cached.includes(absolute(`/css/main.css?v=${APP_VERSION}`)));
 
     // An update waits for the page to accept it instead of taking over.
     assert.equal(sw.skipWaitingCalls, 0);
@@ -66,11 +86,11 @@ test('install names its cache after the server version and precaches the shell a
     assert.deepEqual(sw.network.unmatched, []);
 });
 
-test('a script that cannot be precached is skipped without failing the install', async () => {
+test('an app script that cannot be precached is skipped without failing the install', async () => {
     const sw = loadServiceWorker();
     installRoutes(sw.network);
     sw.network.route('GET /js/app/library.js', reply(404, 'Not found'));
-    sw.network.route('GET /js/pages/reader.js', () => {
+    sw.network.route('GET /js/app/menus.js', () => {
         throw new TypeError('Failed to fetch');
     });
 
@@ -78,11 +98,73 @@ test('a script that cannot be precached is skipped without failing the install',
 
     const cached = sw.caches.urls(VERSIONED_CACHE);
     assert.equal(cached.includes(absolute(`/js/app/library.js?v=${APP_VERSION}`)), false);
-    assert.equal(cached.includes(absolute(`/js/pages/reader.js?v=${APP_VERSION}`)), false);
+    assert.equal(cached.includes(absolute(`/js/app/menus.js?v=${APP_VERSION}`)), false);
     assert.ok(cached.includes(absolute(`/js/main.js?v=${APP_VERSION}`)));
     assert.ok(cached.includes(absolute(`/js/pages/offline.js?v=${APP_VERSION}`)));
     assert.equal(cached.filter(isScript).length, scriptsOfflineDocumentsLoad().length - 2);
-    assert.deepEqual(sw.logged('Failed to precache').map(entry => entry.args[1]).sort(), ['/js/app/library.js', '/js/pages/reader.js']);
+    assert.deepEqual(sw.logged('Failed to precache').map(entry => entry.args[1]).sort(), ['/js/app/library.js', '/js/app/menus.js']);
+});
+
+// FE-3: a release activated without the offline reader would leave every
+// downloaded comic unreadable offline, so it must not install at all.
+test('install fails when the reader document or an asset the offline reader loads cannot be precached', async () => {
+    const readerAssets = [
+        '/reader.html',
+        ...[...scriptsOfflineDocumentsLoad(['reader.html', 'offline.html']), ...stylesheetsOfflineDocumentsLink(['reader.html', 'offline.html'])]
+            .map(url => new URL(url).pathname)
+    ];
+    assert.deepEqual(readerAssets.sort(), ['/css/main.css', '/js/app/api.js', '/js/pages/offline.js', '/js/pages/reader.js', '/js/shared.js', '/reader.html']);
+
+    for (const failing of readerAssets) {
+        for (const [label, answer] of [['404', reply(404, 'Not found')], ['network error', () => { throw new TypeError('Failed to fetch'); }]]) {
+            const sw = loadServiceWorker();
+            installRoutes(sw.network);
+            sw.network.route(`GET ${failing}`, answer);
+
+            await assert.rejects(sw.install(), TypeError, `${failing}: ${label}`);
+
+            // Nothing is recorded for a later activation, so the release
+            // already in control keeps serving its own copy.
+            assert.deepEqual(sw.caches.names(), [VERSIONED_CACHE], `${failing}: ${label}`);
+        }
+    }
+});
+
+// FE-3: the runtime copy of /reader.html lives in the versioned cache, which
+// activate deletes on every upgrade. The scenario: comics downloaded, the
+// server updates overnight, the app is opened once online (so the update
+// activates) without visiting the reader, then every saved comic is opened
+// on a plane.
+test('after an upgrade, a comic downloaded earlier still opens offline in the new release\'s reader', async () => {
+    const OLD_READER = '<!DOCTYPE html><title>Reader 2.0.350</title>';
+    const previous = loadServiceWorker();
+    installRoutes(previous.network, { version: '2.0.350.0' }, { reader: OLD_READER });
+    await previous.install();
+    await previous.activate();
+    routeComic(previous.network, 'Saga/Saga 001.cbz', { pages: 2 });
+    await previous.message({ type: 'DOWNLOAD_COMIC', filePath: 'Saga/Saga 001.cbz' });
+
+    const update = previous.restart();
+    installRoutes(update.network);
+    await update.install();
+    const woken = update.restart();
+    await woken.message({ type: 'SKIP_WAITING' });
+    await woken.activate();
+    assert.deepEqual(woken.logged('Deleting old cache').map(entry => entry.args[1]), ['comic-maintainer-2-0-350-0']);
+
+    const sw = woken.restart();
+    sw.network.offline = true;
+    sw.network.calls.length = 0;
+    const reader = await sw.respond(navigationRequest(`/reader.html?file=${encodeURIComponent('Saga/Saga 001.cbz')}`));
+    assert.equal(reader.status, 200);
+    assert.equal(await reader.text(), PRECACHED_READER_PAGE);
+    for (const asset of [`/css/main.css?v=${APP_VERSION}`, `/js/shared.js?v=${APP_VERSION}`, `/js/pages/reader.js?v=${APP_VERSION}`]) {
+        assert.equal((await sw.respond(asset)).status, 200, asset);
+    }
+    assert.equal(await (await sw.respond('/api/ComicReader/page?filePath=Saga%2FSaga%20001.cbz&page=2')).text(), 'Saga 001.cbz page 2');
+    // And offline.html, which lists the download, is the new release's too.
+    assert.equal(await (await sw.respond(navigationRequest('/series/42'))).text(), OFFLINE_PAGE);
+    assert.equal(sw.network.calls.length, 5, 'every request tried the network first, or not at all');
 });
 
 test('without a usable server version the default cache is used and no scripts are precached', async () => {
@@ -107,6 +189,31 @@ test('without a usable server version the default cache is used and no scripts a
         // Without the version the URLs the pages will request are unknown.
         assert.deepEqual(cached.filter(isScript), [], label);
         assert.deepEqual(sw.network.calls.filter(call => call.path.startsWith('/js/')), [], label);
+    }
+});
+
+test('an update that cannot learn its version fails to install, leaving the release in control untouched', async () => {
+    const answers = {
+        'an error status': reply(503, { error: 'starting up' }),
+        'an answer without a version': { platform: '.NET' },
+        'a network error': () => {
+            throw new TypeError('Failed to fetch');
+        }
+    };
+    for (const [label, answer] of Object.entries(answers)) {
+        const previous = loadServiceWorker();
+        installRoutes(previous.network, { version: '2.0.350.0' });
+        await previous.install();
+        await previous.activate();
+        const names = previous.caches.names();
+        const precached = previous.caches.urls('comic-maintainer-2-0-350-0');
+
+        const update = previous.restart();
+        update.network.route('GET /api/version', answer);
+        await assert.rejects(update.install(), /without knowing its version/, label);
+
+        assert.deepEqual(update.caches.names(), names, `${label}: not even a default cache was made`);
+        assert.deepEqual(update.caches.urls('comic-maintainer-2-0-350-0'), precached, label);
     }
 });
 

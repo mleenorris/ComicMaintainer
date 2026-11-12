@@ -20,6 +20,21 @@
 
         let serviceWorkerReloadStarted = false;
 
+        // Whether a service worker was serving this page when it loaded (or
+        // has started serving it since). On the very first visit — a new
+        // device, or after clearing site data — the page is uncontrolled
+        // until the freshly installed worker claims it. That first
+        // 'controllerchange' only means the worker now serves a page that
+        // is already current, so it must not reload the page under the
+        // user. Captured at script evaluation, before anything registers.
+        let serviceWorkerControlledPage = Boolean(
+            typeof navigator !== 'undefined' && navigator.serviceWorker && navigator.serviceWorker.controller);
+
+        // Set when the user asked for the new version from the update
+        // banner: a controller change after that is always the one to
+        // reload for.
+        let serviceWorkerUpdateRequested = false;
+
         // Reload onto a new version, at most once: when the update banner gives
         // up waiting, or on 'controllerchange' (the new worker is in control,
         // so it serves the reloaded page).
@@ -36,6 +51,8 @@
          * can wait indefinitely; this must always end in a reload.
          */
         function applyServiceWorkerUpdate(worker) {
+            serviceWorkerUpdateRequested = true;
+
             // A worker from an older release still proxies the real-time event
             // stream. That request never finishes, so while this tab holds it
             // open the current worker is never idle and cannot be replaced.
@@ -62,6 +79,23 @@
             setTimeout(() => {
                 reloadForServiceWorkerUpdate('New service worker did not take control in time');
             }, SW_UPDATE_RELOAD_TIMEOUT_MS);
+        }
+
+        /**
+         * Handle 'controllerchange'. A new worker taking over a page that was
+         * already controlled means the page runs an older release, so reload
+         * it onto the new one (at most once). The first worker claiming a page
+         * that had none is the first install finishing: the page is already
+         * current, so there is nothing to reload, but any later change is a
+         * real update again.
+         */
+        function handleServiceWorkerControllerChange() {
+            if (!serviceWorkerControlledPage && !serviceWorkerUpdateRequested) {
+                serviceWorkerControlledPage = true;
+                console.log('PWA: Service worker now controls this page (first install), no reload needed');
+                return;
+            }
+            reloadForServiceWorkerUpdate('New service worker took control');
         }
 
         /**
@@ -204,10 +238,9 @@
 
                 // Reload exactly once the new service worker has taken control,
                 // so the reloaded page is served by the NEW worker (and thus the
-                // new cached assets).
-                navigator.serviceWorker.addEventListener('controllerchange', () => {
-                    reloadForServiceWorkerUpdate('New service worker took control');
-                });
+                // new cached assets) — except when the first install claims a
+                // page that no worker controlled (see above).
+                navigator.serviceWorker.addEventListener('controllerchange', handleServiceWorkerControllerChange);
             });
         }
         

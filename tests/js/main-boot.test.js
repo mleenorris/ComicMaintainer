@@ -31,26 +31,16 @@ test('a visit without a route lands on the overview', async () => {
     }
 });
 
-test('saved page size, filter and sort are applied when the preferences arrive, and the library reloads', async () => {
+test('a saved filter and sort are applied when the preferences arrive, and the library reloads', async () => {
     const page = await boot({
         hash: '#/library',
-        routes: libraryRoutes({ 'GET /api/preferences': preferences({ perPage: 50, filterMode: 'unmarked', sortMode: 'date' }) }),
-        beforeScripts(window) {
-            // index.html no longer has a page-size selector; a page that does is kept in sync.
-            const select = window.document.createElement('select');
-            select.id = 'perPageSelect';
-            for (const size of [50, 100, 200]) select.add(new window.Option(String(size), String(size), size === 100, size === 100));
-            window.document.body.appendChild(select);
-        }
+        routes: libraryRoutes({ 'GET /api/preferences': preferences({ filterMode: 'unmarked', sortMode: 'date' }) })
     });
 
-    assert.equal(page.evaluate('perPage'), 50);
-    assert.equal(page.$('#perPageSelect').value, '50');
     assert.equal(page.$('#headerFilterLabel').textContent, 'Unmarked');
     assert.deepEqual(activeItems(page, 'headerFilterMenu'), ['unmarked']);
     assert.equal(page.$('#headerSortLabel').textContent, 'Date ↑');
     assert.deepEqual(activeItems(page, 'headerSortMenu'), ['date']);
-    assert.equal(page.evaluate('libraryViewMode'), 'series');
 
     const last = seriesListLoads(page).at(-1);
     assert.equal(last.query.filter, 'unmarked');
@@ -58,13 +48,11 @@ test('saved page size, filter and sort are applied when the preferences arrive, 
     assert.ok(page.$('#fileList .series-card'), 'the reloaded library is shown');
 });
 
-test('the library reloads for a saved page size alone, but not for the defaults', async () => {
+test('saved preferences that change nothing the library lists do not reload it', async () => {
     const custom = await boot({ hash: '#/library', routes: libraryRoutes({ 'GET /api/preferences': preferences({ perPage: 25 }) }) });
-    assert.equal(custom.evaluate('perPage'), 25);
-    assert.equal(seriesListLoads(custom).length, 2);
+    assert.equal(seriesListLoads(custom).length, 1);
 
     const defaults = await boot({ hash: '#/library', routes: libraryRoutes({ 'GET /api/preferences': preferences({ perPage: 0, filterMode: '', sortMode: '', sortDirection: '' }) }) });
-    assert.equal(defaults.evaluate('perPage'), 100, 'no saved size means the default');
     assert.equal(defaults.evaluate('filterMode'), 'all');
     assert.equal(defaults.evaluate('sortMode'), 'name');
     assert.equal(defaults.evaluate('sortDirection'), 'asc');

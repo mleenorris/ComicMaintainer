@@ -1,9 +1,13 @@
+using System.Globalization;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
-using ComicMaintainer.Tests.Helpers;
+using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Services.Auth;
 using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Controllers;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -14,16 +18,13 @@ using Moq;
 namespace ComicMaintainer.Tests.Controllers;
 
 /// <summary>
-/// Covers the registration gate, first-run admin setup, SSE token issuance and
+/// Covers who may register an account, first-run admin setup, stream token issuance and
 /// the anonymous / Authelia branches of the status endpoints in <see cref="AuthController"/>.
 /// </summary>
 public class AuthControllerCoverageTests
 {
-    private const string RegistrationDisabledError = "Registration is disabled. Ask an administrator to create your account.";
-
     private readonly Mock<IAuthService> _authService = new();
     private readonly Mock<IAuthorizationService> _authorization = new();
-    private readonly AppSettings _appSettings = new() { AllowRegistration = false };
     private readonly AutheliaSettings _autheliaSettings = new() { Enabled = false };
 
     public AuthControllerCoverageTests()
@@ -41,7 +42,7 @@ public class AuthControllerCoverageTests
             NullLogger<AuthController>.Instance,
             Options.Create(_autheliaSettings),
             _authorization.Object,
-            new TestOptionsMonitor<AppSettings>(_appSettings))
+            ClientAddressResolver.Direct)
         {
             ControllerContext = new ControllerContext
             {
@@ -80,48 +81,22 @@ public class AuthControllerCoverageTests
 
     // ----- Register -------------------------------------------------------
 
+    // The pipeline refuses everyone but an administrator before the action runs (401 anonymously, 403 signed in);
+    // RegisterAuthorizationIntegrationTests checks the answers through the real pipeline.
     [Fact]
-    public async Task Register_WhenDisabledAndAnonymous_ReturnsUnauthorizedWithoutCreatingAccount()
+    public void Register_RequiresTheAdministratorPolicy_AndIsNeverAnonymous()
     {
-        var controller = CreateController(Anonymous());
+        var register = typeof(AuthController).GetMethod(nameof(AuthController.Register))!;
 
-        var result = await controller.Register(NewAccount);
-
-        var unauthorized = Assert.IsType<UnauthorizedObjectResult>(result);
-        Assert.Equal(RegistrationDisabledError, Prop<string>(unauthorized.Value, "error"));
-        _authService.VerifyNoOtherCalls();
-        _authorization.Verify(a => a.AuthorizeAsync(
-            It.IsAny<ClaimsPrincipal>(), It.IsAny<object?>(), AuthorizationPolicies.CanAdminister), Times.Once);
+        var authorize = Assert.Single(register.GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true).Cast<AuthorizeAttribute>());
+        Assert.Equal(AuthorizationPolicies.CanAdminister, authorize.Policy);
+        Assert.Empty(register.GetCustomAttributes(typeof(IAllowAnonymous), inherit: true));
+        Assert.Empty(typeof(AuthController).GetCustomAttributes(typeof(IAllowAnonymous), inherit: true));
     }
 
     [Fact]
-    public async Task Register_WhenDisabledAndPrincipalHasNoIdentity_ReturnsUnauthorized()
+    public async Task Register_CreatesTheAccount_WithoutCheckingAnySetting()
     {
-        var controller = CreateController(new ClaimsPrincipal());
-
-        var result = await controller.Register(NewAccount);
-
-        Assert.IsType<UnauthorizedObjectResult>(result);
-        _authService.VerifyNoOtherCalls();
-    }
-
-    [Fact]
-    public async Task Register_WhenDisabledAndSignedInNonAdmin_ReturnsForbidden()
-    {
-        var controller = CreateController(SignedIn());
-
-        var result = await controller.Register(NewAccount);
-
-        var forbidden = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);
-        Assert.Equal(RegistrationDisabledError, Prop<string>(forbidden.Value, "error"));
-        _authService.VerifyNoOtherCalls();
-    }
-
-    [Fact]
-    public async Task Register_WhenDisabled_AdministratorCanStillCreateAccounts()
-    {
-        GrantPolicy(AuthorizationPolicies.CanAdminister);
         _authService.Setup(s => s.RegisterAsync("newuser", "Password123!", "new@example.com", null)).ReturnsAsync((true, null));
         var controller = CreateController(SignedIn(name: "admin"));
 
@@ -130,28 +105,15 @@ public class AuthControllerCoverageTests
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal("User registered successfully", Prop<string>(ok.Value, "message"));
         _authService.Verify(s => s.RegisterAsync("newuser", "Password123!", "new@example.com", null), Times.Once);
+        _authorization.VerifyNoOtherCalls();
     }
 
     [Fact]
-    public async Task Register_WhenEnabled_AnonymousVisitorCanRegister()
+    public async Task Register_WhenTheServiceRejects_ReturnsBadRequestWithServiceError()
     {
-        _appSettings.AllowRegistration = true;
-        _authService.Setup(s => s.RegisterAsync("newuser", "Password123!", "new@example.com", null)).ReturnsAsync((true, null));
-        var controller = CreateController(Anonymous());
-
-        var result = await controller.Register(NewAccount);
-
-        Assert.IsType<OkObjectResult>(result);
-        _authService.Verify(s => s.RegisterAsync("newuser", "Password123!", "new@example.com", null), Times.Once);
-    }
-
-    [Fact]
-    public async Task Register_WhenEnabledButServiceRejects_ReturnsBadRequestWithServiceError()
-    {
-        _appSettings.AllowRegistration = true;
         _authService.Setup(s => s.RegisterAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
             .ReturnsAsync((false, "Username already taken"));
-        var controller = CreateController(Anonymous());
+        var controller = CreateController(SignedIn(name: "admin"));
 
         var result = await controller.Register(NewAccount);
 
@@ -159,14 +121,14 @@ public class AuthControllerCoverageTests
         Assert.Equal("Username already taken", Prop<string>(badRequest.Value, "error"));
     }
 
-    // ----- SetupAdmin -----------------------------------------------------
+    // ----- CompleteFirstRunSetup -----------------------------------------------------
 
     private void SetupRequired(bool required) =>
         _authService.Setup(s => s.IsSetupRequiredAsync()).ReturnsAsync(required);
 
     private void VerifyNoAdminCreated() =>
         _authService.Verify(
-            s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+            s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
 
     [Theory]
     [InlineData(null)]
@@ -178,7 +140,7 @@ public class AuthControllerCoverageTests
         SetupRequired(true);
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest(username!, "LongEnough1", null));
+        var result = await controller.CompleteFirstRunSetup(new SetupRequest(username!, "LongEnough1", null, "code"));
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal("Username must be at least 3 characters", Prop<string>(badRequest.Value, "error"));
@@ -195,7 +157,7 @@ public class AuthControllerCoverageTests
         SetupRequired(true);
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin", password!, null));
+        var result = await controller.CompleteFirstRunSetup(new SetupRequest("admin", password!, null, "code"));
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal("Password must be at least 8 characters", Prop<string>(badRequest.Value, "error"));
@@ -206,56 +168,44 @@ public class AuthControllerCoverageTests
     public async Task SetupAdmin_WithValidInput_CreatesFirstAdministrator()
     {
         SetupRequired(true);
-        _authService.Setup(s => s.SetupAdminAsync("admin", "12345678", "admin@example.com")).ReturnsAsync((true, null));
+        _authService.Setup(s => s.SetupAdminAsync("admin", "12345678", "admin@example.com", "code", "unknown"))
+            .ReturnsAsync((SetupOutcome.Created, null));
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", "admin@example.com"));
+        var result = await controller.CompleteFirstRunSetup(new SetupRequest("admin", "12345678", "admin@example.com", "code"));
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal("Admin user created successfully", Prop<string>(ok.Value, "message"));
-        _authService.Verify(s => s.SetupAdminAsync("admin", "12345678", "admin@example.com"), Times.Once);
+        _authService.Verify(s => s.SetupAdminAsync("admin", "12345678", "admin@example.com", "code", "unknown"), Times.Once);
     }
 
     [Fact]
-    public async Task SetupAdmin_WhenAConcurrentRequestCreatesTheAdminFirst_ReturnsBadRequestWithServiceError()
+    public async Task SetupAdmin_WhenAConcurrentRequestCreatesTheAdminFirst_Returns403WithServiceError()
     {
-        // Setup was still required when checked; the service then finds an admin.
+        // Setup was still available when checked; the service then finds an account.
         SetupRequired(true);
-        _authService.Setup(s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
-            .ReturnsAsync((false, "Admin user already exists"));
+        _authService.Setup(s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()))
+            .ReturnsAsync((SetupOutcome.NotAvailable, AuthService.SetupNotAvailableError));
         var controller = CreateController(Anonymous());
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", null));
+        var result = await controller.CompleteFirstRunSetup(new SetupRequest("admin", "12345678", null, "code"));
 
-        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal("Admin user already exists", Prop<string>(badRequest.Value, "error"));
+        var forbidden = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);
+        Assert.Equal(AuthService.SetupNotAvailableError, Prop<string>(forbidden.Value, "error"));
     }
 
     [Fact]
-    public async Task SetupAdmin_AfterSetup_LetsAnAdministratorThroughToTheService()
+    public async Task SetupAdmin_AfterSetup_RefusesAnAdministratorToo()
     {
         SetupRequired(false);
         GrantPolicy(AuthorizationPolicies.CanAdminister);
-        _authService.Setup(s => s.SetupAdminAsync("admin2", "12345678", null))
-            .ReturnsAsync((false, "Admin user already exists"));
         var controller = CreateController(SignedIn("admin-1", "admin"));
 
-        var result = await controller.SetupAdmin(new SetupRequest("admin2", "12345678", null));
+        var result = await controller.CompleteFirstRunSetup(new SetupRequest("admin2", "12345678", null, "code"));
 
-        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal("Admin user already exists", Prop<string>(badRequest.Value, "error"));
-        _authService.Verify(s => s.SetupAdminAsync("admin2", "12345678", null), Times.Once);
-    }
-
-    [Fact]
-    public async Task SetupAdmin_AfterSetup_ChallengesAPrincipalWithoutAnIdentity()
-    {
-        SetupRequired(false);
-        var controller = CreateController(new ClaimsPrincipal());
-
-        var result = await controller.SetupAdmin(new SetupRequest("admin", "12345678", null));
-
-        Assert.IsType<ChallengeResult>(result);
+        var forbidden = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status403Forbidden, forbidden.StatusCode);
         VerifyNoAdminCreated();
     }
 
@@ -303,54 +253,171 @@ public class AuthControllerCoverageTests
         Assert.True(Prop<bool>(ok.Value, "requiresLogin"));
     }
 
-    // ----- GetSseToken ----------------------------------------------------
+    // ----- GetStreamToken -------------------------------------------------
 
-    public static TheoryData<string> IncompleteUsers => new() { "no-identity", "no-user-id", "no-name" };
+    public static TheoryData<string> IncompleteUsers => new() { "no-identity", "no-user-id" };
 
     [Theory]
     [MemberData(nameof(IncompleteUsers))]
-    public async Task GetSseToken_WithoutUserIdOrName_ReturnsUnauthorized(string kind)
+    public async Task GetStreamToken_WithoutUserId_ReturnsUnauthorized(string kind)
     {
         var user = kind switch
         {
             "no-identity" => new ClaimsPrincipal(),
-            "no-user-id" => SignedIn(userId: null, name: "reader"),
-            _ => SignedIn(userId: "user-1", name: null),
+            _ => SignedIn(userId: null, name: "reader"),
         };
         var controller = CreateController(user);
 
-        var result = await controller.GetSseToken();
+        var result = await controller.GetStreamToken();
 
         Assert.IsType<UnauthorizedResult>(result);
         _authService.VerifyNoOtherCalls();
     }
 
     [Fact]
-    public async Task GetSseToken_ForSignedInUser_ReturnsFreshToken()
+    public async Task GetStreamToken_ForSignedInUser_ReturnsAStreamTokenAndItsLifetime()
     {
-        _authService.Setup(s => s.GenerateTokenForUserAsync("user-1")).ReturnsAsync((true, "sse-jwt", null));
+        _authService.Setup(s => s.GenerateStreamTokenAsync("user-1")).ReturnsAsync((true, "stream-jwt", null));
         var controller = CreateController(SignedIn(extra: new Claim("auth_method", "authelia")));
 
-        var result = await controller.GetSseToken();
+        var result = await controller.GetStreamToken();
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        Assert.Equal("sse-jwt", Prop<string>(ok.Value, "token"));
-        _authService.Verify(s => s.GenerateTokenForUserAsync("user-1"), Times.Once);
+        Assert.Equal("stream-jwt", Prop<string>(ok.Value, "token"));
+        Assert.Equal(60, Prop<int>(ok.Value, "expiresIn"));
+        // Never a session token: the stream token is the only token that may travel in a URL.
+        _authService.Verify(s => s.GenerateStreamTokenAsync("user-1"), Times.Once);
+        _authService.Verify(s => s.GenerateTokenForUserAsync(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]
-    public async Task GetSseToken_WhenTokenGenerationFails_Returns500WithGenericError()
+    public async Task GetStreamToken_ForADisabledOrDeletedAccount_ReturnsUnauthorized()
     {
-        _authService.Setup(s => s.GenerateTokenForUserAsync("user-1"))
-            .ReturnsAsync((false, string.Empty, "User not found in database"));
+        _authService.Setup(s => s.GenerateStreamTokenAsync("user-1"))
+            .ReturnsAsync((false, string.Empty, "User not found"));
         var controller = CreateController(SignedIn());
 
-        var result = await controller.GetSseToken();
+        var result = await controller.GetStreamToken();
 
-        var error = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(StatusCodes.Status500InternalServerError, error.StatusCode);
-        Assert.Equal("Failed to generate token", Prop<string>(error.Value, "error"));
+        Assert.IsType<UnauthorizedResult>(result);
     }
+
+    // ----- API key status and revocation ----------------------------------
+
+    [Theory]
+    [MemberData(nameof(IncompleteUsers))]
+    public async Task GetApiKeyStatus_WithoutUserId_ReturnsUnauthorized(string kind)
+    {
+        var controller = CreateController(IncompleteUser(kind));
+
+        Assert.IsType<UnauthorizedResult>(await controller.GetApiKeyStatus());
+        _authService.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task GetApiKeyStatus_ReportsTheAccountsKeyAndTheHeaderItIsSentIn()
+    {
+        var createdAt = new DateTime(2025, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        var usedAt = createdAt.AddDays(3);
+        _authService.Setup(s => s.GetApiKeyStatusAsync("user-1")).ReturnsAsync(new ApiKeyStatus(true, createdAt, usedAt));
+
+        var ok = Assert.IsType<OkObjectResult>(await CreateController(SignedIn()).GetApiKeyStatus());
+
+        Assert.True(Prop<bool>(ok.Value, "hasApiKey"));
+        Assert.Equal(createdAt, Prop<DateTime?>(ok.Value, "createdAt"));
+        Assert.Equal(usedAt, Prop<DateTime?>(ok.Value, "lastUsedAt"));
+        Assert.Equal(ApiKeys.HeaderName, Prop<string>(ok.Value, "header"));
+    }
+
+    [Theory]
+    [MemberData(nameof(IncompleteUsers))]
+    public async Task RevokeApiKey_WithoutUserId_ReturnsUnauthorized(string kind)
+    {
+        var controller = CreateController(IncompleteUser(kind));
+
+        Assert.IsType<UnauthorizedResult>(await controller.RevokeApiKey());
+        _authService.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task RevokeApiKey_WithAKey_ReturnsNoContent()
+    {
+        _authService.Setup(s => s.RevokeApiKeyAsync("user-1")).ReturnsAsync(true);
+
+        Assert.IsType<NoContentResult>(await CreateController(SignedIn()).RevokeApiKey());
+    }
+
+    [Fact]
+    public async Task RevokeApiKey_WithoutAKey_ReturnsNotFoundWithTheReason()
+    {
+        _authService.Setup(s => s.RevokeApiKeyAsync("user-1")).ReturnsAsync(false);
+
+        var notFound = Assert.IsType<NotFoundObjectResult>(await CreateController(SignedIn()).RevokeApiKey());
+
+        Assert.Equal("This account has no API key.", Prop<string>(notFound.Value, "error"));
+    }
+
+    // ----- Logout ---------------------------------------------------------
+
+    [Theory]
+    [MemberData(nameof(IncompleteUsers))]
+    public async Task Logout_WithoutUserId_ReturnsUnauthorized(string kind)
+    {
+        var controller = CreateController(IncompleteUser(kind));
+
+        Assert.IsType<UnauthorizedResult>(await controller.Logout());
+        _authService.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Logout_RefusesTheSessionTokenThisRequestWasMadeWithUntilItExpires()
+    {
+        var expiresAt = new DateTimeOffset(2030, 6, 1, 12, 0, 0, TimeSpan.Zero);
+        var controller = CreateController(SignedIn(extra:
+        [
+            new Claim(JwtRegisteredClaimNames.Jti, "token-1"),
+            new Claim(JwtRegisteredClaimNames.Exp, expiresAt.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)),
+        ]));
+
+        Assert.IsType<NoContentResult>(await controller.Logout());
+
+        _authService.Verify(s => s.LogoutAsync("user-1", "token-1", expiresAt.UtcDateTime, false), Times.Once);
+    }
+
+    [Fact]
+    public async Task Logout_ForAllSessions_AsksForEverySessionToBeRefused()
+    {
+        var controller = CreateController(SignedIn(extra: new Claim(JwtRegisteredClaimNames.Jti, "token-1")));
+
+        Assert.IsType<NoContentResult>(await controller.Logout(new LogoutRequest(AllSessions: true)));
+
+        _authService.Verify(s => s.LogoutAsync("user-1", "token-1", It.IsAny<DateTime>(), true), Times.Once);
+    }
+
+    // A session without a usable expiry claim is still revoked, for at least as long as a session token can live.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not-a-number")]
+    public async Task Logout_WithoutAReadableExpiry_RefusesTheTokenForADay(string? expClaim)
+    {
+        Claim[] claims = expClaim is null ? [] : [new Claim(JwtRegisteredClaimNames.Exp, expClaim)];
+        DateTime recorded = default;
+        _authService
+            .Setup(s => s.LogoutAsync("user-1", null, It.IsAny<DateTime>(), false))
+            .Callback((string _, string? _, DateTime expires, bool _) => recorded = expires)
+            .Returns(Task.CompletedTask);
+        var before = DateTime.UtcNow;
+
+        Assert.IsType<NoContentResult>(await CreateController(SignedIn(extra: claims)).Logout());
+
+        Assert.InRange(recorded, before.AddDays(1).AddSeconds(-5), DateTime.UtcNow.AddDays(1).AddSeconds(5));
+    }
+
+    private static ClaimsPrincipal IncompleteUser(string kind) => kind switch
+    {
+        "no-identity" => new ClaimsPrincipal(),
+        _ => SignedIn(userId: null, name: "reader"),
+    };
 
     // ----- GetCurrentUser -------------------------------------------------
 

@@ -47,8 +47,8 @@ public class HtmlVersioningTests
         // Any /css/...css (or /js/...js) URL must carry a ?v= query string,
         // otherwise the browser will hit the unversioned URL which is never
         // invalidated when the app is updated.
-        var unversionedCss = new Regex("href\\s*=\\s*[\"']/css/[^\"'?\\s]+\\.css[\"']");
-        var unversionedJs = new Regex("src\\s*=\\s*[\"']/js/[^\"'?\\s]+\\.js[\"']");
+        var unversionedCss = new Regex("href\\s*=\\s*[\"'](?:__BASE_PATH__)?/css/[^\"'?\\s]+\\.css[\"']");
+        var unversionedJs = new Regex("src\\s*=\\s*[\"'](?:__BASE_PATH__)?/js/[^\"'?\\s]+\\.js[\"']");
 
         Assert.False(
             unversionedCss.IsMatch(html),

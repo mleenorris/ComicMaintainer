@@ -3,12 +3,16 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Controllers;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Newtonsoft.Json.Linq;
+using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Tests.Helpers;
 
 namespace ComicMaintainer.Tests.Controllers;
 
@@ -37,9 +41,6 @@ public sealed class MetadataControllerCoverageTests : IDisposable
 
     private MetadataController CreateController(
         IExternalSeriesMetadataService? external = null,
-        bool withProcessor = false,
-        bool withFileStore = false,
-        bool withRetag = false,
         ISeriesMetadataRefreshJobService? refreshJobs = null,
         IHostApplicationLifetime? lifetime = null) =>
         new(
@@ -48,9 +49,9 @@ public sealed class MetadataControllerCoverageTests : IDisposable
             refreshJobs ?? _refreshJobs.Object,
             external ?? _external.Object,
             NullLogger<MetadataController>.Instance,
-            withProcessor ? _processor.Object : null,
-            withFileStore ? _fileStore.Object : null,
-            withRetag ? _retag.Object : null,
+            _processor.Object,
+            _fileStore.Object,
+            _retag.Object,
             lifetime)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
@@ -60,13 +61,6 @@ public sealed class MetadataControllerCoverageTests : IDisposable
 
     // Error bodies are { error = "…" } objects so the UI can read the message.
     private static string? ErrorOf(ObjectResult result) => (string?)Json(result.Value)["error"];
-
-    private static void Assert500(object? result, string message)
-    {
-        var obj = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(StatusCodes.Status500InternalServerError, obj.StatusCode);
-        Assert.Equal(message, ErrorOf(obj));
-    }
 
     private static void AssertBadRequest(object? result, string message) =>
         Assert.Equal(message, ErrorOf(Assert.IsType<BadRequestObjectResult>(result)));
@@ -93,28 +87,24 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     // ---- RefreshAll / MatchUnmatched / RefreshSelected ----------------------------------
 
     [Fact]
-    public async Task RefreshAll_LibraryFailure_Returns500WithoutQueueing()
+    public async Task RefreshAll_LibraryFailure_EscapesWithoutQueueing()
     {
         _library.Setup(l => l.GetSeriesAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(),
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("db down"));
 
-        var result = await CreateController().RefreshAll(CancellationToken.None);
-
-        Assert500(result.Result, "Error queuing metadata refresh");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController().RefreshAll(CancellationToken.None));
         _refreshJobs.Verify(r => r.StartAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task MatchUnmatched_JobStartFailure_Returns500()
+    public async Task MatchUnmatched_JobStartFailure_Escapes()
     {
         SetupLibrary(new SeriesLibraryDto { Title = "Batman", CanonicalTitle = "Batman" });
         SetupStartThrows();
 
-        var result = await CreateController().MatchUnmatched(CancellationToken.None);
-
-        Assert500(result.Result, "Error queuing metadata match");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController().MatchUnmatched(CancellationToken.None));
     }
 
     [Fact]
@@ -151,14 +141,12 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task RefreshSelected_JobStartFailure_Returns500()
+    public async Task RefreshSelected_JobStartFailure_Escapes()
     {
         SetupStartThrows();
 
-        var result = await CreateController().RefreshSelected(
-            new MetadataController.RefreshSelectedRequest { Series = new() { "Batman" } });
-
-        Assert500(result.Result, "Error queuing metadata refresh");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController().RefreshSelected(
+            new MetadataController.RefreshSelectedRequest { Series = new() { "Batman" } }));
     }
 
     // ---- RefreshOne ---------------------------------------------------------------------
@@ -175,24 +163,20 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task RefreshOne_SynchronousLookupFailure_Returns500()
+    public async Task RefreshOne_SynchronousLookupFailure_Escapes()
     {
         _cache.Setup(c => c.RefreshAsync("Batman", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("provider down"));
 
-        var result = await CreateController().RefreshOne("Batman", queue: false, CancellationToken.None);
-
-        Assert500(result.Result, "Error refreshing metadata");
+        await Assert.ThrowsAsync<HttpRequestException>(() => CreateController().RefreshOne("Batman", queue: false, CancellationToken.None));
     }
 
     [Fact]
-    public async Task RefreshOne_QueuedLookupFailure_Returns500()
+    public async Task RefreshOne_QueuedLookupFailure_Escapes()
     {
         SetupStartThrows();
 
-        var result = await CreateController().RefreshOne("Batman", queue: true, CancellationToken.None);
-
-        Assert500(result.Result, "Error refreshing metadata");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController().RefreshOne("Batman", queue: true, CancellationToken.None));
         _cache.Verify(c => c.RefreshAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -276,15 +260,13 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task RefreshFolder_SeriesIdLookupFailure_Returns500()
+    public async Task RefreshFolder_SeriesIdLookupFailure_Escapes()
     {
         _library.Setup(l => l.GetTitlesForSeriesIdAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("db down"));
 
-        var result = await CreateController().RefreshFolder(
-            new MetadataController.RefreshFolderRequest { SeriesId = "batman" }, CancellationToken.None);
-
-        Assert500(result.Result, "Error queuing metadata refresh");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController().RefreshFolder(
+            new MetadataController.RefreshFolderRequest { SeriesId = "batman" }, CancellationToken.None));
     }
 
     // ---- Refresh job lifetime -----------------------------------------------------------
@@ -329,8 +311,11 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         var jobs = new SeriesMetadataRefreshJobService(
             _cache.Object,
             NullLogger<SeriesMetadataRefreshJobService>.Instance,
-            fileStore: _fileStore.Object,
-            processor: _processor.Object);
+            Mock.Of<IEventBroadcaster>(),
+            _fileStore.Object,
+            _processor.Object,
+            new TestOptionsMonitor<AppSettings>(new AppSettings()),
+            TestServices.ResolverThatRetagsEveryFile());
 
         var result = await CreateController(refreshJobs: jobs).RefreshAll(_cts.Token);
         var jobId = Json(Assert.IsType<OkObjectResult>(result.Result).Value)["jobId"]!.ToObject<Guid>();
@@ -469,14 +454,12 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task GetProviders_HealthCheckFailure_Returns500()
+    public async Task GetProviders_HealthCheckFailure_Escapes()
     {
         _external.Setup(e => e.CheckHealthAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("dns failure"));
 
-        var result = await CreateController().GetProviders(CancellationToken.None);
-
-        Assert500(result.Result, "Error retrieving provider health");
+        await Assert.ThrowsAsync<HttpRequestException>(() => CreateController().GetProviders(CancellationToken.None));
     }
 
     [Fact]
@@ -491,14 +474,12 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task GetProviders_CancellationTheCallerDidNotAskFor_Returns500()
+    public async Task GetProviders_CancellationTheCallerDidNotAskFor_Escapes()
     {
         _external.Setup(e => e.CheckHealthAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TaskCanceledException("timed out"));
 
-        var result = await CreateController().GetProviders(_cts.Token);
-
-        Assert500(result.Result, "Error retrieving provider health");
+        await Assert.ThrowsAsync<TaskCanceledException>(() => CreateController().GetProviders(_cts.Token));
     }
 
     [Fact]
@@ -641,14 +622,12 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task Search_ProviderFailure_Returns500()
+    public async Task Search_ProviderFailure_Escapes()
     {
         _external.Setup(e => e.SearchSeriesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("provider down"));
 
-        var result = await CreateController().Search("Batman", 10, CancellationToken.None);
-
-        Assert500(result.Result, "Error searching external metadata");
+        await Assert.ThrowsAsync<HttpRequestException>(() => CreateController().Search("Batman", 10, CancellationToken.None));
     }
 
     [Fact]
@@ -663,14 +642,118 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task Search_CancellationTheCallerDidNotAskFor_Returns500()
+    public async Task Search_CancellationTheCallerDidNotAskFor_Escapes()
     {
         _external.Setup(e => e.SearchSeriesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TaskCanceledException("timed out"));
 
-        var result = await CreateController().Search("Batman", 10, _cts.Token);
+        await Assert.ThrowsAsync<TaskCanceledException>(() => CreateController().Search("Batman", 10, _cts.Token));
+    }
 
-        Assert500(result.Result, "Error searching external metadata");
+    [Fact]
+    public async Task Search_ProvidersUnavailable_Returns503NamingThem()
+    {
+        _external.Setup(e => e.SearchSeriesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ExternalMetadataUnavailableException(new[]
+            {
+                new ExternalMetadataUnavailableException("MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex request timed out: api.internal:443"),
+                new ExternalMetadataUnavailableException("ComicVine", ExternalMetadataFailureKind.RateLimited, "ComicVine budget used up", TimeSpan.FromSeconds(90))
+            }));
+
+        var result = await CreateController().Search("Batman", 10, CancellationToken.None);
+
+        var obj = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, obj.StatusCode);
+        var body = Json(obj.Value);
+        Assert.Equal(
+            "External metadata providers unavailable: MangaDex did not answer in time; ComicVine is limiting requests; try again in 90s",
+            (string?)body["error"]);
+        Assert.Equal(new[] { "MangaDex", "ComicVine" }, body["providers"]!.Select(p => (string?)p));
+        Assert.Equal(90, (int?)body["retry_after_seconds"]);
+    }
+
+    [Fact]
+    public async Task Search_ReturnsEachCandidatesProviderId()
+    {
+        _external.Setup(e => e.SearchSeriesAsync("Berserk", 10, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ExternalSeriesMetadata>
+            {
+                new() { CanonicalTitle = "Berserk", Source = "AniListManga", SourceId = "30002" }
+            });
+
+        var result = await CreateController().Search("Berserk", 10, CancellationToken.None);
+
+        var json = Json(Assert.IsType<OkObjectResult>(result.Result).Value);
+        Assert.Equal("30002", (string?)json["results"]![0]!["source_id"]);
+    }
+
+    [Fact]
+    public async Task Search_ReturnsEachCandidatesDetails()
+    {
+        _external.Setup(e => e.SearchSeriesAsync("Berserk", 10, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ExternalSeriesMetadata>
+            {
+                new()
+                {
+                    CanonicalTitle = "Berserk",
+                    Source = "AniListManga",
+                    Synopsis = "Guts fights.",
+                    SiteUrl = "https://anilist.co/manga/30002",
+                    Genres = new List<string> { "Action" },
+                    PublicationStatus = SeriesPublicationStatus.Completed,
+                    TotalChapters = 364,
+                    Origin = "ja"
+                },
+                new() { CanonicalTitle = "Berserk 2", Source = "ComicVine", Genres = null! }
+            });
+
+        var result = await CreateController().Search("Berserk", 10, CancellationToken.None);
+
+        var results = Json(Assert.IsType<OkObjectResult>(result.Result).Value)["results"]!;
+        var candidate = results[0]!;
+        Assert.Equal("Guts fights.", (string?)candidate["synopsis"]);
+        Assert.Equal("https://anilist.co/manga/30002", (string?)candidate["site_url"]);
+        Assert.Equal("Action", (string?)candidate["genres"]![0]);
+        Assert.Equal(SeriesPublicationStatus.Completed, (string?)candidate["publication_status"]);
+        Assert.Equal(364, (int?)candidate["total_chapters"]);
+        Assert.Equal("ja", (string?)candidate["origin"]);
+        Assert.Empty(results[1]!["genres"]!);
+    }
+
+    [Fact]
+    public async Task RefreshOne_ProvidersUnavailable_Returns503AndKeepsTheRecord()
+    {
+        _cache.Setup(c => c.RefreshAsync("Batman", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ExternalMetadataUnavailableException(
+                "ComicVine", ExternalMetadataFailureKind.Unavailable, "ComicVine request failed: No such host api.internal:443"));
+
+        var result = await CreateController().RefreshOne("Batman", queue: false, CancellationToken.None);
+
+        var obj = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, obj.StatusCode);
+        Assert.Equal("ComicVine could not be reached or answered with an error", ErrorOf(obj));
+        Assert.Null((int?)Json(obj.Value)["retry_after_seconds"]);
+    }
+
+    [Fact]
+    public void RefreshOne_RunsUnderTheLongRunningRequestTimeout()
+    {
+        // The synchronous form can wait out a provider's request pace.
+        var attribute = typeof(MetadataController).GetMethod(nameof(MetadataController.RefreshOne))!
+            .GetCustomAttributes(typeof(RequestTimeoutAttribute), inherit: true)
+            .Cast<RequestTimeoutAttribute>()
+            .Single();
+
+        Assert.Equal(RequestTimeoutPolicies.LongRunning, attribute.PolicyName);
+    }
+
+    [Fact]
+    public void Search_AnswersWithinTheDefaultRequestTimeout()
+    {
+        // The pickers run under the default timeout; a slow provider must be
+        // cut off first, so they show what answered instead of a 504.
+        Assert.True(CompositeExternalSeriesMetadataService.SearchCallTimeout < RequestTimeoutPolicies.DefaultTimeout);
+        Assert.True(RateLimitedHttpInvoker.InteractivePermitWait < CompositeExternalSeriesMetadataService.SearchCallTimeout);
     }
 
     // ---- GetSeries ----------------------------------------------------------------------
@@ -739,15 +822,13 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task SetAliases_CacheFailure_Returns500()
+    public async Task SetAliases_CacheFailure_Escapes()
     {
         _cache.Setup(c => c.SetUserAliasesAsync(It.IsAny<string>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("db locked"));
 
-        var result = await CreateController().SetAliases(
-            "Batman", new MetadataController.SetAliasesRequest { Aliases = new() { "Bats" } }, CancellationToken.None);
-
-        Assert500(result.Result, "Error updating aliases");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().SetAliases(
+            "Batman", new MetadataController.SetAliasesRequest { Aliases = new() { "Bats" } }, CancellationToken.None));
     }
 
     [Theory]
@@ -820,6 +901,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
                 CanonicalTitle = "  Attack on Titan  ",
                 Aliases = new() { " Shingeki no Kyojin ", "", "   ", "AoT" },
                 Source = "AniList",
+                SourceId = " 16498 ",
                 ImageUrl = "https://img.example/aot.jpg",
                 ThumbnailUrl = "   ",
                 LocalizedTitles = new()
@@ -837,12 +919,56 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         Assert.NotNull(_appliedMatch);
         Assert.Equal("Attack on Titan", _appliedMatch!.CanonicalTitle);
         Assert.Equal(new[] { "Shingeki no Kyojin", "AoT" }, _appliedMatch.Aliases);
+        Assert.Equal("16498", _appliedMatch.SourceId);
         Assert.Equal("AniList", _appliedMatch.Source);
         Assert.Equal("https://img.example/aot.jpg", _appliedMatch.ImageUrl);
         Assert.Null(_appliedMatch.ThumbnailUrl);
         Assert.Equal(
             new (string, string?)[] { ("進撃の巨人", "ja"), ("Attack on Titan", null), ("L'Attaque des Titans", null) },
             _appliedMatch.LocalizedTitles.Select(t => (t.Title, t.Language)));
+    }
+
+    [Fact]
+    public async Task ApplyMatch_PassesTheCandidatesDetailsToTheCache()
+    {
+        SetupApplyMatch("Berserk");
+
+        var result = await CreateController().ApplyMatch(
+            "Berserk",
+            new MetadataController.ApplyMatchRequest
+            {
+                CanonicalTitle = "Berserk",
+                Source = "AniListManga",
+                Synopsis = "Guts fights.",
+                SiteUrl = "https://anilist.co/manga/30002",
+                Genres = new() { "Action", "Drama" },
+                PublicationStatus = "completed",
+                TotalChapters = 364,
+                Origin = "ja"
+            },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal("Guts fights.", _appliedMatch!.Synopsis);
+        Assert.Equal("https://anilist.co/manga/30002", _appliedMatch.SiteUrl);
+        Assert.Equal(new[] { "Action", "Drama" }, _appliedMatch.Genres);
+        Assert.Equal("completed", _appliedMatch.PublicationStatus);
+        Assert.Equal(364, _appliedMatch.TotalChapters);
+        Assert.Equal("ja", _appliedMatch.Origin);
+    }
+
+    [Fact]
+    public async Task ApplyMatch_WithoutDetailsPassesNoGenres()
+    {
+        SetupApplyMatch("Saga");
+
+        await CreateController().ApplyMatch(
+            "Saga",
+            new MetadataController.ApplyMatchRequest { CanonicalTitle = "Saga", Genres = null },
+            CancellationToken.None);
+
+        Assert.Empty(_appliedMatch!.Genres);
+        Assert.Null(_appliedMatch.SiteUrl);
     }
 
     [Fact]
@@ -884,28 +1010,14 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task ApplyMatch_CacheFailure_Returns500()
+    public async Task ApplyMatch_CacheFailure_Escapes()
     {
         _cache.Setup(c => c.ApplyExternalMatchAsync(It.IsAny<string>(), It.IsAny<ExternalSeriesMetadata>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("db locked"));
 
-        var result = await CreateController(withProcessor: true, withFileStore: true).ApplyMatch(
-            "Batman", new MetadataController.ApplyMatchRequest { CanonicalTitle = "Batman" }, CancellationToken.None);
-
-        Assert500(result.Result, "Error applying match");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().ApplyMatch(
+            "Batman", new MetadataController.ApplyMatchRequest { CanonicalTitle = "Batman" }, CancellationToken.None));
         _fileStore.VerifyNoOtherCalls();
-    }
-
-    [Fact]
-    public async Task ApplyMatch_ProcessorWithoutFileStore_SkipsNormalizeJob()
-    {
-        var record = SetupApplyMatch("Batman");
-
-        var result = await CreateController(withProcessor: true).ApplyMatch(
-            "Batman", new MetadataController.ApplyMatchRequest { CanonicalTitle = "Batman: Year One" }, CancellationToken.None);
-
-        Assert.Same(record, Assert.IsType<OkObjectResult>(result.Result).Value);
-        _processor.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -915,7 +1027,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("file store offline"));
 
-        var result = await CreateController(withProcessor: true, withFileStore: true).ApplyMatch(
+        var result = await CreateController().ApplyMatch(
             "Batman", new MetadataController.ApplyMatchRequest { CanonicalTitle = "Batman: Year One" }, CancellationToken.None);
 
         Assert.Same(record, Assert.IsType<OkObjectResult>(result.Result).Value);
@@ -946,7 +1058,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
             });
         var normalized = CaptureNormalizedPaths();
 
-        var result = await CreateController(withProcessor: true, withFileStore: true).ApplyMatch(
+        var result = await CreateController().ApplyMatch(
             "Batman", new MetadataController.ApplyMatchRequest { CanonicalTitle = "Batman: Year One" }, _cts.Token);
 
         Assert.IsType<OkObjectResult>(result.Result);
@@ -980,7 +1092,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
             });
         var normalized = CaptureNormalizedPaths();
 
-        var result = await CreateController(withProcessor: true, withFileStore: true).ApplyMatch(
+        var result = await CreateController().ApplyMatch(
             "Batman", new MetadataController.ApplyMatchRequest { CanonicalTitle = "Batman" }, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(result.Result);
@@ -997,7 +1109,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
                 new() { FilePath = "/library/Saga/Saga 001.cbz", Metadata = new ComicMetadata { Series = "Saga" } }
             });
 
-        var result = await CreateController(withProcessor: true, withFileStore: true).ApplyMatch(
+        var result = await CreateController().ApplyMatch(
             "Batman", new MetadataController.ApplyMatchRequest { CanonicalTitle = "Batman: Year One" }, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(result.Result);
@@ -1028,14 +1140,12 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task ClearExternal_CacheFailure_Returns500()
+    public async Task ClearExternal_CacheFailure_Escapes()
     {
         _cache.Setup(c => c.GetByTitleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("db locked"));
 
-        var result = await CreateController().ClearExternal("Batman", CancellationToken.None);
-
-        Assert500(result.Result, "Error clearing external metadata");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().ClearExternal("Batman", CancellationToken.None));
     }
 
     // ---- SetPreferredLanguage -----------------------------------------------------------
@@ -1043,7 +1153,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     [Fact]
     public async Task SetPreferredLanguage_BlankTitle_ReturnsBadRequest()
     {
-        var result = await CreateController(withRetag: true).SetPreferredLanguage(
+        var result = await CreateController().SetPreferredLanguage(
             "", new MetadataController.PreferredLanguageRequest { Language = "en" }, CancellationToken.None);
 
         AssertBadRequest(result.Result, "Series title is required");
@@ -1051,7 +1161,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task SetPreferredLanguage_NullBodyWithoutRetagService_ClearsPreference()
+    public async Task SetPreferredLanguage_NullBody_ClearsPreference()
     {
         var record = new SeriesMetadataCacheRecord { NormalizedKey = "saga" };
         _cache.Setup(c => c.SetPreferredLanguageAsync("Saga", null, _cts.Token)).ReturnsAsync(record);
@@ -1069,7 +1179,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         _cache.Setup(c => c.SetPreferredLanguageAsync("Saga", "en", It.IsAny<CancellationToken>())).ReturnsAsync(record);
         _retag.Setup(r => r.QueueRetagForSeriesAsync(record, It.IsAny<CancellationToken>())).ReturnsAsync(0);
 
-        var result = await CreateController(withRetag: true).SetPreferredLanguage(
+        var result = await CreateController().SetPreferredLanguage(
             "Saga", new MetadataController.PreferredLanguageRequest { Language = "en" }, CancellationToken.None);
 
         Assert.Same(record, Assert.IsType<OkObjectResult>(result.Result).Value);
@@ -1084,7 +1194,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         _retag.Setup(r => r.QueueRetagForSeriesAsync(record, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("file store offline"));
 
-        var result = await CreateController(withRetag: true).SetPreferredLanguage(
+        var result = await CreateController().SetPreferredLanguage(
             "Saga", new MetadataController.PreferredLanguageRequest { Language = "ja" }, CancellationToken.None);
 
         Assert.Same(record, Assert.IsType<OkObjectResult>(result.Result).Value);
@@ -1096,7 +1206,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         _cache.Setup(c => c.SetPreferredLanguageAsync("Saga", "xx", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ArgumentException("Unsupported language 'xx'"));
 
-        var result = await CreateController(withRetag: true).SetPreferredLanguage(
+        var result = await CreateController().SetPreferredLanguage(
             "Saga", new MetadataController.PreferredLanguageRequest { Language = "xx" }, CancellationToken.None);
 
         AssertBadRequest(result.Result, "Unsupported language 'xx'");
@@ -1104,15 +1214,13 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task SetPreferredLanguage_CacheFailure_Returns500()
+    public async Task SetPreferredLanguage_CacheFailure_Escapes()
     {
         _cache.Setup(c => c.SetPreferredLanguageAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("db locked"));
 
-        var result = await CreateController().SetPreferredLanguage(
-            "Saga", new MetadataController.PreferredLanguageRequest { Language = "en" }, CancellationToken.None);
-
-        Assert500(result.Result, "Error setting preferred language");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().SetPreferredLanguage(
+            "Saga", new MetadataController.PreferredLanguageRequest { Language = "en" }, CancellationToken.None));
     }
 
     // ---- SetSeriesName ------------------------------------------------------------------
@@ -1122,7 +1230,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     [InlineData("  ")]
     public async Task SetSeriesName_BlankTitle_ReturnsBadRequest(string title)
     {
-        var result = await CreateController(withRetag: true).SetSeriesName(
+        var result = await CreateController().SetSeriesName(
             title, new MetadataController.SeriesNameRequest { Name = "Batman" }, CancellationToken.None);
 
         AssertBadRequest(result.Result, "Series title is required");
@@ -1135,7 +1243,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         _cache.Setup(c => c.SetSeriesNameAsync("One-Punch Man", null, _cts.Token))
             .ReturnsAsync((SeriesMetadataCacheRecord?)null);
 
-        var result = await CreateController(withRetag: true).SetSeriesName("One-Punch Man", null, _cts.Token);
+        var result = await CreateController().SetSeriesName("One-Punch Man", null, _cts.Token);
 
         var record = Assert.IsType<SeriesMetadataCacheRecord>(Assert.IsType<OkObjectResult>(result.Result).Value);
         Assert.Equal("onepunchman", record.NormalizedKey);
@@ -1152,7 +1260,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         _cache.Setup(c => c.SetSeriesNameAsync("One-Punch Man", "One Punch-Man", _cts.Token)).ReturnsAsync(record);
         _retag.Setup(r => r.QueueRetagForSeriesAsync(record, _cts.Token)).ReturnsAsync(flaggedFiles);
 
-        var result = await CreateController(withRetag: true).SetSeriesName(
+        var result = await CreateController().SetSeriesName(
             "One-Punch Man", new MetadataController.SeriesNameRequest { Name = "One Punch-Man" }, _cts.Token);
 
         Assert.Same(record, Assert.IsType<OkObjectResult>(result.Result).Value);
@@ -1167,14 +1275,14 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         _retag.Setup(r => r.QueueRetagForSeriesAsync(It.IsAny<SeriesMetadataCacheRecord>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("file store offline"));
 
-        var result = await CreateController(withRetag: true).SetSeriesName(
+        var result = await CreateController().SetSeriesName(
             "Saga", new MetadataController.SeriesNameRequest { Name = "Saga (2012)" }, CancellationToken.None);
 
         Assert.Same(record, Assert.IsType<OkObjectResult>(result.Result).Value);
     }
 
     [Fact]
-    public async Task SetSeriesName_WithoutRetagService_ReturnsRecord()
+    public async Task SetSeriesName_NothingToRetag_ReturnsRecord()
     {
         var record = new SeriesMetadataCacheRecord { NormalizedKey = "saga" };
         _cache.Setup(c => c.SetSeriesNameAsync("Saga", "Saga (2012)", It.IsAny<CancellationToken>())).ReturnsAsync(record);
@@ -1191,7 +1299,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         _cache.Setup(c => c.SetSeriesNameAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ArgumentException("Series name is too long"));
 
-        var result = await CreateController(withRetag: true).SetSeriesName(
+        var result = await CreateController().SetSeriesName(
             "Saga", new MetadataController.SeriesNameRequest { Name = new string('x', 600) }, CancellationToken.None);
 
         AssertBadRequest(result.Result, "Series name is too long");
@@ -1199,14 +1307,12 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task SetSeriesName_CacheFailure_Returns500()
+    public async Task SetSeriesName_CacheFailure_Escapes()
     {
         _cache.Setup(c => c.SetSeriesNameAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("db locked"));
 
-        var result = await CreateController().SetSeriesName(
-            "Saga", new MetadataController.SeriesNameRequest { Name = "Saga" }, CancellationToken.None);
-
-        Assert500(result.Result, "Error setting series name");
+        await Assert.ThrowsAsync<IOException>(() => CreateController().SetSeriesName(
+            "Saga", new MetadataController.SeriesNameRequest { Name = "Saga" }, CancellationToken.None));
     }
 }

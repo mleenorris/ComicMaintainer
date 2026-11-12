@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Telemetry;
 using ComicMaintainer.Core.Utilities;
@@ -24,11 +25,12 @@ namespace ComicMaintainer.WebApi.Services;
 /// when a run is in progress it makes the job run once more after that run
 /// instead of dropping the request.
 /// </summary>
-public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
+public sealed class ScheduledJobsHostedService : IHostedService, IScheduledJobRunner, IDisposable
 {
-    private readonly ScheduledJobService _service;
+    private readonly IScheduledJobService _service;
     private readonly ILogger<ScheduledJobsHostedService> _logger;
     private readonly ComicMaintainerMetrics? _metrics;
+    private readonly INotificationPublisher _notifications;
     private readonly ConcurrentDictionary<string, JobSlot> _slots = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _shutdownCts;
     private bool _started;
@@ -36,15 +38,12 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
     public ScheduledJobsHostedService(
         IScheduledJobService service,
         ILogger<ScheduledJobsHostedService> logger,
+        INotificationPublisher notifications,
         ComicMaintainerMetrics? metrics = null)
     {
         _metrics = metrics;
-        // The hosted service depends on the concrete ScheduledJobService for
-        // the Handlers enumeration, but interacts with state through the
-        // IScheduledJobService surface. The DI container resolves both to the
-        // same singleton instance, so the cast here is safe and avoids
-        // widening the public interface.
-        _service = (ScheduledJobService)service;
+        _notifications = notifications;
+        _service = service;
         _logger = logger;
     }
 
@@ -98,24 +97,12 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
         _shutdownCts?.Dispose();
     }
 
-    /// <summary>
-    /// Trigger an immediate run of the named job in the background. The run
-    /// honors single-flight: returns false, without starting anything, when the
-    /// job is unknown or a run is already in progress for that key. Once
-    /// started, the run is not tied to <paramref name="cancellationToken"/>.
-    /// </summary>
+    /// <inheritdoc />
     public Task<bool> RunNowAsync(string jobKey, CancellationToken cancellationToken = default) =>
         RequestRunAsync(jobKey, runAgainIfInProgress: false, cancellationToken);
 
-    /// <summary>
-    /// Like <see cref="RunNowAsync"/>, but a request that finds a run already in
-    /// progress is not dropped: the job runs again as soon as that run finishes,
-    /// so work added after the current run read its input is still picked up.
-    /// All requests made during one run share a single follow-up run, and no
-    /// follow-up starts once the host is stopping. Returns true when this
-    /// request started a run, false when the job is unknown or the request was
-    /// left to the follow-up run.
-    /// </summary>
+    /// <inheritdoc />
+    /// <remarks>No follow-up run starts once the host is stopping.</remarks>
     public Task<bool> RunNowOrAfterCurrentRunAsync(string jobKey, CancellationToken cancellationToken = default) =>
         RequestRunAsync(jobKey, runAgainIfInProgress: true, cancellationToken);
 
@@ -308,9 +295,19 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
             var optionsJson = view?.OptionsJson;
 
             _logger.LogInformation("Scheduled job {JobKey} starting", safeKey);
-            var summary = await handler.ExecuteAsync(optionsJson, token);
+            var result = handler is IScheduledJobFindingsHandler findingsHandler
+                ? await findingsHandler.ExecuteWithFindingsAsync(optionsJson, token)
+                : new ScheduledJobResult(await handler.ExecuteAsync(optionsJson, token));
+            var summary = result.Summary;
             stopwatch.Stop();
             _metrics?.RecordScheduledJobRun(handler.JobKey, "success", stopwatch.Elapsed);
+
+            // Raised before the outcome is recorded, so a database problem cannot lose it.
+            if (result.HasFindings)
+            {
+                _notifications.ScheduledJobFindings(handler.JobKey, handler.DisplayName, summary);
+            }
+
             await _service.RecordCompletionAsync(
                 jobKey, ScheduledJobStatus.Success, summary, stopwatch.ElapsedMilliseconds, token);
             _logger.LogInformation("Scheduled job {JobKey} completed in {Ms}ms: {Summary}",
@@ -328,6 +325,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
         {
             stopwatch.Stop();
             _metrics?.RecordScheduledJobRun(handler.JobKey, "failed", stopwatch.Elapsed);
+            _notifications.ScheduledJobFailed(handler.JobKey, handler.DisplayName, ex.Message);
             await _service.RecordCompletionAsync(
                 jobKey, ScheduledJobStatus.Failed, ex.Message, stopwatch.ElapsedMilliseconds);
             _logger.LogError(ex, "Scheduled job {JobKey} failed", safeKey);

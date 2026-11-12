@@ -36,6 +36,10 @@
         const CLIENT_ERROR_FIELD_LIMITS = { name: 100, message: 500, stack: 8000, url: 500 };
 
         function reportUnexpectedError(detail, kind, source) {
+            // The end of a session is not a defect, and the user is already on
+            // the way to the login page.
+            if (detail && detail.authHandled) return;
+
             console.error('Unhandled error:', detail);
 
             // Offline is already explained by its own banner; reporting the
@@ -85,9 +89,10 @@
                 const token = localStorage.getItem('jwt_token');
                 if (token) headers.Authorization = 'Bearer ' + token;
 
-                fetch(apiUrl('/api/client-errors'), {
+                apiFetch('/api/client-errors', {
                     method: 'POST',
-                    credentials: 'include',
+                    auth: false,
+                    json: false,
                     // Lets the report survive being filed as the page unloads.
                     keepalive: true,
                     headers,

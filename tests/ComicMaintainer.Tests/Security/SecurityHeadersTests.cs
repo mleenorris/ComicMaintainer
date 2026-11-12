@@ -79,6 +79,40 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
         Assert.Contains(directive, response.Headers.GetValues("Content-Security-Policy").First());
     }
 
+    // 'ws:' and 'wss:' in connect-src allowed WebSocket connections to any host, which an injected script
+    // could use to send data off-origin. The app's only stream is the same-origin SSE endpoint.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SecurityHeaders_CspConnectSrc_IsSameOriginOnly(bool behindHttpsProxy)
+    {
+        var client = behindHttpsProxy
+            ? _factory.CreateDefaultClient(new ForwardedProtoHandler())
+            : _factory.CreateClient();
+
+        var response = await client.GetAsync("/api/version");
+
+        var connectSrc = response.Headers.GetValues("Content-Security-Policy").First()
+            .Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Single(directive => directive.StartsWith("connect-src ", StringComparison.Ordinal));
+        Assert.Equal("connect-src 'self'", connectSrc);
+    }
+
+    // The unused SignalR hub accepted anonymous connections and let any of them join any job's group.
+    [Theory]
+    [InlineData("GET", "/hubs/progress")]
+    [InlineData("POST", "/hubs/progress/negotiate?negotiateVersion=1")]
+    public async Task TheSignalRProgressHubIsNotMapped(string method, string path)
+    {
+        var client = _factory.CreateClient();
+
+        using var request = new HttpRequestMessage(new HttpMethod(method), path);
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Contains("application/json", response.Content.Headers.ContentType?.ToString() ?? string.Empty);
+    }
+
     [Fact]
     public async Task SecurityHeaders_NoDeprecatedHeaders()
     {
@@ -126,6 +160,22 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
         Assert.Contains("geolocation=()", policy);
         Assert.Contains("microphone=()", policy);
         Assert.Contains("camera=()", policy);
+    }
+
+    // A proxy that sets the header twice sends a list; the first value is the client's scheme.
+    [Theory]
+    [InlineData("https,https", true)]
+    [InlineData("https, http", true)]
+    [InlineData("http,https", false)]
+    public async Task SecurityHeaders_WithAListOfForwardedProtos_TheFirstDecidesHsts(string forwardedProto, bool expectHsts)
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/version");
+        request.Headers.Add("X-Forwarded-Proto", forwardedProto);
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(expectHsts, response.Headers.Contains("Strict-Transport-Security"));
     }
 
     [Fact]

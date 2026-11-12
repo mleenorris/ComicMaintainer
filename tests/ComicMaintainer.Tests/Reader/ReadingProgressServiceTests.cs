@@ -35,6 +35,25 @@ public class ReadingProgressServiceTests
     }
 
     [Fact]
+    public async Task GetProgressForContentAsync_ReturnsOnlyThatUsersProgressForThoseFiles()
+    {
+        await _service.SaveProgressAsync(new ReadingProgress { UserId = "alice", ContentId = "a.cbz", CurrentPage = 3, TotalPages = 9, LastReadAt = DateTime.UtcNow });
+        await _service.SaveProgressAsync(new ReadingProgress { UserId = "alice", ContentId = "b.cbz", CurrentPage = 1, TotalPages = 9, LastReadAt = DateTime.UtcNow });
+        await _service.SaveProgressAsync(new ReadingProgress { UserId = "bob", ContentId = "a.cbz", CurrentPage = 7, TotalPages = 9, LastReadAt = DateTime.UtcNow });
+
+        var result = await _service.GetProgressForContentAsync("alice", ["a.cbz", "missing.cbz"]);
+
+        Assert.Single(result);
+        Assert.Equal(3, result["a.cbz"].CurrentPage);
+    }
+
+    [Fact]
+    public async Task GetProgressForContentAsync_WithNoFiles_ReturnsEmptyWithoutAQuery()
+    {
+        Assert.Empty(await _service.GetProgressForContentAsync("alice", []));
+    }
+
+    [Fact]
     public async Task SaveProgressAsync_NewProgress_CanBeRetrieved()
     {
         var progress = new ReadingProgress

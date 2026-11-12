@@ -1,295 +1,111 @@
 # Testing Policy
 
-## Overview
-This document outlines the testing requirements for all code changes in the ComicMaintainer project. **All bug fixes and new features MUST include appropriate tests before being merged.**
+Every bug fix and new feature ships with tests. This page says what is expected, what CI enforces, and how to run the
+tests.
 
-## Testing Requirements
+## What needs tests
 
-### Mandatory Test Coverage
-Every pull request that includes code changes MUST include:
+| Change | Tests |
+| --- | --- |
+| Bug fix | A test that fails without the fix and passes with it |
+| New feature | Unit tests, and integration tests when several components work together |
+| API change | Tests for each new or changed endpoint |
+| Security fix | A test that shows the hole is closed |
+| Change to how files are processed | Tests with real archives where a mock would hide the behaviour |
 
-1. **Unit Tests** - For all new functions, methods, and logic changes
-2. **Integration Tests** - For features that interact with multiple components or external systems
-3. **Regression Tests** - For bug fixes to ensure the issue doesn't reoccur
+Documentation-only changes need no tests. If a change genuinely needs none, such as a pure refactor that existing tests
+cover, say why in the pull request and add the `no-tests-needed` label.
 
-### When Tests Are Required
+## What CI enforces
 
-#### ✅ Tests ARE Required For:
-- **Bug Fixes**: Tests that reproduce the bug and verify the fix
-- **New Features**: Comprehensive unit and integration tests
-- **API Changes**: Tests for all new/modified endpoints
-- **Business Logic**: Tests for all new/modified business rules
-- **Data Processing**: Tests for file processing, transformations, etc.
-- **Security Fixes**: Tests that verify the vulnerability is fixed
+A pull request into `dotnet` must pass all of these. [GITHUB_ACTIONS_DOTNET.md](GITHUB_ACTIONS_DOTNET.md) describes the
+workflows.
 
-#### ⚠️ Tests MAY Be Waived For:
-- **Documentation-only changes** (README, docs, comments)
-- **Configuration changes** that don't affect code logic
-- **Trivial formatting/style changes** (with reviewer approval)
+| Check | Workflow | Fails when |
+| --- | --- | --- |
+| Tests included | `pr-test-check.yml` | Server C# or web UI JavaScript changed and nothing under `tests/` did, unless the `no-tests-needed` label is set. EF Core migrations are not counted as source |
+| Unit tests | `test-dotnet.yml` | A JavaScript or .NET test fails, or a test hangs for 5 minutes |
+| .NET coverage | `test-dotnet.yml` | Line coverage of the unit tests is below 97%. Migrations and generated code are excluded by `coverlet.runsettings` |
+| JavaScript coverage | `test-dotnet.yml` | Below 99% lines, 97% branches or 99% functions (`package.json`) |
+| Warnings | `test-dotnet.yml` | The projects in `src/` build with a compiler warning (`-p:StrictWarnings=true`). NuGet audit warnings are left to the security scan |
+| Windows | `test-dotnet.yml` | Any test fails on Windows |
+| macOS | `test-dotnet.yml` | A delete-job test fails on macOS |
+| Integration tests | `test-dotnet.yml` | A test with `Category=Integration` fails |
+| Container | `integration-tests-e2e.yml` | The image does not start and process a comic, or has a fixable critical or high vulnerability |
 
-Note: Even for documentation changes, if they involve code examples, those examples should be tested.
+Do not lower a gate to get a change through. Raise the .NET gate as coverage grows.
 
-## Test Categories
+## Kinds of test
 
-### 1. Unit Tests
-**Purpose**: Test individual components in isolation
+- **Unit tests** check one class with its collaborators mocked. Cover the failure paths and the edges as well as the
+  normal case.
+- **Integration tests** carry `[Trait("Category", "Integration")]` and run the real API through
+  `WebApplicationFactory<Program>`: EF Core, the middleware pipeline and authorization.
+- **Regression tests** reproduce a bug. Confirm the test fails without the fix.
+- **Web UI tests** are in `tests/js`, using `node:test`. Small helpers run in a `node:vm` sandbox, and pages run in jsdom
+  through `tests/js/support/dom.js`.
 
-**Guidelines**:
-- Test one component/method at a time
-- Mock external dependencies
-- Test both success and failure scenarios
-- Test edge cases and boundary conditions
-- Use clear, descriptive test names
+## Writing good tests
 
-**Example**:
-```csharp
-[Theory]
-[InlineData("Batman_The Dark Knight", "Batman:The Dark Knight", false)]
-[InlineData("Spider_Man", "Spider:Man", false)]
-public void NormalizeSeriesName_WithUnderscores_ReplacesWithColons(
-    string input, string expected, bool forComparison)
-{
-    // Act
-    var result = ComicFileProcessor.NormalizeSeriesName(input, forComparison);
+- Name tests `MethodName_Scenario_ExpectedBehavior`, and mirror the source layout, such as
+  `tests/ComicMaintainer.Tests/Services/MyServiceTests.cs`.
+- Keep tests independent. Clean up files and connections in `Dispose`.
+- Test behaviour, not implementation details.
+- Do not write a test that passes whether or not the bug exists. Check that it fails when the code is broken.
+- A test that waits to see that nothing happened needs a positive control first: wait for something that must happen,
+  then assert that the other thing did not.
+- Build services that take many collaborators through `Helpers/TestServices.cs`, so a test names only the ones it cares
+  about.
 
-    // Assert
-    Assert.Equal(expected, result);
-}
-```
+### Tests that depend on the platform
 
-### 2. Integration Tests
-**Purpose**: Test interactions between components
+Skip a test by what it needs, not by which operating system runs it. The attributes in `Helpers/TestCapabilities.cs`
+detect the capability once, by trying the operation, and give the reason in the skip message:
 
-**Guidelines**:
-- Test real component interactions
-- Test with realistic data
-- Test full workflows/scenarios
-- May use test databases or file systems
-- Clean up test artifacts after execution
+| Attribute | Needs |
+| --- | --- |
+| `[SymbolicLinkFact]`, `[SymbolicLinkTheory]` | Permission to create symbolic links |
+| `[ExclusiveLockFact]` | A specific behaviour for a file held open without sharing |
+| `[BashFact]` | bash, to run the container scripts |
 
-**Example**:
-```csharp
-[Fact]
-public async Task ProcessFile_WithValidComicFile_UpdatesMetadataAndRenames()
-{
-    // Arrange
-    var testFile = CreateTestComicFile();
-    
-    // Act
-    var result = await _processor.ProcessFileAsync(testFile);
-    
-    // Assert
-    Assert.True(result.Success);
-    Assert.True(File.Exists(result.NewPath));
-    // ... additional assertions
-}
-```
+### Rules a test holds in place
 
-### 3. Regression Tests
-**Purpose**: Ensure bugs don't reoccur
+- `ServiceGraphTests.Constructors_DoNotDeclareCollaboratorsAsOptional` fails when a production collaborator is optional.
+  See [IOC_DESIGN_PRINCIPLES.md](IOC_DESIGN_PRINCIPLES.md).
+- `DocumentedEnvironmentVariablesTests` fails when a document or deployment file sets a variable the app does not read,
+  and it reads the `### Configuration Options` table in `README.md`.
+- `AndroidAppContractTests` runs the Android app's client against the real server pipeline.
+- A test pins the current page-list rules to `ComicReaderService.PageListVersion`. Bump that constant when the rules for
+  which archive entries are pages, or their order, change.
 
-**Guidelines**:
-- Create a test that reproduces the original bug
-- Verify the test fails before the fix
-- Verify the test passes after the fix
-- Include the issue number in the test name/comments
+## Running tests
 
-**Example**:
-```csharp
-[Fact]
-public void ProcessFile_Issue123_HandlesDecimalChapterNumbers()
-{
-    // Regression test for Issue #123
-    // Chapter numbers like "71.4" should be preserved
-    var result = ComicFileProcessor.ParseChapterNumber("Chapter 71.4");
-    Assert.Equal("71.4", result);
-}
-```
-
-## Test Quality Standards
-
-### Test Naming Convention
-- Use descriptive names that explain what is being tested
-- Format: `MethodName_Scenario_ExpectedBehavior`
-- Examples:
-  - `NormalizeSeriesName_WithUnderscores_ReplacesWithColons`
-  - `ProcessFile_WhenFileNotFound_ThrowsException`
-  - `FormatFilename_WithDecimalIssue_PreservesDecimals`
-
-### Test Organization
-- Place tests in the `tests/ComicMaintainer.Tests` directory
-- Mirror the source code structure
-- Group related tests in the same test class
-- Use nested classes for logical grouping when needed
-
-### Code Coverage
-- Aim for **minimum 80% code coverage** for new code
-- Critical paths and business logic should have 100% coverage
-- Coverage reports are automatically generated in CI/CD
-- Pull requests show coverage changes in comments
-
-### Test Data
-- Use inline data for simple test cases (`[InlineData]`)
-- Use `[Theory]` for parameterized tests
-- Create helper methods for complex test data setup
-- Clean up test data/files in `Dispose()` or teardown methods
-
-## Running Tests
-
-### Local Testing
 ```bash
-# Run all tests
+# .NET: everything, or part of it
 dotnet test
-
-# Run only unit tests (fast)
 dotnet test --filter "Category!=Integration"
-
-# Run only integration tests (in-process Web API)
 dotnet test --filter "Category=Integration"
-
-# Run tests with coverage
-dotnet test --collect:"XPlat Code Coverage"
-
-# Run specific test class
 dotnet test --filter "FullyQualifiedName~ComicFileProcessorTests"
 
-# Run tests with verbose output
-dotnet test --verbosity normal
+# .NET coverage, as CI measures it (requires bash)
+./scripts/run-tests-with-coverage.sh
 
-# Run the end-to-end container smoke test (requires Docker)
+# Web UI
+npm ci
+npm test
+npm run test:coverage
+
+# The container, end to end (requires Docker)
 docker build -f Dockerfile.dotnet -t comicmaintainer:ci .
 ./scripts/container-smoke-test.sh
 ```
 
-### CI/CD Testing
-Every push and pull request runs three jobs that must all stay green:
+These need no Android workload.
 
-1. **Unit Tests** (`test-dotnet.yml`) — `dotnet test --filter "Category!=Integration"`,
-   plus coverage reporting/PR comment.
-2. **Integration Tests** (`test-dotnet.yml`) — `dotnet test --filter "Category=Integration"`,
-   exercising the real Web API through `WebApplicationFactory<Program>` (real
-   EF Core + middleware pipeline).
-3. **Docker Container Smoke Test** (`integration-tests-e2e.yml`) — builds
-   `Dockerfile.dotnet`, runs the container, verifies `/api/version` is healthy,
-   and confirms the file watcher reacts to a fixture `.cbz`. Container logs are
-   uploaded as an artifact on failure.
+## Testing frameworks
 
-Test results appear in the GitHub Actions workflow, coverage is posted as a PR
-comment, and failed jobs block merging once the corresponding check names are
-added to branch-protection settings.
+- [xUnit](https://xunit.net/) and [Moq](https://github.com/moq/moq4) for .NET
+- `node:test` and [jsdom](https://github.com/jsdom/jsdom) for the web UI
 
-## Pull Request Test Requirements
-
-### Before Submitting a PR
-1. ✅ Write tests for all new/changed code
-2. ✅ Run tests locally and verify they pass
-3. ✅ Check code coverage locally
-4. ✅ Update existing tests if behavior changed
-5. ✅ Document what tests were added in the PR description
-
-### PR Review Checklist
-Reviewers should verify:
-- [ ] Tests are included for all code changes
-- [ ] Tests are meaningful and test the right things
-- [ ] Tests cover edge cases and error scenarios
-- [ ] Test names are clear and descriptive
-- [ ] Code coverage hasn't decreased
-- [ ] All tests pass in CI/CD
-
-### Handling Test Failures
-If tests fail in CI:
-1. Review the test output and error messages
-2. Fix the issue locally and verify tests pass
-3. Push the fix and verify CI tests pass
-4. Do not merge PRs with failing tests
-
-## Test Automation
-
-### GitHub Actions Workflows
-The project uses GitHub Actions for automated testing:
-
-**Test Workflow** (`.github/workflows/test-dotnet.yml`):
-- Runs on every push and PR
-- Builds the project
-- Runs all tests
-- Generates coverage reports
-- Posts coverage to PR comments
-
-**PR Test Check Workflow** (`.github/workflows/pr-test-check.yml`):
-- Verifies that test files were modified when source files change
-- Helps ensure tests are not forgotten
-- Can be overridden for documentation-only changes
-
-## Testing Best Practices
-
-### Do's ✅
-- Write tests before or alongside code (TDD when possible)
-- Test one thing per test method
-- Use descriptive test and variable names
-- Test both happy path and error cases
-- Keep tests fast and independent
-- Use mocks/stubs for external dependencies
-- Clean up test resources (files, DB connections, etc.)
-- Update tests when requirements change
-
-### Don'ts ❌
-- Don't skip tests because "it's a small change"
-- Don't test implementation details, test behavior
-- Don't write flaky tests (tests that randomly fail)
-- Don't have tests that depend on execution order
-- Don't leave commented-out test code
-- Don't commit failing tests (use `Skip` attribute if needed)
-- Don't test framework/library code
-
-## Examples and Resources
-
-### Testing Framework
-- **xUnit** - Primary testing framework
-- **Moq** - Mocking library for unit tests
-- **xUnit Documentation**: https://xunit.net/
-- **Moq Documentation**: https://github.com/moq/moq4
-
-### Example Test Files
-See these files for testing patterns:
-- `tests/ComicMaintainer.Tests/Services/ComicFileProcessorTests.cs` - Unit test examples
-- `tests/ComicMaintainer.Tests/Services/ComicFileProcessorIntegrationTests.cs` - Integration test examples
-- `tests/ComicMaintainer.Tests/Controllers/FilesControllerTests.cs` - Controller test examples
-
-## Getting Help
-
-### Questions About Testing?
-- Check existing test files for examples
-- Review this policy document
-- Ask in pull request comments
-- Discuss in GitHub Issues
-
-### Reporting Issues
-If you find gaps in test coverage or testing infrastructure issues:
-1. Create a GitHub Issue
-2. Label it with `testing` and `enhancement`
-3. Describe the problem and proposed solution
-
-## Policy Enforcement
-
-### Automated Checks
-- CI/CD will fail if tests fail
-- Coverage reports show if coverage decreased
-- PR checks verify test files are included
-
-### Manual Review
-- Reviewers will verify test quality
-- PRs without adequate tests will be sent back for revision
-- Exceptions require explicit approval and justification
-
-### Consequences
-- PRs without tests will not be merged
-- Repeated violations may result in PR privileges being restricted
-- Critical security fixes may be merged with tests added separately (rare exception)
-
-## Version History
-
-- **v1.0** (2025-11-01): Initial testing policy created
-
----
-
-**Remember**: Tests are not optional. They are a critical part of maintaining code quality and preventing regressions. Taking time to write good tests saves time in the long run by catching bugs early and making refactoring safer.
+Good examples are `tests/ComicMaintainer.Tests/Services/ComicFileProcessorTests.cs`,
+`tests/ComicMaintainer.Tests/Controllers/FilesControllerTests.cs` and `tests/ComicMaintainer.Tests/Integration/`.

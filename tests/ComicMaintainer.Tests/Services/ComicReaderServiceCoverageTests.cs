@@ -151,7 +151,18 @@ public class ComicReaderServiceCoverageTests : IDisposable
     {
         private static readonly uint[] CrcTable = BuildCrcTable();
 
-        public static void Write(string path, params (string Name, byte[]? Data)[] entries)
+        public static void Write(string path, params (string Name, byte[]? Data)[] entries) =>
+            Write(path, entries.Select((string, byte[]?, uint?) (e) => (e.Name, e.Data, null)));
+
+        /// <summary>
+        /// Like <c>Write</c>, but each entry's header declares <c>UnpackedSize</c>
+        /// instead of the length of the data stored, as a crafted or corrupt
+        /// archive would.
+        /// </summary>
+        public static void WriteDeclaringSizes(string path, params (string Name, byte[] Data, uint UnpackedSize)[] entries) =>
+            Write(path, entries.Select((string, byte[]?, uint?) (e) => (e.Name, e.Data, e.UnpackedSize)));
+
+        private static void Write(string path, IEnumerable<(string Name, byte[]? Data, uint? UnpackedSize)> entries)
         {
             using var output = new MemoryStream();
             output.Write(new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00 });
@@ -159,7 +170,7 @@ public class ComicReaderServiceCoverageTests : IDisposable
             // Main archive header: two reserved fields (HighPosAV, PosAV).
             WriteBlock(output, 0x73, 0x0000, new byte[6]);
 
-            foreach (var (name, data) in entries)
+            foreach (var (name, data, unpackedSize) in entries)
             {
                 var isDirectory = data is null;
                 var payload = data ?? Array.Empty<byte>();
@@ -168,7 +179,7 @@ public class ComicReaderServiceCoverageTests : IDisposable
                 var body = new byte[25 + nameBytes.Length];
                 var span = body.AsSpan();
                 BinaryPrimitives.WriteUInt32LittleEndian(span[0..], (uint)payload.Length); // packed size
-                BinaryPrimitives.WriteUInt32LittleEndian(span[4..], (uint)payload.Length); // unpacked size
+                BinaryPrimitives.WriteUInt32LittleEndian(span[4..], unpackedSize ?? (uint)payload.Length); // unpacked size
                 body[8] = 0; // host OS: MS-DOS
                 BinaryPrimitives.WriteUInt32LittleEndian(span[9..], Crc32(payload));
                 BinaryPrimitives.WriteUInt32LittleEndian(span[13..], 0x50210000); // 2020-01-01 (DOS time)

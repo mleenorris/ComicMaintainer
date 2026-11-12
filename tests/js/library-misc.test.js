@@ -1,18 +1,14 @@
 'use strict';
 
 // The rest of js/app/library.js: the "Scan Unmarked" action, the External
-// Providers status modal, the force-reprocess prompt used by the bulk jobs
-// and the legacy pagination shims kept for old callers.
+// Providers status modal and the force-reprocess prompt used by the bulk jobs.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
 const {
-    makeSeriesList,
     bootLibrary,
     callsTo,
-    folderCalls,
-    seriesCalls,
     messages
 } = require('./support/library-helpers');
 
@@ -25,14 +21,14 @@ const widgetText = page => page.$('#providerHealthWidget').textContent.trim();
 
 test('Scan Unmarked reports how many files are marked and unmarked', async () => {
     const page = await bootLibrary({
-        routes: { 'POST /api/scan-unmarked': { total_count: 10, unmarked_count: 3, marked_count: 7 } }
+        routes: { 'GET /api/files/scan-unmarked': { total_count: 10, unmarked_count: 3, marked_count: 7 } }
     });
 
     page.click(SCAN_BUTTON);
     assert.deepEqual(messages(page), [{ type: 'info', text: 'Scanning for unmarked files...' }]);
     await page.settle();
 
-    const [call] = callsTo(page, '/api/scan-unmarked', 'POST');
+    const [call] = callsTo(page, '/api/files/scan-unmarked');
     assert.match(call.headers.authorization, /^Bearer /);
     assert.deepEqual(messages(page).at(-1), {
         type: 'success',
@@ -42,7 +38,7 @@ test('Scan Unmarked reports how many files are marked and unmarked', async () =>
 
 test('Scan Unmarked from the settings menu closes the menu', async () => {
     const page = await bootLibrary({
-        routes: { 'POST /api/scan-unmarked': { total_count: 0, unmarked_count: 0, marked_count: 0 } }
+        routes: { 'GET /api/files/scan-unmarked': { total_count: 0, unmarked_count: 0, marked_count: 0 } }
     });
     page.click('#settingsMenuToggle');
     assert.ok(page.$('#settingsDropdownMenu').classList.contains('show'));
@@ -55,7 +51,7 @@ test('Scan Unmarked from the settings menu closes the menu', async () => {
 });
 
 test('a failed scan is reported', async () => {
-    const page = await bootLibrary({ routes: { 'POST /api/scan-unmarked': respond(500, 'Error scanning files') } });
+    const page = await bootLibrary({ routes: { 'GET /api/files/scan-unmarked': respond(500, 'Error scanning files') } });
 
     page.click(SCAN_BUTTON);
     await page.settle();
@@ -64,7 +60,7 @@ test('a failed scan is reported', async () => {
 });
 
 test('a scan with an expired session goes to the login page', async () => {
-    const page = await bootLibrary({ routes: { 'POST /api/scan-unmarked': 401 } });
+    const page = await bootLibrary({ routes: { 'GET /api/files/scan-unmarked': 401 } });
 
     page.click(SCAN_BUTTON);
     await page.settle();
@@ -95,7 +91,7 @@ test('the External Providers modal shows each provider\'s health', async () => {
     await page.settle();
 
     const [call] = providerCalls(page);
-    assert.equal(call.init.credentials, 'same-origin');
+    assert.equal(call.init.credentials, 'include');
     assert.match(call.headers.authorization, /^Bearer /);
 
     const widget = page.$('#providerHealthWidget');
@@ -177,6 +173,16 @@ test('the providers modal reports a status it could not fetch', async () => {
     assert.match(String(warning.args[1]), /Failed to fetch/);
 });
 
+test('an expired session while fetching provider status only goes to the login page', async () => {
+    const page = await bootLibrary({ routes: { 'GET /api/metadata/providers': 401 } });
+    page.click(PROVIDERS_BUTTON);
+    await page.settle();
+
+    assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
+    assert.notEqual(widgetText(page), 'Unable to fetch provider status.');
+    assert.equal(page.consoleMessages.some(message => message.type === 'warn' && message.args[0] === 'Provider health fetch failed'), false);
+});
+
 test('refreshing before the modal was ever opened requests nothing', async () => {
     const page = await bootLibrary({ routes: { 'GET /api/metadata/providers': { providers: PROVIDERS } } });
 
@@ -233,39 +239,4 @@ test('the force-reprocess prompt explains both choices and returns the answer', 
         });
         page.close();
     }
-});
-
-test('the legacy pagination entry points are harmless no-ops', async () => {
-    const page = await bootLibrary({ series: makeSeriesList(2) });
-    const requests = page.fetchCalls.length;
-    const list = page.$('#fileList').innerHTML;
-
-    await page.run('updatePagination(); nextPage(); previousPage(); changePerPage()');
-
-    assert.equal(page.fetchCalls.length, requests);
-    assert.equal(page.$('#fileList').innerHTML, list);
-    assert.deepEqual(page.errors, []);
-});
-
-test('the legacy loadFiles() entry point loads the folder list', async () => {
-    const page = await bootLibrary({ routes: { 'GET /api/files/folders': { folders: [], offset: 0, limit: 100, total_folders: 0, unmarked_count: 0 } } });
-
-    await page.run('loadFiles(1, true)');
-
-    assert.deepEqual(folderCalls(page).at(-1).query, { offset: '0', limit: '100', refresh: 'true' });
-});
-
-test('a pagination bar, where present, is hidden while a series page is open', async () => {
-    const page = await bootLibrary({
-        hash: '#/series/series-1',
-        series: makeSeriesList(1),
-        routes: { 'GET /api/files/series/series-1/issues': { issues: [], issue_count: 0 } }
-    });
-    page.$('#fileList').insertAdjacentHTML('afterend', '<div id="pagination">Page 1</div>');
-
-    page.click('#headerFilterMenu [data-filter="marked"]');
-    await page.settle();
-
-    assert.equal(seriesCalls(page).at(-1).query.filter, 'marked');
-    assert.equal(page.$('#pagination').style.display, 'none');
 });

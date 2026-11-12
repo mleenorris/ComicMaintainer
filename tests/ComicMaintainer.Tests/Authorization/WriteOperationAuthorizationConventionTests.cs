@@ -41,6 +41,7 @@ public class WriteOperationAuthorizationConventionTests
     [InlineData("Suwayomi", AuthorizationPolicies.CanModifyLibrary)]
     [InlineData("Settings", AuthorizationPolicies.CanAdminister)]
     [InlineData("ScheduledJobs", AuthorizationPolicies.CanAdminister)]
+    [InlineData("Users", AuthorizationPolicies.CanAdminister)]
     public void WriteActionOnProtectedController_GetsTheControllersPolicy(string controllerName, string expectedPolicy)
     {
         var action = CreateAction(controllerName, Array.Empty<object>(), ["POST"]);

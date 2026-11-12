@@ -2,6 +2,8 @@ using System.Text;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Tests.Helpers;
+using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -37,7 +39,9 @@ public sealed class FilesControllerFileActionsTests
             _history.Object,
             _seriesLibrary.Object,
             _logger.Object,
-            _settings.Object);
+            _settings.Object,
+            TestFolderCombineService.Create(_fileStore.Object, _processor.Object, Mock.Of<IBatchJobRegistry>(), _history.Object, _seriesLibrary.Object, _settings.Object),
+            Mock.Of<IEventBroadcaster>(), Mock.Of<ISeriesNameResolver>(), Mock.Of<IScheduledJobRunner>(), new FileOperationLock(), Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
     }
 
     private string InRoot(params string[] parts) => Path.Join(new[] { _root }.Concat(parts).ToArray());
@@ -57,6 +61,16 @@ public sealed class FilesControllerFileActionsTests
         Assert.Equal(expectedStatus, objectResult.StatusCode);
         Assert.Equal(expectedValue, objectResult.Value);
     }
+
+    private void VerifyNoErrorLogged() =>
+        _logger.Verify(
+            l => l.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
 
     private void VerifyWarned(string fragment) =>
         _logger.Verify(
@@ -108,15 +122,29 @@ public sealed class FilesControllerFileActionsTests
     }
 
     [Fact]
-    public async Task MarkFileRead_StoreThrows_Returns500()
+    public async Task MarkFileRead_StoreThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _fileStore.Setup(f => f.MarkFileReadAsync(path, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("db locked"));
 
-        var result = await _controller.MarkFileRead(Encode(path), new FilesController.ReadStatusRequest { Read = true });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.MarkFileRead(Encode(path), new FilesController.ReadStatusRequest { Read = true }));
+    }
 
-        AssertStatus(result, 500, "Error updating read status");
+    [Fact]
+    public async Task MarkFileRead_Cancelled_Returns499WithoutLoggingAnError()
+    {
+        // The reader closing mid-request is not a server error.
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        var path = InRoot("Saga 001.cbz");
+        _fileStore.Setup(f => f.MarkFileReadAsync(path, true, cancelled.Token))
+            .ThrowsAsync(new OperationCanceledException(cancelled.Token));
+
+        var result = await _controller.MarkFileRead(Encode(path), new FilesController.ReadStatusRequest { Read = true }, cancelled.Token);
+
+        Assert.Equal(499, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+        VerifyNoErrorLogged();
     }
 
     // ---------------------------------------------------------- MarkFilesReadBatch
@@ -167,18 +195,116 @@ public sealed class FilesControllerFileActionsTests
     }
 
     [Fact]
-    public async Task MarkFilesReadBatch_StoreThrows_Returns500()
+    public async Task MarkFilesReadBatch_StoreThrows_Escapes()
     {
         _fileStore.Setup(f => f.MarkFilesReadAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("db locked"));
 
-        var result = await _controller.MarkFilesReadBatch(new FilesController.ReadBatchRequest
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.MarkFilesReadBatch(new FilesController.ReadBatchRequest
         {
             Files = new List<string> { InRoot("Saga 001.cbz") },
             Read = true
-        });
+        }));
+    }
 
-        AssertStatus(result, 500, "Error updating read status");
+    [Fact]
+    public async Task MarkFilesReadBatch_Cancelled_Returns499WithoutLoggingAnError()
+    {
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        _fileStore.Setup(f => f.MarkFilesReadAsync(It.IsAny<IEnumerable<string>>(), true, cancelled.Token))
+            .ThrowsAsync(new OperationCanceledException(cancelled.Token));
+
+        var result = await _controller.MarkFilesReadBatch(
+            new FilesController.ReadBatchRequest { Files = new List<string> { InRoot("Saga 001.cbz") }, Read = true },
+            cancelled.Token);
+
+        Assert.Equal(499, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+        VerifyNoErrorLogged();
+    }
+
+    // --------------------------------------------------------------- MarkScopeRead
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("library", false)]
+    [InlineData(" Library ", true)]
+    public async Task MarkScopeRead_Library_MarksTheWholeLibraryServerSide(string? scope, bool read)
+    {
+        _fileStore.Setup(f => f.MarkScopeReadAsync(It.IsAny<FileReadScope>(), read, It.IsAny<CancellationToken>())).ReturnsAsync(42);
+
+        var result = await _controller.MarkScopeRead(new FilesController.ReadScopeRequest { Scope = scope, Read = read });
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(42, Prop(ok.Value, "updated"));
+        _fileStore.Verify(f => f.MarkScopeReadAsync(FileReadScope.Library, read, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task MarkScopeRead_Folder_PassesTheFolderKey()
+    {
+        var result = await _controller.MarkScopeRead(new FilesController.ReadScopeRequest { Scope = "folder", Id = "Saga", Read = true });
+
+        Assert.IsType<OkObjectResult>(result);
+        _fileStore.Verify(f => f.MarkScopeReadAsync(
+            It.Is<FileReadScope>(s => s.Kind == FileReadScopeKind.Folder && s.FolderKey == "Saga"),
+            true,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task MarkScopeRead_Series_MarksEveryIssueOfTheSeries()
+    {
+        var first = InRoot("Saga", "Saga 001.cbz");
+        var second = InRoot("Saga", "Saga 002.cbz");
+        _seriesLibrary.Setup(s => s.GetSeriesIssuesAsync("saga", null, 1, -1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesIssuesResult
+            {
+                Id = "saga",
+                Issues = new List<SeriesIssueDto> { new() { FilePath = first }, new() { FilePath = second } }
+            });
+
+        var result = await _controller.MarkScopeRead(new FilesController.ReadScopeRequest { Scope = "series", Id = "saga", Read = false });
+
+        Assert.IsType<OkObjectResult>(result);
+        _fileStore.Verify(f => f.MarkScopeReadAsync(
+            It.Is<FileReadScope>(s => s.Kind == FileReadScopeKind.Files && s.FilePaths!.SequenceEqual(new[] { first, second })),
+            false,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("series", null, 400)]
+    [InlineData("series", "missing", 404)]
+    [InlineData("everything", null, 400)]
+    public async Task MarkScopeRead_BadScope_ChangesNothing(string scope, string? id, int status)
+    {
+        var result = await _controller.MarkScopeRead(new FilesController.ReadScopeRequest { Scope = scope, Id = id, Read = true });
+
+        Assert.Equal(status, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+        _fileStore.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task MarkScopeRead_Cancelled_Returns499()
+    {
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        _fileStore.Setup(f => f.MarkScopeReadAsync(It.IsAny<FileReadScope>(), It.IsAny<bool>(), cancelled.Token))
+            .ThrowsAsync(new OperationCanceledException(cancelled.Token));
+
+        var result = await _controller.MarkScopeRead(new FilesController.ReadScopeRequest { Read = true }, cancelled.Token);
+
+        Assert.Equal(499, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+    }
+
+    [Fact]
+    public async Task MarkScopeRead_StoreThrows_Escapes()
+    {
+        _fileStore.Setup(f => f.MarkScopeReadAsync(It.IsAny<FileReadScope>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("db locked"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.MarkScopeRead(new FilesController.ReadScopeRequest { Read = true }));
     }
 
     // ----------------------------------------------------------------- ProcessFile
@@ -195,14 +321,12 @@ public sealed class FilesControllerFileActionsTests
     }
 
     [Fact]
-    public async Task ProcessFile_ProcessorThrows_Returns500()
+    public async Task ProcessFile_ProcessorThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _processor.Setup(p => p.ProcessFileAsync(path, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("corrupt"));
 
-        var result = await _controller.ProcessFile(path);
-
-        AssertStatus(result, 500, "Error processing file");
+        await Assert.ThrowsAsync<IOException>(() => _controller.ProcessFile(path));
     }
 
     [Fact]
@@ -245,13 +369,25 @@ public sealed class FilesControllerFileActionsTests
     private static IEnumerable<string> Failed(object? value) =>
         Assert.IsAssignableFrom<IEnumerable<string>>(Prop(value, "failed"));
 
+    /// <summary>Makes ApplyMetadataEditAsync succeed or fail for <paramref name="path"/> (any path when null).</summary>
+    private void SetupEdit(string? path, ComicMetadata? metadata, bool succeeds)
+    {
+        _processor.Setup(p => p.ApplyMetadataEditAsync(
+                It.Is<string>(file => path == null || file == path),
+                It.Is<ComicMetadata>(m => metadata == null || m == metadata),
+                It.IsAny<ComicMetadataFieldFlags>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string file, ComicMetadata _, ComicMetadataFieldFlags _, CancellationToken _) =>
+                new MetadataWriteResult(succeeds ? MetadataWriteOutcome.Written : MetadataWriteOutcome.Failed, file));
+    }
+
     [Fact]
     public async Task UpdateTags_SkipsBlankEntriesAndUpdatesTheRest()
     {
         var first = InRoot("Saga 001.cbz");
         var second = InRoot("Saga 002.cbz");
         var metadata = new ComicMetadata { Series = "Saga" };
-        _processor.Setup(p => p.UpdateMetadataAsync(It.IsAny<string>(), metadata, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        SetupEdit(null, metadata, succeeds: true);
         var request = new FilesController.UpdateTagsRequest
         {
             Files = new List<string> { first, "", " ", "\t", null!, second },
@@ -261,8 +397,59 @@ public sealed class FilesControllerFileActionsTests
         var result = await _controller.UpdateTags(request);
 
         Assert.IsType<OkResult>(result);
-        _processor.Verify(p => p.UpdateMetadataAsync(first, metadata, It.IsAny<CancellationToken>()), Times.Once);
-        _processor.Verify(p => p.UpdateMetadataAsync(second, metadata, It.IsAny<CancellationToken>()), Times.Once);
+        // Without a field list only the fields that carry a value are applied.
+        _processor.Verify(p => p.ApplyMetadataEditAsync(first, metadata, ComicMetadataFieldFlags.Series, It.IsAny<CancellationToken>()), Times.Once);
+        _processor.Verify(p => p.ApplyMetadataEditAsync(second, metadata, ComicMetadataFieldFlags.Series, It.IsAny<CancellationToken>()), Times.Once);
+        _processor.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateTags_WithAFieldList_AppliesExactlyThoseFields()
+    {
+        var file = InRoot("Saga 001.cbz");
+        var metadata = new ComicMetadata { Series = "Saga" };
+        SetupEdit(file, metadata, succeeds: true);
+
+        var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
+        {
+            Files = new List<string> { file },
+            Metadata = metadata,
+            Fields = new List<string> { "publisher", "Writer" }
+        });
+
+        Assert.IsType<OkResult>(result);
+        _processor.Verify(p => p.ApplyMetadataEditAsync(
+            file, metadata, ComicMetadataFieldFlags.Publisher | ComicMetadataFieldFlags.Authors, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("month")]
+    [InlineData("")]
+    public async Task UpdateTags_UnknownField_IsRejectedAndUpdatesNothing(string field)
+    {
+        var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
+        {
+            Files = new List<string> { InRoot("Saga 001.cbz") },
+            Metadata = new ComicMetadata { Series = "Saga" },
+            Fields = new List<string> { "series", field }
+        });
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal($"Unknown metadata field: {field}", Prop(badRequest.Value, "error"));
+        _processor.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateTags_NothingToApply_IsRejectedAndUpdatesNothing()
+    {
+        var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
+        {
+            Files = new List<string> { InRoot("Saga 001.cbz") },
+            Metadata = new ComicMetadata()
+        });
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("No metadata fields specified", Prop(badRequest.Value, "error"));
         _processor.VerifyNoOtherCalls();
     }
 
@@ -285,8 +472,7 @@ public sealed class FilesControllerFileActionsTests
     {
         var missing = InRoot("Missing 001.cbz");
         var notAnArchive = InRoot("Notes.txt");
-        _processor.Setup(p => p.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
+        SetupEdit(null, null, succeeds: false);
 
         var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
         {
@@ -305,8 +491,8 @@ public sealed class FilesControllerFileActionsTests
         var missing = InRoot("Missing 001.cbz");
         var updated = InRoot("Saga 002.cbz");
         var metadata = new ComicMetadata { Series = "Saga" };
-        _processor.Setup(p => p.UpdateMetadataAsync(missing, metadata, It.IsAny<CancellationToken>())).ReturnsAsync(false);
-        _processor.Setup(p => p.UpdateMetadataAsync(updated, metadata, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        SetupEdit(missing, metadata, succeeds: false);
+        SetupEdit(updated, metadata, succeeds: true);
 
         var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
         {
@@ -317,7 +503,7 @@ public sealed class FilesControllerFileActionsTests
         var multiStatus = Assert.IsType<ObjectResult>(result);
         Assert.Equal(207, multiStatus.StatusCode);
         Assert.Equal(new[] { missing }, Failed(multiStatus.Value));
-        _processor.Verify(p => p.UpdateMetadataAsync(updated, metadata, It.IsAny<CancellationToken>()), Times.Once);
+        _processor.Verify(p => p.ApplyMetadataEditAsync(updated, metadata, It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
@@ -337,17 +523,17 @@ public sealed class FilesControllerFileActionsTests
     }
 
     [Fact]
-    public async Task UpdateTags_ProcessorThrows_Returns500()
+    public async Task UpdateTags_ProcessorThrows_Escapes()
     {
-        _processor.Setup(p => p.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<CancellationToken>()))
+        _processor.Setup(p => p.ApplyMetadataEditAsync(
+                It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("read-only"));
 
-        var result = await _controller.UpdateTags(new FilesController.UpdateTagsRequest
+        await Assert.ThrowsAsync<IOException>(() => _controller.UpdateTags(new FilesController.UpdateTagsRequest
         {
-            Files = new List<string> { InRoot("Saga 001.cbz") }
-        });
-
-        AssertStatus(result, 500, "Error updating tags");
+            Files = new List<string> { InRoot("Saga 001.cbz") },
+            Metadata = new ComicMetadata { Series = "Saga" }
+        }));
     }
 
     // A body without "files" binds to an empty list. The {"file": ..., "tags": ...}
@@ -380,13 +566,11 @@ public sealed class FilesControllerFileActionsTests
     // ---------------------------------------------------------------- ScanUnmarked
 
     [Fact]
-    public async Task ScanUnmarked_StoreThrows_Returns500()
+    public async Task ScanUnmarked_StoreThrows_Escapes()
     {
         _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("not loaded"));
 
-        var result = await _controller.ScanUnmarked();
-
-        AssertStatus(result, 500, "Error scanning files");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.ScanUnmarked());
     }
 
     // ---------------------------------------------------- ProcessFileByEncodedPath
@@ -425,14 +609,12 @@ public sealed class FilesControllerFileActionsTests
     }
 
     [Fact]
-    public async Task ProcessFileByEncodedPath_ProcessorThrows_Returns500()
+    public async Task ProcessFileByEncodedPath_ProcessorThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _processor.Setup(p => p.ProcessFileAsync(path, true, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("corrupt"));
 
-        var result = await _controller.ProcessFileByEncodedPath(Encode(path), forceReprocess: true);
-
-        AssertStatus(result, 500, "Error processing file");
+        await Assert.ThrowsAsync<IOException>(() => _controller.ProcessFileByEncodedPath(Encode(path), forceReprocess: true));
     }
 
     // ----------------------------------------------------- RenameFileByEncodedPath
@@ -471,15 +653,13 @@ public sealed class FilesControllerFileActionsTests
     }
 
     [Fact]
-    public async Task RenameFileByEncodedPath_ProcessorThrows_Returns500()
+    public async Task RenameFileByEncodedPath_ProcessorThrows_Escapes()
     {
         var path = InRoot("Saga 001.cbz");
         _processor.Setup(p => p.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("queue full"));
 
-        var result = await _controller.RenameFileByEncodedPath(Encode(path));
-
-        AssertStatus(result, 500, "Error renaming file");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.RenameFileByEncodedPath(Encode(path)));
     }
 
     // --------------------------------------------------------- CleanupStaleEntries
@@ -488,37 +668,103 @@ public sealed class FilesControllerFileActionsTests
     public async Task CleanupStaleEntries_ReportsRemovedCount()
     {
         using var cts = new CancellationTokenSource();
-        _fileStore.Setup(f => f.CleanupStaleEntriesAsync(cts.Token)).ReturnsAsync(3);
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(new StaleCleanupOptions(IsManual: true, Confirmed: false), cts.Token))
+            .ReturnsAsync(new StaleCleanupResult
+            {
+                Status = StaleCleanupStatus.Completed,
+                RemovedCount = 3,
+                TrackedCount = 40,
+                Message = "Removed 3 stale database entries.",
+            });
 
-        var result = await _controller.CleanupStaleEntries(cts.Token);
+        var result = await _controller.CleanupStaleEntries(cancellationToken: cts.Token);
 
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var ok = Assert.IsType<OkObjectResult>(result);
         Assert.Equal(true, Prop(ok.Value, "success"));
         Assert.Equal(3, Prop(ok.Value, "removedCount"));
-        Assert.Equal("Removed 3 stale database entries", Prop(ok.Value, "message"));
+        Assert.Equal(40, Prop(ok.Value, "trackedCount"));
+        Assert.Equal("Removed 3 stale database entries.", Prop(ok.Value, "message"));
+        Assert.Equal(false, Prop(ok.Value, "requiresConfirmation"));
+    }
+
+    [Fact]
+    public async Task CleanupStaleEntries_OverTheRemovalShare_AsksForConfirmation()
+    {
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult
+            {
+                Status = StaleCleanupStatus.ThresholdExceeded,
+                TrackedCount = 100,
+                RemovableCount = 60,
+                MaxRemovalPercent = 10,
+                Message = "60 of 100 tracked files are missing.",
+            });
+
+        var result = await _controller.CleanupStaleEntries();
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.Equal(false, Prop(conflict.Value, "success"));
+        Assert.Equal(true, Prop(conflict.Value, "requiresConfirmation"));
+        Assert.Equal("ThresholdExceeded", Prop(conflict.Value, "status"));
+        Assert.Equal(60, Prop(conflict.Value, "removableCount"));
+        Assert.Equal(0, Prop(conflict.Value, "removedCount"));
+        Assert.Equal("60 of 100 tracked files are missing.", Prop(conflict.Value, "error"));
+    }
+
+    [Fact]
+    public async Task CleanupStaleEntries_Confirmed_PassesTheConfirmationToTheStore()
+    {
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Completed, RemovedCount = 60 });
+
+        var result = await _controller.CleanupStaleEntries(confirm: true);
+
+        Assert.IsType<OkObjectResult>(result);
+        _fileStore.Verify(f => f.CleanupStaleEntriesAsync(new StaleCleanupOptions(IsManual: true, Confirmed: true), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CleanupStaleEntries_LibraryUnavailable_IsRefusedWithoutAConfirmationOffer()
+    {
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.WatchedDirectoryUnavailable, Message = "unmounted" });
+
+        var result = await _controller.CleanupStaleEntries(confirm: true);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.Equal(false, Prop(conflict.Value, "requiresConfirmation"));
+        Assert.Equal("WatchedDirectoryUnavailable", Prop(conflict.Value, "status"));
     }
 
     [Fact]
     public async Task CleanupStaleEntries_Cancelled_Returns499()
     {
-        _fileStore.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new OperationCanceledException());
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Cancelled, Message = "The cleanup was cancelled. No rows were removed." });
 
         var result = await _controller.CleanupStaleEntries();
 
-        var objectResult = Assert.IsType<ObjectResult>(result.Result);
+        var objectResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(499, objectResult.StatusCode);
-        Assert.Equal("Cleanup operation was cancelled", Prop(objectResult.Value, "error"));
+        Assert.Equal("The cleanup was cancelled. No rows were removed.", Prop(objectResult.Value, "error"));
     }
 
     [Fact]
-    public async Task CleanupStaleEntries_StoreThrows_Returns500()
+    public async Task CleanupStaleEntries_StoreFailed_Returns500()
     {
-        _fileStore.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("db locked"));
+        _fileStore
+            .Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<StaleCleanupOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StaleCleanupResult { Status = StaleCleanupStatus.Failed, Message = "The cleanup failed. No rows were removed." });
 
         var result = await _controller.CleanupStaleEntries();
 
-        var objectResult = Assert.IsType<ObjectResult>(result.Result);
+        var objectResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(500, objectResult.StatusCode);
-        Assert.Equal("Failed to cleanup stale entries", Prop(objectResult.Value, "error"));
+        Assert.Equal("The cleanup failed. No rows were removed.", Prop(objectResult.Value, "error"));
     }
 }

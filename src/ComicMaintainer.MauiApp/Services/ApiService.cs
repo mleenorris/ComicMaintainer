@@ -1,120 +1,130 @@
+using System.Globalization;
 using System.Net.Http.Json;
-using System.Text.Json;
-using ComicMaintainer.Core.Models;
+using System.Text;
+using ComicMaintainer.MauiApp.Models;
 
 namespace ComicMaintainer.MauiApp.Services;
 
-public class ApiService : IApiService
+/// <inheritdoc cref="IApiService"/>
+public sealed class ApiService : IApiService
 {
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ISettingsService _settingsService;
-    private readonly JsonSerializerOptions _jsonOptions;
+    private readonly ApiTransport _transport;
+    private readonly ISessionManager _session;
 
-    public ApiService(IHttpClientFactory httpClientFactory, ISettingsService settingsService)
+    public ApiService(ApiTransport transport, ISessionManager session)
     {
-        _httpClientFactory = httpClientFactory;
-        _settingsService = settingsService;
-        _jsonOptions = new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true
-        };
+        _transport = transport;
+        _session = session;
     }
 
-    private HttpClient CreateClient()
+    /// <inheritdoc/>
+    public async Task<ConnectionTestResult> TestConnectionAsync(string serverUrl, CancellationToken cancellationToken = default)
     {
-        var client = _httpClientFactory.CreateClient();
-        var serverUrl = _settingsService.ServerUrl;
-        if (!string.IsNullOrWhiteSpace(serverUrl))
+        if (!ServerAddress.TryParse(serverUrl, out var server, out var error))
         {
-            client.BaseAddress = new Uri(serverUrl);
+            return new ConnectionTestResult(false, error);
         }
-        return client;
+
+        try
+        {
+            var versionBody = await _transport.SendAsync(server, HttpMethod.Get, "api/version", timeout: ApiTransport.QuickRequestTimeout, cancellationToken: cancellationToken);
+            var version = ApiTransport.ParseJson(versionBody, ApiJsonContext.Default.VersionResponse);
+            if (string.IsNullOrEmpty(version.Version) || string.IsNullOrEmpty(version.Platform))
+            {
+                return new ConnectionTestResult(false, "Something answered at this address, but it is not a ComicMaintainer server.");
+            }
+
+            var setupBody = await _transport.SendAsync(server, HttpMethod.Get, "api/auth/setup-required", timeout: ApiTransport.QuickRequestTimeout, cancellationToken: cancellationToken);
+            return ApiTransport.ParseJson(setupBody, ApiJsonContext.Default.SetupRequiredResponse).SetupRequired
+                ? new ConnectionTestResult(true, $"Reached ComicMaintainer {version.Version}. {SessionManager.SetupRequiredMessage}")
+                : new ConnectionTestResult(true, $"Reached ComicMaintainer {version.Version}.");
+        }
+        catch (ApiException exception)
+        {
+            return new ConnectionTestResult(false, exception.Message);
+        }
     }
 
-    public async Task<bool> TestConnectionAsync(string serverUrl)
+    /// <inheritdoc/>
+    public async Task<FilesPage> GetFilesAsync(int page = 1, int perPage = 100, string? filter = null, string? search = null, CancellationToken cancellationToken = default)
+    {
+        var query = new StringBuilder("api/files?page=")
+            .Append(page.ToString(CultureInfo.InvariantCulture))
+            .Append("&per_page=")
+            .Append(perPage.ToString(CultureInfo.InvariantCulture));
+
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            query.Append("&filter=").Append(Uri.EscapeDataString(filter));
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            query.Append("&search=").Append(Uri.EscapeDataString(search));
+        }
+
+        var body = await SendAsync(HttpMethod.Get, query.ToString(), null, cancellationToken);
+        return ApiTransport.ParseJson(body, ApiJsonContext.Default.FilesPage);
+    }
+
+    /// <inheritdoc/>
+    public Task ProcessFileAsync(string filePath, CancellationToken cancellationToken = default) =>
+        SendAsync(HttpMethod.Post, "api/files/process?filePath=" + Uri.EscapeDataString(filePath), null, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<string> StartBatchProcessAsync(IReadOnlyCollection<string> files, CancellationToken cancellationToken = default) =>
+        StartSelectedFilesJobAsync("api/jobs/process-selected", files, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task DeleteFileAsync(string filePath, CancellationToken cancellationToken = default) =>
+        SendAsync(HttpMethod.Delete, "api/files/" + EncodePathSegment(filePath), null, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<string> StartBatchDeleteAsync(IReadOnlyCollection<string> files, CancellationToken cancellationToken = default) =>
+        StartSelectedFilesJobAsync("api/jobs/delete-selected", files, cancellationToken);
+
+    /// <inheritdoc/>
+    public async Task<JobStatusInfo?> GetJobStatusAsync(string jobId, CancellationToken cancellationToken = default)
     {
         try
         {
-            using var testClient = _httpClientFactory.CreateClient();
-            testClient.BaseAddress = new Uri(serverUrl);
-            testClient.Timeout = TimeSpan.FromSeconds(5);
-
-            var response = await testClient.GetAsync("/api/version");
-            return response.IsSuccessStatusCode;
+            var body = await SendAsync(HttpMethod.Get, "api/jobs/" + Uri.EscapeDataString(jobId), null, cancellationToken);
+            return ApiTransport.ParseJson(body, ApiJsonContext.Default.JobStatusInfo);
         }
-        catch
+        catch (ApiException exception) when (exception.Kind == ApiErrorKind.NotFound)
         {
-            return false;
-        }
-    }
-
-    public async Task<IEnumerable<ComicFile>> GetFilesAsync(int page = 1, int pageSize = 100, string? filter = null, string? search = null)
-    {
-        using var client = CreateClient();
-        
-        var queryParams = new List<string>
-        {
-            $"page={page}",
-            $"page_size={pageSize}"
-        };
-
-        if (!string.IsNullOrWhiteSpace(filter))
-            queryParams.Add($"filter={filter}");
-
-        if (!string.IsNullOrWhiteSpace(search))
-            queryParams.Add($"search={Uri.EscapeDataString(search)}");
-
-        var query = string.Join("&", queryParams);
-        var response = await client.GetAsync($"/api/files?{query}");
-        response.EnsureSuccessStatusCode();
-
-        var result = await response.Content.ReadFromJsonAsync<FilesResponse>(_jsonOptions);
-        return result?.Files ?? Enumerable.Empty<ComicFile>();
-    }
-
-    public async Task<bool> ProcessFileAsync(string filePath)
-    {
-        using var client = CreateClient();
-        
-        var content = JsonContent.Create(new { file_path = filePath });
-        var response = await client.PostAsync("/api/files/process", content);
-        return response.IsSuccessStatusCode;
-    }
-
-    public async Task<string> StartBatchProcessAsync(List<string> files)
-    {
-        using var client = CreateClient();
-        
-        var content = JsonContent.Create(new { files });
-        var response = await client.PostAsync("/api/jobs/process-selected", content);
-        response.EnsureSuccessStatusCode();
-
-        var result = await response.Content.ReadFromJsonAsync<JobResponse>(_jsonOptions);
-        return result?.JobId ?? throw new Exception("Failed to start batch process");
-    }
-
-    public async Task<JobStatus?> GetJobStatusAsync(string jobId)
-    {
-        using var client = CreateClient();
-        
-        var response = await client.GetAsync($"/api/jobs/{jobId}");
-        if (!response.IsSuccessStatusCode)
             return null;
-
-        return await response.Content.ReadFromJsonAsync<JobStatus>(_jsonOptions);
+        }
     }
 
-    private class FilesResponse
+    private async Task<string> StartSelectedFilesJobAsync(string path, IReadOnlyCollection<string> files, CancellationToken cancellationToken)
     {
-        public List<ComicFile> Files { get; set; } = new();
-        public int TotalFiles { get; set; }
-        public int TotalPages { get; set; }
-        public int CurrentPage { get; set; }
+        using var content = JsonContent.Create(new SelectedFilesRequest(files), ApiJsonContext.Default.SelectedFilesRequest);
+        var body = await SendAsync(HttpMethod.Post, path, content, cancellationToken);
+        var jobId = ApiTransport.ParseJson(body, ApiJsonContext.Default.JobStartedResponse).JobId;
+        return string.IsNullOrEmpty(jobId)
+            ? throw new ApiException(ApiErrorKind.InvalidResponse, "The server accepted the request but did not say which job it started.")
+            : jobId;
     }
 
-    private class JobResponse
+    private async Task<string> SendAsync(HttpMethod method, string relativeUri, HttpContent? content, CancellationToken cancellationToken)
     {
-        public string JobId { get; set; } = string.Empty;
-        public int TotalItems { get; set; }
+        var credential = await _session.RequireCredentialAsync();
+        try
+        {
+            return await _transport.SendAsync(credential.ServerUrl, method, relativeUri, content, credential, cancellationToken: cancellationToken);
+        }
+        catch (ApiException exception) when (exception.Kind == ApiErrorKind.Unauthorized)
+        {
+            await _session.NotifyUnauthorizedAsync(credential);
+            throw;
+        }
     }
+
+    // The URL-safe base64 of the UTF-8 path, without padding: the form the endpoints that take a path in the route decode.
+    private static string EncodePathSegment(string filePath) =>
+        Convert.ToBase64String(Encoding.UTF8.GetBytes(filePath))
+            .Replace('+', '-')
+            .Replace('/', '_')
+            .TrimEnd('=');
 }

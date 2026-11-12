@@ -109,6 +109,27 @@ public class MissingIssuesCheckJobHandlerTests
     }
 
     [Fact]
+    public async Task ExecuteWithFindingsAsync_ReportsHowManySeriesHaveGaps()
+    {
+        SetupCandidates(("a", "Alpha"), ("b", "Beta"));
+        SetupSeries("a", "Alpha", "1", "2", "4");
+        SetupSeries("b", "Beta", "1", "3");
+
+        var result = await BuildHandler().ExecuteWithFindingsAsync(null, CancellationToken.None);
+
+        Assert.Equal(2, result.Findings);
+        Assert.True(result.HasFindings);
+    }
+
+    [Fact]
+    public async Task ExecuteWithFindingsAsync_NothingMissing_HasNoFindings()
+    {
+        SetupCandidates();
+
+        Assert.False((await BuildHandler().ExecuteWithFindingsAsync(null, CancellationToken.None)).HasFindings);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_NoCandidates_ReportsNothingMissing()
     {
         SetupCandidates();
@@ -149,6 +170,32 @@ public class MissingIssuesCheckJobHandlerTests
             It.IsAny<CancellationToken>()), Times.Once);
         Assert.Contains("Queued 2 chapter(s) on Suwayomi", summary);
         Assert.Contains("1 Suwayomi source check(s) failed.", summary);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AutoDownload_ReportsCutShortSearchesWithoutCallingThemFailures()
+    {
+        SetupCandidates(("a", "Alpha"));
+        SetupSeries("a", "Alpha", "1", "4");
+        _suwayomi.SetupGet(s => s.IsConfigured).Returns(true);
+        _suwayomi.Setup(s => s.GetLibrarySeriesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SuwayomiLibrarySnapshot());
+        _suwayomi.Setup(s => s.DownloadMissingIssuesFromSnapshotAsync(
+                "Alpha", It.IsAny<IEnumerable<int>>(), It.IsAny<SuwayomiLibrarySnapshot>(),
+                It.IsAny<IEnumerable<string>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SuwayomiDownloadResult
+            {
+                CutShortSearches = new List<SuwayomiCutShortSearch>
+                {
+                    new() { Target = "Fuzzy source", Reason = "Only the first 3 pages of results were searched." },
+                    new() { Target = "Other source", Reason = "Only the first 3 pages of results were searched." }
+                }
+            });
+
+        var summary = await BuildHandler().ExecuteAsync("""{"autoDownload":true}""", CancellationToken.None);
+
+        Assert.Contains("2 Suwayomi search(es) were cut short", summary);
+        Assert.DoesNotContain("failed", summary);
     }
 
     [Fact]

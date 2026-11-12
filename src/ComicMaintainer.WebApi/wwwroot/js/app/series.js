@@ -110,8 +110,120 @@
         // the client does no paging.
         const SERIES_ISSUES_LOAD_ALL = -1;
 
-        async function loadSeriesIssues(seriesId, force = false) {
+        // Forced reloads of a list that is already shown come in bursts: a
+        // batch job broadcasts file_processed for every file it touches,
+        // anywhere in the library, and with a series open each of those asks
+        // for the series' whole issue list again. So such a refresh starts at
+        // once only when no request for the list is in flight and the last
+        // refresh has cooled down; otherwise it is folded into a single
+        // trailing reload that starts as soon as both hold. Everyone folded
+        // into it waits for that reload, which starts after their call and so
+        // sees whatever change prompted it. The cool-down grows with how long
+        // the last reload took (a big series costs more to list and render),
+        // so a long job keeps the list current while spending no more than
+        // about a tenth of its time reloading it.
+        //
+        // The cool-down is there for the burst, not for someone waiting on the
+        // result: the reload after a user's action (`immediate`) and the one
+        // that shows the end of the job the page is following skip it. They
+        // still wait for a request in flight, whose answer predates them.
+        const SERIES_ISSUES_REFRESH_MIN_COOLDOWN_MS = 1000;
+        const SERIES_ISSUES_REFRESH_MAX_COOLDOWN_MS = 10000;
+        const SERIES_ISSUES_REFRESH_LOAD_FACTOR = 10;
+        // Per series id: whether a refresh is running or cooling down (and the
+        // timer ending the cool-down), the trailing refresh queued meanwhile
+        // ({ promise, resolve, urgent }), if any, and whether the last refresh
+        // was asked for during the page's job.
+        const seriesIssuesRefreshes = new Map();
+
+        async function loadSeriesIssues(seriesId, force = false, { immediate = false } = {}) {
             if (!seriesId) return;
+            const cached = seriesIssuesCache.get(seriesId);
+            // A forced reload of the list already shown (or being loaded) for
+            // the active filter is a refresh; anything else is a first load,
+            // a retry or a filter change, which must not wait.
+            if (force && cached && !cached.error && cached.filter === filterMode
+                && (cached.loaded || cached.loading)) {
+                return refreshSeriesIssues(seriesId, immediate);
+            }
+            return fetchSeriesIssues(seriesId, force);
+        }
+
+        function refreshSeriesIssues(seriesId, immediate) {
+            let state = seriesIssuesRefreshes.get(seriesId);
+            if (!state) {
+                state = { busy: false, cooldownTimer: null, trailing: null, duringJob: false };
+                seriesIssuesRefreshes.set(seriesId, state);
+            }
+            // events.js reloads the same way per processed file and when the
+            // job ends, but by then it has cleared hasActiveJob.
+            const jobEnded = state.duringJob && !hasActiveJob;
+            state.duringJob = hasActiveJob;
+            const urgent = immediate || jobEnded;
+            if (urgent && state.cooldownTimer !== null) {
+                clearTimeout(state.cooldownTimer);
+                state.cooldownTimer = null;
+                state.busy = false;
+            }
+            if (state.trailing) {
+                const { promise } = state.trailing;
+                if (urgent) {
+                    state.trailing.urgent = true;
+                    startTrailingSeriesIssuesRefresh(seriesId, state);
+                }
+                return promise;
+            }
+            const cached = seriesIssuesCache.get(seriesId);
+            const loading = Boolean(cached && cached.loading);
+            if (!state.busy && !loading) {
+                return startSeriesIssuesRefresh(seriesId, state);
+            }
+            let resolve;
+            const promise = new Promise(done => { resolve = done; });
+            state.trailing = { promise, resolve, urgent };
+            if (loading) {
+                // The answer in flight predates this call; see fetchSeriesIssues.
+                cached.stale = true;
+            }
+            if (!state.busy) {
+                // Another load of the list (opening the series, a filter
+                // change) is in flight: go once it has answered.
+                Promise.resolve(cached.settled).then(() => startTrailingSeriesIssuesRefresh(seriesId, state));
+            }
+            return promise;
+        }
+
+        // Starts the queued refresh, if any, unless something still holds it back.
+        function startTrailingSeriesIssuesRefresh(seriesId, state) {
+            if (!state.trailing || state.busy) return;
+            const cached = seriesIssuesCache.get(seriesId);
+            if (cached && cached.loading) {
+                Promise.resolve(cached.settled).then(() => startTrailingSeriesIssuesRefresh(seriesId, state));
+                return;
+            }
+            const { resolve } = state.trailing;
+            state.trailing = null;
+            startSeriesIssuesRefresh(seriesId, state).then(resolve, resolve);
+        }
+
+        async function startSeriesIssuesRefresh(seriesId, state) {
+            state.busy = true;
+            const startedAt = Date.now();
+            try {
+                await fetchSeriesIssues(seriesId, true);
+            } finally {
+                const cooldown = state.trailing && state.trailing.urgent ? 0 : Math.min(
+                    SERIES_ISSUES_REFRESH_MAX_COOLDOWN_MS,
+                    Math.max(SERIES_ISSUES_REFRESH_MIN_COOLDOWN_MS, (Date.now() - startedAt) * SERIES_ISSUES_REFRESH_LOAD_FACTOR));
+                state.cooldownTimer = setTimeout(() => {
+                    state.cooldownTimer = null;
+                    state.busy = false;
+                    startTrailingSeriesIssuesRefresh(seriesId, state);
+                }, cooldown);
+            }
+        }
+
+        async function fetchSeriesIssues(seriesId, force) {
             // The list that a forced reload, or a retry after a failure, replaces.
             const previous = seriesIssuesCache.get(seriesId);
             // An entry listed (or being listed) under another filter is stale.
@@ -159,17 +271,17 @@
                 seriesIssuesCache.set(seriesId, entry);
             }
             entry.loading = true;
+            // Settles when this request does, for a refresh queued meanwhile.
+            let settle;
+            entry.settled = new Promise(resolve => { settle = resolve; });
 
             let seriesMissing = false;
             try {
-                let url = apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}`);
+                let path = `/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}`;
                 if (filterMode !== 'all') {
-                    url += `&filter=${encodeURIComponent(filterMode)}`;
+                    path += `&filter=${encodeURIComponent(filterMode)}`;
                 }
-                const response = await fetch(url, {
-                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch(path, { json: false });
                 if (!response.ok) {
                     entry.error = true;
                     seriesMissing = response.status === 404;
@@ -207,7 +319,11 @@
                                 has_external_image: data.has_external_image,
                                 external_image_url: data.external_image_url,
                                 issue_count: data.issue_count,
-                                total_size: data.total_size
+                                total_size: data.total_size,
+                                synopsis: data.synopsis,
+                                genres: data.genres,
+                                publication_status: data.publication_status,
+                                site_url: data.site_url
                             }
                         );
                     }
@@ -217,9 +333,14 @@
                 entry.error = true;
             } finally {
                 entry.loading = false;
+                settle();
             }
 
-            const selectionPruned = pruneSeriesIssueSelection(entry);
+            // A list that a queued refresh will replace was taken before the
+            // change that prompted it (e.g. while a file was being moved), so
+            // the newer list decides which selected issues are gone: this one
+            // passes the issues it had to confirm on to it.
+            const selectionPruned = entry.stale ? false : pruneSeriesIssueSelection(entry);
 
             // Re-render only if the user is still on this series and this
             // answer has not been superseded (e.g. by a filter change).
@@ -229,7 +350,7 @@
                 updateSelectInfo();
             }
 
-            if (seriesMissing) {
+            if (seriesMissing && !entry.stale) {
                 await confirmIssuesOfMissingSeries(seriesId, entry);
             }
         }
@@ -371,10 +492,7 @@
             const paths = entry.unconfirmedPaths;
             if (!paths || ![...paths].some(path => selectedFiles.has(path))) return;
             const getJson = async path => {
-                const response = await fetch(apiUrl(path), {
-                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
-                    credentials: 'same-origin'
-                });
+                const response = await apiFetch(path, { json: false });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 return response.json();
             };
@@ -527,10 +645,7 @@
         let suwayomiStatusPromise = null;
 
         async function fetchSuwayomiStatus() {
-            const response = await fetch(apiUrl('/api/suwayomi/status'), {
-                headers: getAuthHeaders(),
-                credentials: 'same-origin'
-            });
+            const response = await apiFetch('/api/suwayomi/status', { json: false });
             if (!response.ok) throw new Error('suwayomi status ' + response.status);
             return await response.json();
         }
@@ -598,13 +713,7 @@
             // back to the rest when the shown title has no exact match.
             const titles = [];
             try {
-                const response = await fetch(
-                    apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}&page=1`),
-                    {
-                        headers: getAuthHeaders ? getAuthHeaders() : undefined,
-                        credentials: 'same-origin'
-                    });
-                if (handleAuthError(response)) return;
+                const response = await apiFetch(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}&page=1`, { json: false });
                 if (!response.ok) {
                     showMessage(`Could not load the full issue list (HTTP ${response.status}).`, 'error');
                     return;
@@ -633,16 +742,7 @@
 
             showMessage(`Asking Suwayomi for ${missing.length} missing issue${missing.length === 1 ? '' : 's'}...`, 'info');
             try {
-                const response = await fetch(apiUrl('/api/suwayomi/download-missing'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({ seriesTitle: titles[0] || '', alternateTitles: titles.slice(1), issueNumbers: missing })
-                });
-                if (handleAuthError(response)) return;
+                const response = await apiFetch('/api/suwayomi/download-missing', { method: 'POST', body: { seriesTitle: titles[0] || '', alternateTitles: titles.slice(1), issueNumbers: missing }, json: false });
                 if (!response.ok) {
                     let errorMsg = `HTTP error! status: ${response.status}`;
                     try {
@@ -658,6 +758,7 @@
                 const queued = (result.queuedChapters || result.queued_chapters || []).length;
                 const unmatched = (result.unmatchedIssueNumbers || result.unmatched_issue_numbers || []).length;
                 const failures = result.discoveryFailures || result.discovery_failures || [];
+                const cutShort = result.cutShortSearches || result.cut_short_searches || [];
                 // Name the Suwayomi series when it goes by another title, so a
                 // match made through one of the other titles is visible.
                 const matchedTitle = result.series && typeof result.series.title === 'string' ? result.series.title : '';
@@ -677,6 +778,9 @@
                     const first = failures[0] || {};
                     const detail = first.target && first.error ? ` First failure: ${first.target}: ${first.error}` : '';
                     message += ` ${failures.length} source check${failures.length === 1 ? '' : 's'} failed.${detail}`;
+                }
+                if (cutShort.length) {
+                    message += ` ${cutShort.length} search${cutShort.length === 1 ? ' was' : 'es were'} cut short, so a series further down the results may have been missed.`;
                 }
                 showMessage(message, queued ? 'success' : failures.length ? 'error' : 'info');
             } catch (err) {
@@ -834,6 +938,33 @@
             `;
         }
 
+        // The provider's page for a series, when its address is an http(s)
+        // one. escapeHtml alone would let a javascript: link through.
+        function seriesSiteLink(url) {
+            return typeof url === 'string' && /^https?:\/\//i.test(url) ? url : '';
+        }
+
+        // Genres, status and provider link shown on the series page. A matched
+        // series that has none of them yet gets them at its next refresh, and
+        // says so; a series with no match has nothing to wait for.
+        function renderSeriesDetails(series) {
+            const genres = Array.isArray(series.genres) ? series.genres : [];
+            const status = series.publication_status ? seriesStatusLabel(series.publication_status) : '';
+            const link = seriesSiteLink(series.site_url);
+            if (!genres.length && !status && !link) {
+                return series.metadata_source
+                    ? '<div class="series-detail-details-pending">Genres and status are not available yet. They are added the next time this series\' metadata is refreshed.</div>'
+                    : '';
+            }
+            return `
+                <div class="series-detail-details">
+                    ${status ? `<span class="series-detail-chip series-detail-chip--status">${escapeHtml(status)}</span>` : ''}
+                    ${genres.map(genre => `<span class="series-detail-chip">${escapeHtml(genre)}</span>`).join('')}
+                    ${link ? `<a class="series-detail-link" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">View on ${escapeHtml(series.metadata_source || 'provider')}</a>` : ''}
+                </div>
+            `;
+        }
+
         // Expands/collapses a clamped synopsis block.
         function toggleSeriesSynopsis(btn) {
             const block = btn.closest('[data-synopsis-block]');
@@ -843,11 +974,18 @@
             btn.textContent = expanded ? 'Show less' : 'Show more';
         }
 
+        // The open series panel as last rendered: its markup without the issue
+        // cards (`shell`), each card's markup (`items`) and the panel element.
+        // A re-render compares against it to update only the cards that
+        // changed, and nothing at all when none did, rather than rebuilding
+        // and re-parsing the whole panel (closing any open menu) for every
+        // reload while a job processes files elsewhere in the library.
+        let lastSeriesDetailRender = null;
+        // Stands in for the issue cards in the shell markup.
+        const SERIES_ISSUES_GRID_SLOT = '<!--series-issues-grid-items-->';
+
         function renderSeriesDetail(seriesId) {
             const fileList = document.getElementById('fileList');
-            // Restore/close any open action menu (which may be portaled to
-            // <body>) before the panel's DOM is rebuilt below.
-            closeAllDropdowns();
             let series = seriesLibrary.find(item => item.id === seriesId);
             if (!series && seriesId === currentSeriesDetailId) {
                 // A metadata refresh may have changed the union-find
@@ -882,6 +1020,7 @@
                 series = currentSeriesDetailSeries;
             }
             if (!series) {
+                closeAllDropdowns();
                 closeSeriesDetail();
                 return;
             }
@@ -905,13 +1044,13 @@
                 .filter(path => typeof path === 'string' && path.length > 0);
             const allIssuesSelected = selectableIssuePaths.length > 0 && selectableIssuePaths.every(path => selectedFiles.has(path));
             const someIssuesSelected = selectableIssuePaths.some(path => selectedFiles.has(path));
-            const gridItems = buildSeriesIssuesGridItems(issues);
+            const itemMarkup = buildSeriesIssuesGridItems(issues).map(renderSeriesIssueGridItemHtml);
 
             // Every Series Actions item needs write access, so read-only users
             // don't get the menu at all: data-requires-write is on the dropdown
             // and, like the issue menus, on each item (an open menu is moved
             // to <body>, out of the dropdown).
-            renderHtml(fileList, html`
+            const shell = htmlToString(html`
                 <div class="series-detail" id="seriesDetailPanel">
                     <div class="series-detail-header">
                         <button type="button" class="btn btn-small series-detail-back" onclick="closeSeriesDetail()">${uiIcon('arrow-left')} Back to Series</button>
@@ -922,6 +1061,7 @@
                                 <div class="series-detail-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>
                                 ${series.aliases?.length ? html`<div class="series-detail-meta">Also known as: ${series.aliases.join(', ')}</div>` : ''}
                                 ${series.metadata_source ? html`<div class="series-detail-meta">Source: ${series.metadata_source}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
+                                ${rawHtml(renderSeriesDetails(series))}
                                 ${rawHtml(renderSeriesSynopsis(series))}
                                 <div class="series-detail-actions">
                                     ${issues.length ? html`<button type="button" class="btn btn-small btn-primary" onclick="readComic('${jsArg(issues[0].file_path)}')">${uiIcon('book-open')} Read First Issue</button>` : ''}
@@ -989,12 +1129,25 @@
                             ${filterMode !== 'all' ? html`<button type="button" class="btn btn-small" onclick="setHeaderFilter('all')">Clear filter</button>` : ''}
                         </div>
                     ` : html`
-                        <div class="series-issues-grid">
-                            ${rawHtml(gridItems.map(renderSeriesIssueGridItemHtml).join(''))}
-                        </div>
+                        <div class="series-issues-grid">${rawHtml(SERIES_ISSUES_GRID_SLOT)}</div>
                     `}
                 </div>
             `);
+
+            let renderedCards = patchSeriesDetail(fileList, seriesId, shell, itemMarkup);
+            if (!renderedCards) {
+                // Restore/close any open action menu (which may be portaled to
+                // <body>) before the panel's DOM is rebuilt.
+                closeAllDropdowns();
+                renderHtml(fileList, rawHtml(shell.replace(SERIES_ISSUES_GRID_SLOT, () => itemMarkup.join(''))));
+                lastSeriesDetailRender = {
+                    seriesId,
+                    shell,
+                    items: itemMarkup,
+                    panel: fileList ? fileList.querySelector('#seriesDetailPanel') : null
+                };
+                renderedCards = fileList ? [fileList] : [];
+            }
 
             const selectAllCheckbox = document.getElementById('selectAll');
             if (selectAllCheckbox) {
@@ -1003,5 +1156,65 @@
             updateSelectInfo();
             updateSelectAllCheckbox();
             updateLibraryViewLayout();
-            hydrateProtectedImages(fileList);
+            if (renderedCards.length) {
+                hydrateProtectedImages(renderedCards);
+            }
+        }
+
+        // Brings the panel rendered last for this series up to date by
+        // replacing only the issue cards whose markup changed. Returns the
+        // cards it put in (none when nothing changed), or null when the panel
+        // has to be rendered whole: another series or view was rendered since,
+        // something outside the cards changed (counts, selection, banner), or
+        // the cards are not the ones rendered.
+        function patchSeriesDetail(fileList, seriesId, shell, items) {
+            const last = lastSeriesDetailRender;
+            if (!fileList || !last || last.seriesId !== seriesId || last.shell !== shell
+                || last.items.length !== items.length || !last.panel
+                || fileList.querySelector('#seriesDetailPanel') !== last.panel) {
+                return null;
+            }
+            const grid = last.panel.querySelector('.series-issues-grid');
+            if (items.length && (!grid || grid.children.length !== items.length)) {
+                return null;
+            }
+            const changed = [];
+            items.forEach((markup, index) => {
+                if (markup !== last.items[index]) changed.push(index);
+            });
+            const oldCards = changed.map(index => grid.children[index]);
+            // An open menu (possibly moved to <body>) of a card about to be
+            // replaced is closed first; menus of the other cards stay open.
+            const menuOpenOnChangedCard = oldCards.some(card => {
+                const path = card.dataset.filePath;
+                const menu = path ? document.getElementById(getDropdownId(path)) : null;
+                return Boolean(menu && menu.classList.contains('show'));
+            });
+            if (menuOpenOnChangedCard) {
+                closeAllDropdowns();
+            }
+            const newCards = changed.map((index, i) => {
+                const card = htmlToElement(rawHtml(items[index]));
+                oldCards[i].replaceWith(card);
+                return card;
+            });
+            last.items = items;
+            if (grid) {
+                syncSeriesIssueCardSelection(grid);
+            }
+            return newCards;
+        }
+
+        // The selection also changes in place (ticking a box, clearing the
+        // selection after a job) without the cards being rendered again, so
+        // the cards a patch leaves in place are brought in line with it.
+        function syncSeriesIssueCardSelection(grid) {
+            grid.querySelectorAll('.series-issue-card[data-file-path]').forEach(card => {
+                const selected = selectedFiles.has(card.dataset.filePath);
+                card.classList.toggle('series-issue-card--selected', selected);
+                const checkbox = card.querySelector('.series-issue-select input[type="checkbox"]');
+                if (checkbox) {
+                    checkbox.checked = selected;
+                }
+            });
         }

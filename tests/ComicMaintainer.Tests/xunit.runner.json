@@ -4,7 +4,7 @@
   "methodDisplayOptions": "all",
   "diagnosticMessages": false,
   "internalDiagnosticMessages": false,
-  "maxParallelThreads": -1,
+  "maxParallelThreads": 0,
   "parallelizeAssembly": false,
   "parallelizeTestCollections": true,
   "preEnumerateTheories": true,

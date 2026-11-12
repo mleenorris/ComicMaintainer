@@ -1,7 +1,7 @@
 'use strict';
 
 // Loading the series library (js/app/library.js loadSeriesLibrary and the
-// infinite-scroll observer from js/app/file-list.js): requests, rendering,
+// infinite-scroll observer): requests, rendering,
 // paging, reload/abort handling and error states.
 
 const test = require('node:test');
@@ -31,7 +31,7 @@ test('the library opens on the first page of series, rendered as the compact gri
     const cards = page.$$('#fileList .series-grid--compact > .series-card');
     assert.equal(cards.length, 3);
     assert.deepEqual(renderedTitles(page), ['Series 001', 'Series 002', 'Series 003']);
-    assert.equal(cards[0].getAttribute('aria-label'), 'Open series Series 001');
+    assert.equal(cards[0].querySelector('.series-card-open').getAttribute('aria-label'), 'Open series Series 001');
     assert.equal(cards[0].querySelector('.series-count-badge').textContent, '3');
     assert.equal(cards[0].querySelector('.series-meta').textContent, '3.0 MB');
 
@@ -102,7 +102,7 @@ test('a server error is reported with the failed request\'s reference', async ()
     });
 
     assert.deepEqual(messages(page).filter(m => m.type === 'error'), [
-        { type: 'error', text: 'Failed to load series: HTTP error! status: 500 (ref: corr-42)' }
+        { type: 'error', text: 'Failed to load series: boom (ref: corr-42)' }
     ]);
     assert.equal(page.$('#fileList .series-card'), null);
 });

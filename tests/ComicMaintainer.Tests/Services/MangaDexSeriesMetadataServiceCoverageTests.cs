@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -171,14 +172,31 @@ public sealed class MangaDexSeriesMetadataServiceCoverageTests : IDisposable
         Assert.All(results, r => Assert.Equal("MangaDex", r.Source));
         var request = Assert.Single(handler.Requests);
         Assert.Equal(
-            $"{BaseUrl}/manga?title=Solo%20Leveling&limit={expected}&includes[]=cover_art",
+            $"{BaseUrl}/manga?title=Solo%20Leveling&limit={expected}&includes[]=cover_art&order[relevance]=desc",
             request.Uri);
-        Assert.Null(request.Accept);
+        Assert.Equal("application/json", request.Accept);
     }
 
     [Theory]
     [InlineData("""{"result":"error"}""")]
+    [InlineData("""{"result":"error","errors":[{"status":400,"detail":"bad"}]}""")]
+    public async Task SearchSeriesAsync_ErrorResult_IsAFailureNotAnEmptyAnswer(string json)
+    {
+        var service = CreateService(new StubHandler(_ => Json(json)));
+
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.SearchSeriesAsync("Solo Leveling"));
+
+        Assert.Equal(ExternalMetadataFailureKind.InvalidResponse, failure.Kind);
+        _cache.Set(ProbeCacheKey, (true, "Reachable"));
+        var health = await service.CheckHealthAsync();
+        Assert.Equal(0, health.SuccessCount);
+        Assert.Equal(1, health.FailureCount);
+    }
+
+    [Theory]
     [InlineData("""{"data":{"id":"1"}}""")]
+    [InlineData("""{"result":"ok"}""")]
     public async Task SearchSeriesAsync_ResponseWithoutDataArray_ReturnsEmptyAsASuccessfulCall(string json)
     {
         var service = CreateService(new StubHandler(_ => Json(json)));
@@ -197,16 +215,20 @@ public sealed class MangaDexSeriesMetadataServiceCoverageTests : IDisposable
     {
         var service = CreateService(new StubHandler(_ => Json("{ not json")));
 
-        Assert.Empty(await service.SearchSeriesAsync("Solo Leveling"));
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.SearchSeriesAsync("Solo Leveling"));
 
+        Assert.Equal(ExternalMetadataFailureKind.InvalidResponse, failure.Kind);
         var warning = Assert.Single(_logger.Entries);
         Assert.Equal(LogLevel.Warning, warning.Level);
-        Assert.Equal("MangaDex lookup failed for Solo Leveling", warning.Message);
+        Assert.StartsWith("MangaDex lookup failed for Solo Leveling: ", warning.Message);
         var exception = Assert.IsAssignableFrom<System.Text.Json.JsonException>(warning.Exception);
+        Assert.Same(exception, failure.InnerException);
         _cache.Set(ProbeCacheKey, (true, "Reachable"));
         var health = await service.CheckHealthAsync();
         Assert.Equal(1, health.FailureCount);
-        Assert.Equal(exception.Message, health.LastError);
+        Assert.Equal(failure.Message, health.LastError);
+        Assert.Contains(exception.Message, health.LastError);
     }
 
     [Theory]
@@ -237,21 +259,23 @@ public sealed class MangaDexSeriesMetadataServiceCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchSeriesAsync_RequestTimesOut_ReturnsEmptyLogsAndRecordsTheFailure()
+    public async Task SearchSeriesAsync_RequestTimesOut_ThrowsLogsAndRecordsTheFailure()
     {
         // A cancellation the caller didn't ask for, which is how HttpClient reports its timeout.
         var service = CreateService(new StubHandler(_ => throw new TaskCanceledException("timed out")));
 
-        Assert.Empty(await service.SearchSeriesAsync("Solo Leveling"));
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.SearchSeriesAsync("Solo Leveling"));
 
+        Assert.Equal(ExternalMetadataFailureKind.Timeout, failure.Kind);
         var warning = Assert.Single(_logger.Entries);
         Assert.Equal(LogLevel.Warning, warning.Level);
-        Assert.Equal("MangaDex lookup failed for Solo Leveling", warning.Message);
+        Assert.StartsWith("MangaDex lookup failed for Solo Leveling: ", warning.Message);
         Assert.IsType<TaskCanceledException>(warning.Exception);
         _cache.Set(ProbeCacheKey, (true, "Reachable"));
         var health = await service.CheckHealthAsync();
         Assert.Equal(1, health.FailureCount);
-        Assert.Equal(warning.Exception.Message, health.LastError);
+        Assert.Equal(failure.Message, health.LastError);
     }
 
     [Fact]
@@ -388,17 +412,54 @@ public sealed class MangaDexSeriesMetadataServiceCoverageTests : IDisposable
         Assert.Empty(_logger.Entries);
     }
 
+    /// <summary>Server back-offs short enough to wait out before the single retry.</summary>
     public static TheoryData<string, double, double> RetryAfterCases => new()
     {
-        { "delta-3600", 120, 120 },
         { "delta-0", 0.25, 0.25 },
-        { "date-future", 50, 60.5 },
         { "date-past", 5, 5 },
-        { "unix-future", 25, 30.5 },
         { "unix-garbage", 5, 5 },
         { "unix-past", 5, 5 },
+    };
+
+    /// <summary>Server back-offs too long to hold a lookup for.</summary>
+    public static TheoryData<string, double, double> LongRetryAfterCases => new()
+    {
+        { "delta-3600", 3600, 3600 },
+        { "date-future", 50, 60.5 },
+        { "unix-future", 25, 30.5 },
         { "unix-garbage-then-future", 25, 30.5 },
     };
+
+    [Theory]
+    [MemberData(nameof(LongRetryAfterCases))]
+    public async Task SearchSeriesAsync_Http429WithALongBackOff_FailsAtOnceAsRateLimited(
+        string retryAfterCase,
+        double minSeconds,
+        double maxSeconds)
+    {
+        var handler = new StubHandler(_ => TooManyRequests(retryAfterCase));
+        var service = CreateService(handler);
+        var before = DateTime.UtcNow;
+
+        var failure = await Assert.ThrowsAsync<ExternalMetadataUnavailableException>(
+            () => service.SearchSeriesAsync("Solo Leveling"));
+
+        Assert.Equal(ExternalMetadataFailureKind.RateLimited, failure.Kind);
+        Assert.NotNull(failure.RetryAfter);
+        Assert.InRange(failure.RetryAfter.Value.TotalSeconds, minSeconds, maxSeconds);
+        Assert.Single(handler.Requests);
+        Assert.DoesNotContain(_logger.Entries, e => e.Message.Contains(BackOffMessage, StringComparison.Ordinal));
+
+        // The health panel shows the provider as rate limited (capped at ten minutes).
+        _cache.Set(ProbeCacheKey, (true, "Reachable"));
+        var health = await service.CheckHealthAsync();
+        Assert.True(health.RateLimited);
+        Assert.Equal("Degraded - rate limited", health.StatusMessage);
+        Assert.InRange(
+            health.RateLimitedUntilUtc!.Value,
+            before.AddSeconds(Math.Min(minSeconds, 600) - 1),
+            DateTime.UtcNow.AddSeconds(Math.Min(maxSeconds, 600) + 1));
+    }
 
     [Theory]
     [MemberData(nameof(RetryAfterCases))]
@@ -427,7 +488,9 @@ public sealed class MangaDexSeriesMetadataServiceCoverageTests : IDisposable
     {
         using var cts = new CancellationTokenSource();
         CancelOnBackOff(cts);
-        var handler = new StubHandler(_ => TooManyRequests("delta-3600"));
+        // No usable header: the invoker waits its 5 s default before retrying,
+        // and the health panel shows the provider as rate limited meanwhile.
+        var handler = new StubHandler(_ => TooManyRequests("unix-garbage"));
         var service = CreateService(handler);
         var before = DateTime.UtcNow;
         await SearchCancelledDuringTheBackOffAsync(service, "Solo Leveling", cts.Token);
@@ -441,7 +504,7 @@ public sealed class MangaDexSeriesMetadataServiceCoverageTests : IDisposable
         Assert.True(health.RateLimited);
         Assert.Equal("Degraded - rate limited", health.StatusMessage);
         Assert.NotNull(health.RateLimitedUntilUtc);
-        Assert.InRange(health.RateLimitedUntilUtc.Value, before.AddSeconds(119), DateTime.UtcNow.AddSeconds(121));
+        Assert.InRange(health.RateLimitedUntilUtc.Value, before.AddSeconds(4), DateTime.UtcNow.AddSeconds(6));
         Assert.Single(handler.Requests);
     }
 
@@ -472,7 +535,7 @@ public sealed class MangaDexSeriesMetadataServiceCoverageTests : IDisposable
         Assert.True(health.Reachable);
         Assert.Equal("Reachable", health.StatusMessage);
         var probe = Assert.Single(handler.Requests);
-        Assert.Equal($"{BaseUrl}/manga?title=ping&limit=1&includes[]=cover_art", probe.Uri);
+        Assert.Equal($"{BaseUrl}/manga?title=ping&limit=1&includes[]=cover_art&order[relevance]=desc", probe.Uri);
         Assert.Equal("application/json", probe.Accept);
     }
 

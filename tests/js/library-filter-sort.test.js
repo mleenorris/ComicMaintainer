@@ -215,7 +215,6 @@ test('on a phone the filter applies to the series list, which stays in series mo
     page.click('#headerFilterMenu [data-filter="missing"]');
     await page.settle();
 
-    assert.equal(page.evaluate('libraryViewMode'), 'series');
     assert.equal(seriesCalls(page).at(-1).query.filter, 'missing');
     // Only the filter is saved, and no view change is announced.
     assert.deepEqual(savedPreferences(page), [{ filterMode: 'missing' }]);

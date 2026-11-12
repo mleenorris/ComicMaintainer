@@ -34,7 +34,7 @@ function assertAuthorized(page, method, path) {
     assert.equal(calls.length, 1, `one ${method} ${path}`);
     const [call] = calls;
     assert.equal(call.headers.authorization, bearer(page), `${method} ${path} sends the session token`);
-    assert.equal(call.init.credentials, 'same-origin', `${method} ${path} keeps its credentials mode`);
+    assert.equal(call.init.credentials, 'include', `${method} ${path} sends the session cookie`);
     return call;
 }
 

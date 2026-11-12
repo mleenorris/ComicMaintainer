@@ -368,3 +368,40 @@ test('sending condensed includes the condense settings, and reopening starts ove
     });
     assert.ok(!sendDisabled(page));
 });
+
+test('a book too large to build says so, offers no download and blocks Send', async t => {
+    const GB = 1024 * MB;
+    const buildable = condensedBook({ display_name: 'Saga #1-5' });
+    const oversized = condensedBook({ display_name: 'Saga #6-10', exceeds_attachment_limit: true, estimated_bytes: 30 * MB });
+    const tooLarge = condensedBook({
+        display_name: 'Saga #11-500',
+        issue_count: 490,
+        exceeds_attachment_limit: true,
+        exceeds_book_size_limit: true,
+        estimated_bytes: 3 * GB
+    });
+    const page = await openForSeries(t, {
+        routes: { 'POST /api/email/condense-plan': condensePlan({ books: [tooLarge], max_book_bytes: 2 * GB }) }
+    });
+
+    await choose(page, '#emailCondenseModeSelect', 'count');
+
+    let plan = planState(page);
+    assert.equal(plan.warning,
+        '⚠️ 1 of these books is larger than the 2.0 GB limit for a single book and cannot be built. Condense fewer issues per book.');
+    assert.deepEqual(plan.books, ['Saga #11-500 · 490 issues · ~3.0 GB · too large to build']);
+    assert.equal(plan.downloads, 0);
+    assert.ok(sendDisabled(page));
+
+    // Among other books, each is described for what can still be done with it.
+    page.route('POST /api/email/condense-plan', condensePlan({ books: [buildable, oversized, tooLarge, { ...tooLarge, display_name: 'Saga #501-900' }], max_book_bytes: 2 * GB }));
+    await choose(page, '#emailCondenseCountInput', '6');
+
+    plan = planState(page);
+    assert.equal(plan.warning,
+        '⚠️ 1 of these books is larger than the 25.0 MB attachment limit and cannot be emailed. Download it instead, or condense fewer issues per book.');
+    assert.match(page.$('#emailCondensePlan').textContent.replace(/\s+/g, ' '),
+        /2 of these books are larger than the 2\.0 GB limit for a single book and cannot be built\./);
+    assert.deepEqual(plan.books.map(book => book.split(' · ').at(-1)), ['~10.0 MB', 'too large to email', 'too large to build', 'too large to build']);
+    assert.equal(plan.downloads, 2);
+});

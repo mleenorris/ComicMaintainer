@@ -14,7 +14,6 @@ public class SeriesLibraryServiceCoverageTests
     private static readonly DateTime BaseTime = new(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     private readonly Mock<IFileStoreService> _fileStore = new();
-    private readonly Mock<IComicProcessorService> _processor = new();
     private readonly Mock<ISeriesMetadataCacheService> _metadataCache = new();
     private readonly AppSettings _appSettings = new();
     private readonly Mock<IOptionsMonitor<AppSettings>> _settings = new();
@@ -24,10 +23,6 @@ public class SeriesLibraryServiceCoverageTests
 
     public SeriesLibraryServiceCoverageTests()
     {
-        // Version sources make snapshot caching possible; it is only enabled
-        // for services created with a user context.
-        _fileStore.As<IChangeVersionSource>().SetupGet(v => v.ChangeVersion).Returns(1);
-        _metadataCache.As<IChangeVersionSource>().SetupGet(v => v.ChangeVersion).Returns(1);
         _settings.Setup(s => s.CurrentValue).Returns(() => _appSettings);
         _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string? filter, CancellationToken _) => SelectFiles(filter));
@@ -44,14 +39,23 @@ public class SeriesLibraryServiceCoverageTests
     private SeriesLibraryService CreateService(
         ISeriesNameResolver? resolver = null,
         IUserContextAccessor? user = null,
-        IOptionsMonitor<AppSettings>? settings = null) => new(
+        IOptionsMonitor<AppSettings>? settings = null) => TestServices.CreateSeriesLibrary(
         _fileStore.Object,
-        _processor.Object,
         _metadataCache.Object,
         settings ?? _settings.Object,
         NullLogger<SeriesLibraryService>.Instance,
         resolver,
         user);
+
+    /// <summary>
+    /// Sources that report change versions make snapshot caching possible, so the tests of that
+    /// cache call this before creating the service; every other test builds each view fresh.
+    /// </summary>
+    private void ReportChangeVersions()
+    {
+        _fileStore.As<IChangeVersionSource>().SetupGet(v => v.ChangeVersion).Returns(1);
+        _metadataCache.As<IChangeVersionSource>().SetupGet(v => v.ChangeVersion).Returns(1);
+    }
 
     private void VerifyFileLoads(int times) =>
         _fileStore.Verify(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Exactly(times));
@@ -134,13 +138,13 @@ public class SeriesLibraryServiceCoverageTests
         Assert.Collection(saga.Folders,
             folder =>
             {
-                Assert.Equal("/lib/Saga", folder.Directory);
+                Assert.Equal(TestPaths.Native("/lib/Saga"), folder.Directory);
                 Assert.Equal(2, folder.FileCount);
                 Assert.Equal(30, folder.TotalSize);
             },
             folder =>
             {
-                Assert.Equal("/archive/Saga", folder.Directory);
+                Assert.Equal(TestPaths.Native("/archive/Saga"), folder.Directory);
                 Assert.Equal(1, folder.FileCount);
                 Assert.Equal(5, folder.TotalSize);
             });
@@ -157,13 +161,13 @@ public class SeriesLibraryServiceCoverageTests
 
         var saga = groups.Single(g => g.Id == "saga");
         Assert.Equal("Saga", saga.Title);
-        Assert.Equal(new[] { "/lib/Saga", "/archive/Saga" }, saga.Folders.Select(f => f.Directory));
+        Assert.Equal(new[] { TestPaths.Native("/lib/Saga"), TestPaths.Native("/archive/Saga") }, saga.Folders.Select(f => f.Directory));
         Assert.Equal(new[] { 2, 1 }, saga.Folders.Select(f => f.FileCount));
         Assert.Equal(new long[] { 30, 5 }, saga.Folders.Select(f => f.TotalSize));
 
         var batman = groups.Single(g => g.Id == "batman");
         var batmanFolder = Assert.Single(batman.Folders);
-        Assert.Equal("/lib/Batman", batmanFolder.Directory);
+        Assert.Equal(TestPaths.Native("/lib/Batman"), batmanFolder.Directory);
         Assert.Equal(2, batmanFolder.FileCount);
         Assert.Equal(10, batmanFolder.TotalSize);
 
@@ -213,11 +217,11 @@ public class SeriesLibraryServiceCoverageTests
         var withoutDirectories = await service.GetFoldersForNormalizedKeyAsync("unknown-series");
         var unmatched = await service.GetFoldersForNormalizedKeyAsync("not-a-series");
 
-        Assert.Equal(new[] { "/lib/Saga", "/archive/Saga" }, byImageKey.Select(f => f.Directory));
+        Assert.Equal(new[] { TestPaths.Native("/lib/Saga"), TestPaths.Native("/archive/Saga") }, byImageKey.Select(f => f.Directory));
         Assert.Equal(new[] { 2, 1 }, byImageKey.Select(f => f.FileCount));
         Assert.Equal(byImageKey.Select(f => f.Directory), byPinnedId.Select(f => f.Directory));
         var batman = Assert.Single(byPlainId);
-        Assert.Equal("/lib/Batman", batman.Directory);
+        Assert.Equal(TestPaths.Native("/lib/Batman"), batman.Directory);
         Assert.Equal(2, batman.FileCount);
         Assert.Empty(withoutDirectories);
         Assert.Empty(unmatched);
@@ -493,6 +497,7 @@ public class SeriesLibraryServiceCoverageTests
             File("/lib/Saga/Saga 001.cbz", series: "Saga", issue: "1", title: "Opening"),
             File("/lib/Batman/Batman 001.cbz", series: "Batman", issue: "1"),
         };
+        ReportChangeVersions();
         var service = CreateService(user: new TestUserContextAccessor("alice"));
 
         // More distinct search views than the per-snapshot view cache holds.
@@ -521,6 +526,7 @@ public class SeriesLibraryServiceCoverageTests
             File("/lib/Specials/Annual.cbz", series: "Specials", issue: "Annual"),
             File("/lib/Specials/Holiday Special.cbz", series: "Specials", issue: "Special"),
         };
+        ReportChangeVersions();
         var service = CreateService(user: new TestUserContextAccessor("alice"));
 
         var first = await service.GetSeriesSummariesAsync(filter: "missing");
@@ -539,6 +545,7 @@ public class SeriesLibraryServiceCoverageTests
         var loads = 0;
         _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Returns(() => Interlocked.Increment(ref loads) == 1 ? gate.Task : Task.FromResult(SelectFiles(null)));
+        ReportChangeVersions();
         var service = CreateService(user: new TestUserContextAccessor("alice"));
 
         // The first request holds the build lock while its file load is pending;
@@ -556,20 +563,19 @@ public class SeriesLibraryServiceCoverageTests
     }
 
     [Fact]
-    public async Task NullSettingsValue_UsesDefaultsForSnapshotAndUpgradeBudget()
+    public async Task NullSettingsValue_UsesDefaultsForTheSnapshot()
     {
         var settings = new Mock<IOptionsMonitor<AppSettings>>();
         settings.Setup(s => s.CurrentValue).Returns(default(AppSettings)!);
-        _files = new List<ComicFile> { File("/lib/Saga/Saga 001.cbz", series: "Saga") };
-        _processor.Setup(p => p.GetSeriesMetadataAsync("/lib/Saga/Saga 001.cbz", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesMetadata { Title = "From Disk", Issue = "1" });
+        _files = new List<ComicFile> { File("/lib/Saga/Saga 001.cbz", series: "Saga", issue: "1", title: "Cached") };
+        ReportChangeVersions();
         var service = CreateService(user: new TestUserContextAccessor("alice"), settings: settings.Object);
 
         var result = await service.GetSeriesIssuesAsync("saga");
 
         Assert.NotNull(result);
         var issue = Assert.Single(result.Issues);
-        Assert.Equal("From Disk", issue.Title);
+        Assert.Equal("Cached", issue.Title);
         Assert.Equal("1", issue.Issue);
     }
 
@@ -655,6 +661,41 @@ public class SeriesLibraryServiceCoverageTests
         Assert.Contains(result.Issues, issue => issue.FilePath == expectedPath);
     }
 
+    private void SeedSeriesWithProviderDetails()
+    {
+        _files = new List<ComicFile> { File("/lib/Saga/Saga 001.cbz", series: "Saga", issue: "1") };
+        _records = new List<SeriesMetadataCacheRecord>
+        {
+            new()
+            {
+                NormalizedKey = "saga",
+                CanonicalTitle = "Saga",
+                LookupStatus = "success",
+                Synopsis = "A space opera.",
+                Genres = new List<string> { "Drama" },
+                PublicationStatus = SeriesPublicationStatus.Ongoing,
+                SiteUrl = "https://anilist.co/manga/1"
+            }
+        };
+        _filteredFiles["empty"] = new List<ComicFile>();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("empty")]
+    public async Task GetSeriesIssuesAsync_CarriesTheProviderDetails(string? filter)
+    {
+        SeedSeriesWithProviderDetails();
+
+        var result = await CreateService().GetSeriesIssuesAsync("saga", filter: filter);
+
+        Assert.NotNull(result);
+        Assert.Equal("A space opera.", result.Synopsis);
+        Assert.Equal(new[] { "Drama" }, result.Genres);
+        Assert.Equal(SeriesPublicationStatus.Ongoing, result.PublicationStatus);
+        Assert.Equal("https://anilist.co/manga/1", result.SiteUrl);
+    }
+
     [Theory]
     [InlineData("no-match")]
     [InlineData("empty")]
@@ -712,7 +753,7 @@ public class SeriesLibraryServiceCoverageTests
     }
 
     [Fact]
-    public async Task GetSeriesIssuesAsync_UpgradeKeepsCachedFieldsAndSurvivesProcessorFailures()
+    public async Task GetSeriesIssuesAsync_PagesTheCachedIssuesAndParsesMissingNumbersFromFileNames()
     {
         _files = new List<ComicFile>
         {
@@ -728,12 +769,6 @@ public class SeriesLibraryServiceCoverageTests
                 Metadata = new ComicMetadata { Series = "Upgrade" }
             },
         };
-        _processor.Setup(p => p.GetSeriesMetadataAsync("/lib/Upgrade/Upgrade 001.cbz", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesMetadata { Title = "Disk Title", Issue = "1", Volume = "Disk Volume", Publisher = "Disk Pub", Year = 1999 });
-        _processor.Setup(p => p.GetSeriesMetadataAsync("/lib/Upgrade/Upgrade 002.cbz", It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new IOException("corrupt archive"));
-        _processor.Setup(p => p.GetSeriesMetadataAsync("/lib/Upgrade/Upgrade 003.cbz", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(default(SeriesMetadata?));
 
         var result = await CreateService().GetSeriesIssuesAsync("upgrade", perPage: 0);
 
@@ -741,37 +776,31 @@ public class SeriesLibraryServiceCoverageTests
         Assert.Equal(4, result.IssueCount);
         Assert.Equal(1, result.PerPage);
         Assert.Equal(4, result.TotalPages);
-        var upgraded = Assert.Single(result.Issues);
-        Assert.Equal("/lib/Upgrade/Upgrade 001.cbz", upgraded.FilePath);
-        Assert.Equal("Kept Title", upgraded.Title);
-        Assert.Equal("1", upgraded.Issue);
-        Assert.Equal("V1", upgraded.Volume);
-        Assert.Equal("Pub", upgraded.Publisher);
-        Assert.Equal(2001, upgraded.Year);
+        var first = Assert.Single(result.Issues);
+        Assert.Equal("/lib/Upgrade/Upgrade 001.cbz", first.FilePath);
+        Assert.Equal("Kept Title", first.Title);
+        Assert.Equal("1", first.Issue);
+        Assert.Equal("V1", first.Volume);
+        Assert.Equal("Pub", first.Publisher);
+        Assert.Equal(2001, first.Year);
 
         var all = await CreateService().GetSeriesIssuesAsync("upgrade", perPage: -1);
 
         Assert.NotNull(all);
         Assert.Equal(new[] { "1", "2", "3", null }, all.Issues.Select(i => i.Issue));
-        var failed = all.Issues.Single(i => i.FilePath == "/lib/Upgrade/Upgrade 002.cbz");
-        Assert.Null(failed.Title);
+        Assert.Null(all.Issues.Single(i => i.FilePath == "/lib/Upgrade/Upgrade 002.cbz").Title);
         Assert.Equal("/lib/Upgrade/noname", all.Issues[^1].FilePath);
-        _processor.Verify(p => p.GetSeriesMetadataAsync("/lib/Upgrade/Upgrade 002.cbz", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task GetSeriesIssuesAsync_UpgradeFillsMissingTitleButKeepsCachedIssueNumber()
+    public async Task GetSeriesIssuesAsync_KeepsTheCachedIssueNumberOverTheFileName()
     {
         _files = new List<ComicFile> { File("/lib/Keep/Keep 001.cbz", series: "Keep", issue: "7") };
-        _processor.Setup(p => p.GetSeriesMetadataAsync("/lib/Keep/Keep 001.cbz", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesMetadata { Title = "Disk Title", Issue = "99" });
 
         var result = await CreateService().GetSeriesIssuesAsync("keep");
 
         Assert.NotNull(result);
-        var issue = Assert.Single(result.Issues);
-        Assert.Equal("Disk Title", issue.Title);
-        Assert.Equal("7", issue.Issue);
+        Assert.Equal("7", Assert.Single(result.Issues).Issue);
     }
 
     [Fact]

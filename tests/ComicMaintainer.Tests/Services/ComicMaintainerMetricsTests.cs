@@ -59,9 +59,7 @@ public class ComicMaintainerMetricsTests
         metrics.RecordProviderRateLimitWait("MangaDex", "server", TimeSpan.FromSeconds(5));
         metrics.RecordEmailSend(success: false);
         metrics.RecordDatabaseBackup(success: true);
-        var emailQueue = new ComicEmailQueue(
-            () => Mock.Of<IComicEmailService>(),
-            Mock.Of<ILogger<ComicEmailQueue>>(),
+        var emailQueue = new ComicEmailQueue(Mock.Of<ILogger<ComicEmailQueue>>(),
             metrics);
         emailQueue.Enqueue(1);
         emailQueue.Enqueue(2);

@@ -27,6 +27,7 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
         ("ENABLE_ANILIST_METADATA", o => o.EnableAniListMetadata, (o, v) => o.EnableAniListMetadata = v),
         ("ENABLE_SUWAYOMI", o => o.EnableSuwayomi, (o, v) => o.EnableSuwayomi = v),
         ("DOWNLOAD_EXTERNAL_SERIES_IMAGES", o => o.DownloadExternalSeriesImages, (o, v) => o.DownloadExternalSeriesImages = v),
+        ("FILL_COMICINFO_FROM_PROVIDERS", o => o.FillComicInfoFromProviders, (o, v) => o.FillComicInfoFromProviders = v),
         ("SMTP_USE_SSL", o => o.SmtpUseSsl, (o, v) => o.SmtpUseSsl = v),
         ("SMTP_ALLOW_INSECURE", o => o.SmtpAllowInsecure, (o, v) => o.SmtpAllowInsecure = v),
         ("ERROR_REPORTING_ENABLED", o => o.ErrorReportingEnabled, (o, v) => o.ErrorReportingEnabled = v),
@@ -37,6 +38,8 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
     [
         ("MANGADEX_REQUESTS_PER_SECOND", o => o.MangaDexRequestsPerSecond),
         ("ANILIST_REQUESTS_PER_MINUTE", o => o.AniListRequestsPerMinute),
+        ("COMICVINE_REQUESTS_PER_HOUR", o => o.ComicVineRequestsPerHour),
+        ("METADATA_PROVIDER_TIMEOUT_SECONDS", o => o.MetadataProviderTimeoutSeconds),
         ("SERIES_IMAGE_MAX_BYTES", o => o.SeriesImageMaxBytes),
         ("SERIES_IMAGE_MAX_DOWNLOAD_BYTES", o => o.SeriesImageMaxDownloadBytes),
         ("SERIES_IMAGE_MAX_DIMENSION", o => o.SeriesImageMaxDimension),
@@ -57,6 +60,11 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
         "SMTP_PORT",
         "ERROR_REPORTING_MAX_ISSUES_PER_DAY",
         .. EmailRateLimitVariables,
+        "STALE_CLEANUP_MAX_REMOVAL_PERCENT",
+        "STALE_CLEANUP_MISSING_GRACE_HOURS",
+        "STALE_CLEANUP_SENTINEL_FILE",
+        "PROCESSING_HISTORY_RETENTION_DAYS",
+        "PROCESSING_HISTORY_MAX_ENTRIES",
     ];
 
     // AppSettingsEnvironmentPostConfigure is internal to the WebApi assembly (no InternalsVisibleTo).
@@ -269,6 +277,56 @@ public sealed class AppSettingsEnvironmentPostConfigureTests : IDisposable
             _ => options.EmailMinSecondsBetweenSends,
         };
         Assert.Equal(expected, actual);
+    }
+
+    [Theory]
+    [InlineData("STALE_CLEANUP_MAX_REMOVAL_PERCENT", "0", 0)]
+    [InlineData("STALE_CLEANUP_MAX_REMOVAL_PERCENT", "100", 100)]
+    [InlineData("STALE_CLEANUP_MAX_REMOVAL_PERCENT", "101", 7)]
+    [InlineData("STALE_CLEANUP_MAX_REMOVAL_PERCENT", "-1", 7)]
+    [InlineData("STALE_CLEANUP_MISSING_GRACE_HOURS", "0", 0)]
+    [InlineData("STALE_CLEANUP_MISSING_GRACE_HOURS", "720", 720)]
+    [InlineData("STALE_CLEANUP_MISSING_GRACE_HOURS", "721", 7)]
+    [InlineData("STALE_CLEANUP_MISSING_GRACE_HOURS", "1.5", 7)]
+    [InlineData("PROCESSING_HISTORY_RETENTION_DAYS", "0", 0)]
+    [InlineData("PROCESSING_HISTORY_RETENTION_DAYS", "3650", 3650)]
+    [InlineData("PROCESSING_HISTORY_RETENTION_DAYS", "3651", 7)]
+    [InlineData("PROCESSING_HISTORY_MAX_ENTRIES", "0", 0)]
+    [InlineData("PROCESSING_HISTORY_MAX_ENTRIES", "10000000", 10_000_000)]
+    [InlineData("PROCESSING_HISTORY_MAX_ENTRIES", "10000001", 7)]
+    [InlineData("PROCESSING_HISTORY_MAX_ENTRIES", "many", 7)]
+    public void DatabaseCleanupVariables_AcceptZeroUpToTheirBound(string variable, string value, int expected)
+    {
+        _environment.Set(variable, value);
+        var options = new AppSettings
+        {
+            StaleCleanupMaxRemovalPercent = 7,
+            StaleCleanupMissingGraceHours = 7,
+            ProcessingHistoryRetentionDays = 7,
+            ProcessingHistoryMaxEntries = 7,
+        };
+
+        PostConfigure.PostConfigure(Options.DefaultName, options);
+
+        var actual = variable switch
+        {
+            "STALE_CLEANUP_MAX_REMOVAL_PERCENT" => options.StaleCleanupMaxRemovalPercent,
+            "STALE_CLEANUP_MISSING_GRACE_HOURS" => options.StaleCleanupMissingGraceHours,
+            "PROCESSING_HISTORY_RETENTION_DAYS" => options.ProcessingHistoryRetentionDays,
+            _ => options.ProcessingHistoryMaxEntries,
+        };
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void StaleCleanupSentinelFile_IsTakenFromTheEnvironment()
+    {
+        _environment.Set("STALE_CLEANUP_SENTINEL_FILE", ".library-mounted");
+        var options = new AppSettings { StaleCleanupSentinelFile = "from-settings" };
+
+        PostConfigure.PostConfigure(Options.DefaultName, options);
+
+        Assert.Equal(".library-mounted", options.StaleCleanupSentinelFile);
     }
 
     /// <summary>

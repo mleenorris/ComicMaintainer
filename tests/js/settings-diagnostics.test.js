@@ -259,7 +259,7 @@ test('diagnostics failures are explained in the panel', async () => {
     // A server failure carries its correlation id so it can be found in the logs.
     page.route('GET /api/diagnostics', respond(500, { error: 'boom' }, { 'X-Correlation-Id': 'corr-500' }));
     await page.run('loadDiagnostics()');
-    assert.equal(panelText(page), 'Could not load diagnostics: HTTP error! status: 500 (ref: corr-500)');
+    assert.equal(panelText(page), 'Could not load diagnostics: boom (ref: corr-500)');
 
     // Failures without one are shown without a reference, not with that one.
     page.route('GET /api/diagnostics', 502);

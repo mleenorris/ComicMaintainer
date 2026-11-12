@@ -23,6 +23,9 @@ namespace ComicMaintainer.Core.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("CondensedFilePaths")
                         .HasColumnType("TEXT");
 
@@ -60,6 +63,13 @@ namespace ComicMaintainer.Core.Migrations
                         .HasMaxLength(2048)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OwnerUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("SentAt")
                         .HasColumnType("TEXT");
 
@@ -67,6 +77,9 @@ namespace ComicMaintainer.Core.Migrations
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("StartsWithoutOutcome")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -79,6 +92,8 @@ namespace ComicMaintainer.Core.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedAt");
+
+                    b.HasIndex("OwnerUserId", "CreatedAt");
 
                     b.HasIndex("Status", "SentAt");
 
@@ -123,6 +138,9 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<bool>("IsProcessed")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsProcessingPending")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("IsRead")
                         .HasColumnType("INTEGER");
 
@@ -138,6 +156,12 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<DateTime?>("LastWriteAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("MetadataScannedModified")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("MetadataScannedSize")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("MetadataSource")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -147,6 +171,9 @@ namespace ComicMaintainer.Core.Migrations
 
                     b.Property<int>("MetadataVersion")
                         .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("MissingSince")
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("SeriesMetadataVersion")
                         .HasColumnType("INTEGER");
@@ -159,28 +186,19 @@ namespace ComicMaintainer.Core.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CreatedAt");
-
-                    b.HasIndex("Directory");
-
                     b.HasIndex("FileName");
 
                     b.HasIndex("FilePath")
                         .IsUnique();
 
-                    b.HasIndex("IsDuplicate");
+                    b.HasIndex("FileSize");
 
-                    b.HasIndex("IsNormalized");
+                    b.HasIndex("IsDuplicate")
+                        .HasFilter("\"IsDuplicate\"");
 
-                    b.HasIndex("IsProcessed");
-
-                    b.HasIndex("IsRead");
-
-                    b.HasIndex("IsRenamed");
+                    b.HasIndex("LastModified");
 
                     b.HasIndex("SeriesMetadataVersion");
-
-                    b.HasIndex("UpdatedAt");
 
                     b.HasIndex("Directory", "FileName");
 
@@ -213,12 +231,16 @@ namespace ComicMaintainer.Core.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("OwnerUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EmailAddress")
+                    b.HasIndex("OwnerUserId", "EmailAddress")
                         .IsUnique();
 
                     b.ToTable("EreaderDevices");
@@ -265,6 +287,9 @@ namespace ComicMaintainer.Core.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("IssueCreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("IssueCreationAttemptedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("LastError")
@@ -324,44 +349,26 @@ namespace ComicMaintainer.Core.Migrations
                     b.ToTable("ErrorReports");
                 });
 
-            modelBuilder.Entity("ComicMaintainer.Core.Data.FileReadStatusEntity", b =>
+            modelBuilder.Entity("ComicMaintainer.Core.Data.LibraryScanEntity", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<DateTime>("CreatedAt")
+                    b.Property<DateTime>("CompletedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("CurrentPage")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
-                        .HasDefaultValue(1);
-
-                    b.Property<string>("FilePath")
+                    b.Property<string>("Directory")
                         .IsRequired()
                         .HasMaxLength(2048)
                         .HasColumnType("TEXT");
 
-                    b.Property<bool>("IsRead")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime?>("LastReadDate")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
                     b.HasKey("Id");
 
-                    b.HasIndex("FilePath")
+                    b.HasIndex("Directory")
                         .IsUnique();
 
-                    b.HasIndex("IsRead");
-
-                    b.HasIndex("LastReadDate");
-
-                    b.ToTable("FileReadStatuses");
+                    b.ToTable("LibraryScans");
                 });
 
             modelBuilder.Entity("ComicMaintainer.Core.Data.ProcessingHistoryEntity", b =>
@@ -450,10 +457,6 @@ namespace ComicMaintainer.Core.Migrations
 
                     b.HasIndex("EntryId")
                         .IsUnique();
-
-                    b.HasIndex("FilePath");
-
-                    b.HasIndex("Success");
 
                     b.HasIndex("Timestamp");
 
@@ -722,6 +725,9 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("GenresJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ImageContentType")
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
@@ -750,8 +756,16 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<int>("MetadataVersion")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Origin")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PreferredLanguage")
                         .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PublicationStatus")
+                        .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("RemoteImageUrl")
@@ -762,12 +776,23 @@ namespace ComicMaintainer.Core.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("SiteUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Source")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceId")
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Synopsis")
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("TotalChapters")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
@@ -837,10 +862,6 @@ namespace ComicMaintainer.Core.Migrations
 
                     b.Property<string>("FilterMode")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("LibraryViewMode")
-                        .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("PerPage")
@@ -915,7 +936,14 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<int>("AccessFailedCount")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("ApiKey")
+                    b.Property<DateTime?>("ApiKeyCreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ApiKeyHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ApiKeyLastUsedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ConcurrencyStamp")
@@ -976,7 +1004,8 @@ namespace ComicMaintainer.Core.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ApiKey");
+                    b.HasIndex("ApiKeyHash")
+                        .IsUnique();
 
                     b.HasIndex("NormalizedEmail")
                         .HasDatabaseName("EmailIndex");
@@ -986,6 +1015,30 @@ namespace ComicMaintainer.Core.Migrations
                         .HasDatabaseName("UserNameIndex");
 
                     b.ToTable("AspNetUsers", (string)null);
+                });
+
+            modelBuilder.Entity("ComicMaintainer.Core.Models.Auth.RevokedTokenEntity", b =>
+                {
+                    b.Property<string>("TokenId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("RevokedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TokenId");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.ToTable("RevokedTokens", (string)null);
                 });
 
             modelBuilder.Entity("ComicMaintainer.Core.Models.MetadataAuditFindingEntity", b =>
@@ -1086,6 +1139,73 @@ namespace ComicMaintainer.Core.Migrations
                         .IsUnique();
 
                     b.ToTable("ScheduledJobs");
+                });
+
+            modelBuilder.Entity("ComicMaintainer.Core.Notifications.NotificationDeliveryEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Body")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("DueAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GroupKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ItemCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ItemsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("Status", "DueAt");
+
+                    b.HasIndex("Target", "EventType", "GroupKey", "Status");
+
+                    b.ToTable("NotificationDeliveries");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>

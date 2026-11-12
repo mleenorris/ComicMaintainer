@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Text;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Tests.Helpers;
 using ImageMagick;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -287,7 +288,7 @@ public sealed class Azw3ConversionServiceCoverageTests : IDisposable
         var blocker = Path.Join(outputDir, "Blocked.azw3");
         Directory.CreateDirectory(blocker);
 
-        await Assert.ThrowsAnyAsync<IOException>(
+        await TestIO.AssertFileSystemErrorAsync(
             () => _service.ConvertToAzw3Async(new[] { "Blocked.cbz" }, outputDir));
 
         Assert.True(Directory.Exists(blocker));

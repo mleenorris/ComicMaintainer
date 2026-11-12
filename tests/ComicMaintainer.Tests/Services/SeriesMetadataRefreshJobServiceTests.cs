@@ -1,10 +1,13 @@
 using System.Collections.Concurrent;
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
+using ComicMaintainer.Tests.Helpers;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -21,6 +24,7 @@ public class SeriesMetadataRefreshJobServiceTests
     private readonly Mock<ISeriesMetadataCacheService> _cache = new();
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
+    private readonly Mock<ISeriesNameResolver> _resolver = new();
     private readonly Mock<IEventBroadcaster> _broadcaster = new();
     private readonly RecordingLogger _logger = new();
     private readonly SemaphoreSlim _cleanupCalls = new(0);
@@ -38,15 +42,16 @@ public class SeriesMetadataRefreshJobServiceTests
     }
 
     private SeriesMetadataRefreshJobService CreateService(
-        bool withBroadcaster = true,
-        bool withFileStore = true,
-        bool withProcessor = true,
-        TimeProvider? timeProvider = null) => new(
+        TimeProvider? timeProvider = null,
+        AppSettings? settings = null,
+        bool withResolver = false) => new(
             _cache.Object,
             _logger,
-            withBroadcaster ? _broadcaster.Object : null,
-            withFileStore ? _fileStore.Object : null,
-            withProcessor ? _processor.Object : null,
+            _broadcaster.Object,
+            _fileStore.Object,
+            _processor.Object,
+            new TestOptionsMonitor<AppSettings>(settings ?? new AppSettings()),
+            withResolver ? _resolver.Object : TestServices.ResolverThatRetagsEveryFile(),
             timeProvider);
 
     private void SetupCleanup(int removed) =>
@@ -70,10 +75,22 @@ public class SeriesMetadataRefreshJobServiceTests
         _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-    private static ComicFile TrackedFile(string path, string? series) => new()
+    /// <summary>
+    /// A tracked file as the file store holds most of them: no
+    /// <see cref="ComicFile.Metadata"/> (only edits made in the app populate
+    /// it), so its series is known from the folder it lives in.
+    /// </summary>
+    private static ComicFile TrackedFile(string path, string? series = null) => new()
     {
         FilePath = path,
         Metadata = series is null ? null : new ComicMetadata { Series = series },
+    };
+
+    /// <summary>A tracked file whose metadata was edited in the app, so its <c>&lt;Series&gt;</c> is known.</summary>
+    private static ComicFile EditedFile(string path, string series) => new()
+    {
+        FilePath = path,
+        Metadata = new ComicMetadata { Series = series },
     };
 
     /// <summary>Waits until the job reaches its stale-sibling cleanup step, which runs after the
@@ -91,7 +108,7 @@ public class SeriesMetadataRefreshJobServiceTests
     {
         SetupRefresh("Alpha", "success");
         SetupRefresh("Beta", "success");
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { " Alpha ", "alpha", "", "   ", null!, "Beta", "BETA " });
 
@@ -135,7 +152,7 @@ public class SeriesMetadataRefreshJobServiceTests
         SetupRefresh("Gamma", "not_found");
         SetupRefresh("Delta", "error", source: "MangaDex");
         SetupRefresh("Epsilon", lookupStatus: null);
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Alpha", "Beta", "Gamma", "Delta", "Epsilon" });
         var job = await WaitForCleanupAsync(service, jobId);
@@ -167,7 +184,7 @@ public class SeriesMetadataRefreshJobServiceTests
         _cache.Setup(c => c.RefreshAsync("Broken", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("provider exploded"));
         SetupRefresh("Healthy", "success", source: "AniList");
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Broken", "Healthy" });
         var job = await WaitForCleanupAsync(service, jobId);
@@ -189,7 +206,7 @@ public class SeriesMetadataRefreshJobServiceTests
         var titles = Enumerable.Range(0, 25).Select(i => $"Series {i:00}").ToArray();
         _cache.Setup(c => c.RefreshAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord { LookupStatus = "success" });
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(titles);
         var job = await WaitForCleanupAsync(service, jobId);
@@ -206,7 +223,7 @@ public class SeriesMetadataRefreshJobServiceTests
         SetupRefresh("Beta", "not_found");
         _cache.Setup(c => c.RefreshAsync("Gamma", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Alpha", "Beta", "Gamma" });
         await WaitForCleanupAsync(service, jobId);
@@ -224,20 +241,6 @@ public class SeriesMetadataRefreshJobServiceTests
     }
 
     [Fact]
-    public async Task RunJob_WithoutBroadcaster_StillCompletes()
-    {
-        SetupRefresh("Alpha", "success");
-        var service = CreateService(withBroadcaster: false, withFileStore: false, withProcessor: false);
-
-        var jobId = await service.StartAsync(new[] { "Alpha" });
-        var job = await WaitForCleanupAsync(service, jobId);
-
-        Assert.Equal(JobStatus.Completed, job.Status);
-        Assert.Equal(1, job.Successes);
-        _broadcaster.VerifyNoOtherCalls();
-    }
-
-    [Fact]
     public async Task RunJob_BroadcasterThrowsSynchronously_FailureIsSwallowedAndJobCompletes()
     {
         _broadcaster
@@ -245,7 +248,7 @@ public class SeriesMetadataRefreshJobServiceTests
                 It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>()))
             .Throws(new InvalidOperationException("hub unavailable"));
         SetupRefresh("Alpha", "success");
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Alpha" });
         var job = await WaitForCleanupAsync(service, jobId);
@@ -279,7 +282,7 @@ public class SeriesMetadataRefreshJobServiceTests
                     : Task.CompletedTask);
         SetupRefresh("Alpha", "success");
         SetupRefresh("Beta", "success");
-        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Alpha"), TrackedFile("/library/Beta/c001.cbz", "Beta"));
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz"), TrackedFile("/library/Beta/c001.cbz"));
         var normalizeJobId = Guid.NewGuid();
         _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
             .ReturnsAsync(normalizeJobId);
@@ -316,7 +319,7 @@ public class SeriesMetadataRefreshJobServiceTests
         _cache.Setup(c => c.RefreshAsync("Alpha", It.IsAny<CancellationToken>()))
             .Callback(() => clock.FailTheNextRead())
             .ReturnsAsync(new SeriesMetadataCacheRecord { CanonicalTitle = "Alpha", LookupStatus = "success" });
-        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Alpha"));
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz"));
         var service = CreateService(timeProvider: clock);
 
         var jobId = await service.StartAsync(new[] { "Alpha", "Beta" });
@@ -363,7 +366,7 @@ public class SeriesMetadataRefreshJobServiceTests
         _cache.Setup(c => c.RefreshAsync("Alpha", It.IsAny<CancellationToken>()))
             .Callback(() => cts.Cancel())
             .ReturnsAsync(new SeriesMetadataCacheRecord { CanonicalTitle = "Alpha", LookupStatus = "success" });
-        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Alpha"));
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz"));
         var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Alpha", "Beta", "Gamma" }, cts.Token);
@@ -407,7 +410,7 @@ public class SeriesMetadataRefreshJobServiceTests
     {
         SetupCleanup(removed: 3);
         SetupRefresh("Alpha", "success");
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Alpha" });
 
@@ -422,7 +425,7 @@ public class SeriesMetadataRefreshJobServiceTests
         _cache.Setup(c => c.CleanupStaleSiblingRecordsAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("database is locked"));
         SetupRefresh("Alpha", "success");
-        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Alpha"));
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz"));
         var normalizeJobId = Guid.NewGuid();
         _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
             .ReturnsAsync(normalizeJobId);
@@ -450,14 +453,17 @@ public class SeriesMetadataRefreshJobServiceTests
             aliases: new List<string> { "Wan Pisu", " " },
             userAliases: new List<string> { "OP", "" });
         SetupTrackedFiles(
-            TrackedFile("/library/a.cbz", "one piece"),
-            TrackedFile("/library/b.cbz", "One Piece (Official)"),
-            TrackedFile("/library/c.cbz", "WAN PISU"),
-            TrackedFile("/library/d.cbz", "OP"),
-            TrackedFile("/LIBRARY/A.CBZ", "One Piece"),
-            TrackedFile("/library/naruto.cbz", "Naruto"),
-            TrackedFile("/library/no-metadata.cbz", null),
-            TrackedFile("/library/blank-series.cbz", "   "),
+            // Files without tracked metadata belong by their folder, matched by series key.
+            TrackedFile("/library/one piece/c001.cbz"),
+            TrackedFile("/library/One Piece (Official)/c001.cbz"),
+            TrackedFile("/library/WAN_PISU/c001.cbz"),
+            TrackedFile("/library/OP/c001.cbz"),
+            TrackedFile("/library/one piece/c001.cbz"),
+            TrackedFile("/library/Naruto/c001.cbz"),
+            TrackedFile("/library/loose.cbz"),
+            // A file edited in the app belongs by its <Series>, wherever it lives.
+            EditedFile("/library/Unsorted/c002.cbz", "one-piece"),
+            EditedFile("/library/Naruto/c002.cbz", "Naruto"),
             new ComicFile { FilePath = "", Metadata = new ComicMetadata { Series = "OP" } });
         List<string>? normalized = null;
         var normalizeJobId = Guid.NewGuid();
@@ -469,38 +475,317 @@ public class SeriesMetadataRefreshJobServiceTests
         var jobId = await service.StartAsync(new[] { "One Piece" });
 
         await _logger.WaitForAsync(e => e.Level == LogLevel.Information
-            && e.Message.Contains($"Metadata refresh job {jobId} queued normalization job {normalizeJobId} for 4 files"));
+            && e.Message.Contains($"Metadata refresh job {jobId} queued normalization job {normalizeJobId} for 5 files"));
         Assert.Equal(
-            new[] { "/library/a.cbz", "/library/b.cbz", "/library/c.cbz", "/library/d.cbz" },
+            new[]
+            {
+                "/library/one piece/c001.cbz",
+                "/library/One Piece (Official)/c001.cbz",
+                "/library/WAN_PISU/c001.cbz",
+                "/library/OP/c001.cbz",
+                "/library/Unsorted/c002.cbz"
+            },
             normalized);
         _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [Fact]
-    public async Task RunJob_ErrorOutcomeStillRetagsFilesMatchingTheRequestedTitle()
+    [Theory]
+    [InlineData("error")]
+    [InlineData("not_found")]
+    [InlineData(null)]
+    public async Task RunJob_LookupThatFoundNothing_LeavesItsFilesAlone(string? lookupStatus)
     {
-        // Even when the lookup failed the requested title is kept in the retag set, so
-        // files whose <Series> still holds that title are re-normalized from the cache.
-        SetupRefresh("Alpha", "error", aliases: new List<string>(), userAliases: new List<string>());
-        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Alpha"));
+        // Beta's lookup taught us nothing, so a provider outage during "refresh all" must
+        // not queue a rewrite of every file. Alpha shows the retag step really ran.
+        SetupRefresh("Alpha", "success");
+        SetupRefresh("Beta", lookupStatus, aliases: new List<string>(), userAliases: new List<string>());
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Alpha"), TrackedFile("/library/Beta/c001.cbz", "Beta"));
+        List<string>? normalized = null;
         var normalizeJobId = Guid.NewGuid();
         _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<string>, bool, CancellationToken>((paths, _, _) => normalized = paths.ToList())
             .ReturnsAsync(normalizeJobId);
         var service = CreateService();
 
-        var jobId = await service.StartAsync(new[] { "Alpha" });
+        await service.StartAsync(new[] { "Alpha", "Beta" });
 
         await _logger.WaitForAsync(e => e.Message.Contains($"queued normalization job {normalizeJobId} for 1 files"));
-        var job = service.GetJob(jobId)!;
+        Assert.Equal(new[] { "/library/Alpha/c001.cbz" }, normalized);
+    }
+
+    [Fact]
+    public async Task RunJob_NormalizeTurnedOff_RewritesNoFile()
+    {
+        SetupRefresh("Alpha", "success");
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Old Alpha"), TrackedFile("/library/Alpha/c002.cbz", "Alpha"));
+        var service = CreateService(settings: new AppSettings { WatcherEnableNormalize = false });
+
+        var jobId = await service.StartAsync(new[] { "Alpha" });
+
+        await _logger.WaitForAsync(e => e.Level == LogLevel.Warning
+            && e.Message.Contains($"Metadata refresh job {jobId} will not rewrite per-file metadata")
+            && e.Message.Contains("WatcherEnableNormalize is false"));
+        _fileStore.Verify(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunJob_RefreshAllWithAFilledCache_QueuesOnlyFilesWhoseTagDiffersFromTheResolvedName()
+    {
+        // The archive-metadata cache gives every file a Metadata.Series, so refreshing the
+        // whole library matches every file. Only the one still carrying an alias needs a
+        // rewrite; the others already hold what normalization would write.
+        SetupRefresh("One Piece", "success", aliases: new List<string> { "Wan Pisu" });
+        SetupRefresh("Naruto", "success");
+        SetupTrackedFiles(
+            TrackedFile("/library/One Piece/c001.cbz", "One Piece"),
+            TrackedFile("/library/One Piece/c002.cbz", "One Piece"),
+            TrackedFile("/library/One Piece/c003.cbz", "Wan Pisu"),
+            TrackedFile("/library/Naruto/c001.cbz", "Naruto"),
+            TrackedFile("/library/Naruto/c002.cbz", "Naruto"));
+        _resolver.Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string path, ComicMetadata? _, bool _, CancellationToken _) => new SeriesNameResolution
+            {
+                ResolvedSeries = path.Contains("Naruto") ? "Naruto" : "One Piece",
+            });
+        List<string>? normalized = null;
+        var normalizeJobId = Guid.NewGuid();
+        _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<string>, bool, CancellationToken>((paths, _, _) => normalized = paths.ToList())
+            .ReturnsAsync(normalizeJobId);
+        var service = CreateService(withResolver: true);
+
+        await service.StartAsync(new[] { "One Piece", "Naruto" });
+
+        await _logger.WaitForAsync(e => e.Message.Contains($"queued normalization job {normalizeJobId} for 1 files"));
+        Assert.Equal(new[] { "/library/One Piece/c003.cbz" }, normalized);
+
+        // Decided per folder-and-tag, read-only: one lookup per combination, not per file.
+        _resolver.Verify(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()), Times.Exactly(3));
+        _resolver.Verify(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), true, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunJob_EveryMatchingFileAlreadyCarriesTheResolvedName_QueuesNothing()
+    {
+        SetupRefresh("Alpha", "success");
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Alpha"), TrackedFile("/library/Alpha/c002.cbz", "Alpha"));
+        _resolver.Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesNameResolution { ResolvedSeries = "Alpha" });
+        var service = CreateService(withResolver: true);
+
+        var jobId = await service.StartAsync(new[] { "Alpha" });
+
+        await _logger.WaitForAsync(e => e.Level == LogLevel.Information
+            && e.Message.Contains($"Metadata refresh job {jobId} completed; all 2 matching files already carry the resolved series name"));
+        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunJob_TagDiffersOnlyByCase_IsQueuedBecauseTheResolvedNameIsWrittenExactly()
+    {
+        SetupRefresh("Alpha", "success");
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "alpha"));
+        _resolver.Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesNameResolution { ResolvedSeries = "Alpha" });
+        var normalizeJobId = Guid.NewGuid();
+        _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(normalizeJobId);
+        var service = CreateService(withResolver: true);
+
+        await service.StartAsync(new[] { "Alpha" });
+
+        await _logger.WaitForAsync(e => e.Message.Contains($"queued normalization job {normalizeJobId} for 1 files"));
+    }
+
+    [Theory]
+    [InlineData("not_found")]
+    [InlineData("error")]
+    public async Task RunJob_UnmatchedOutcome_DoesNotRetag(string status)
+    {
+        // Nothing new is known about the series, so its files keep their tags.
+        SetupRefresh("Alpha", status, aliases: new List<string>(), userAliases: new List<string>());
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz"));
+        var service = CreateService();
+
+        var jobId = await service.StartAsync(new[] { "Alpha" });
+        var job = await WaitForCleanupAsync(service, jobId);
+
+        Assert.Equal(JobStatus.Completed, job.Status);
+        _fileStore.Verify(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private void SetupOwner(string title, string normalizedKey, string canonical, string? status = "success", int metadataVersion = 3) =>
+        _cache.Setup(c => c.GetByTitleAsync(title, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord
+            {
+                NormalizedKey = normalizedKey,
+                CanonicalTitle = canonical,
+                LookupStatus = status,
+                MetadataVersion = metadataVersion,
+                Aliases = new List<string>(),
+                UserAliases = new List<string>()
+            });
+
+    private void SetupRefreshOf(string title, string normalizedKey, string canonical, int metadataVersion) =>
+        _cache.Setup(c => c.RefreshAsync(title, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord
+            {
+                NormalizedKey = normalizedKey,
+                CanonicalTitle = canonical,
+                LookupStatus = "success",
+                MetadataVersion = metadataVersion,
+                Aliases = new List<string>(),
+                UserAliases = new List<string>()
+            });
+
+    [Fact]
+    public async Task RunJob_SeveralTitlesOfOneRecord_AreRefreshedOnce()
+    {
+        // A series card's Refresh sends the canonical title and every alias.
+        SetupOwner("Attack on Titan", "shingeki-no-kyojin", "Attack on Titan");
+        SetupOwner("AoT", "shingeki-no-kyojin", "Attack on Titan");
+        SetupRefreshOf("Attack on Titan", "shingeki-no-kyojin", "Attack on Titan", metadataVersion: 3);
+        var service = CreateService();
+
+        var jobId = await service.StartAsync(new[] { "Attack on Titan", "AoT" });
+        var job = await WaitForCleanupAsync(service, jobId);
+
+        _cache.Verify(c => c.RefreshAsync("Attack on Titan", It.IsAny<CancellationToken>()), Times.Once);
+        _cache.Verify(c => c.RefreshAsync("AoT", It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(2, job.ProcessedSeries);
+        Assert.Equal(2, job.Successes);
+        Assert.Equal(new[] { "success", "success" }, job.RecentResults.Select(r => r.Status));
+    }
+
+    [Fact]
+    public async Task RunJob_UnmatchedRecord_IsStillAskedAboutItsOtherNames()
+    {
+        // The folder name found nothing, but the user added the English title
+        // as an alias: that name is what can find the series.
+        SetupOwner("Shingeki", "shingeki", "Shingeki", status: "not_found");
+        SetupOwner("Attack on Titan", "shingeki", "Shingeki", status: "not_found");
+        _cache.Setup(c => c.RefreshAsync("Shingeki", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord
+            {
+                NormalizedKey = "shingeki",
+                CanonicalTitle = "Shingeki",
+                LookupStatus = "not_found",
+                MetadataVersion = 3,
+                Aliases = new List<string>(),
+                UserAliases = new List<string>()
+            });
+        SetupRefreshOf("Attack on Titan", "shingeki", "Attack on Titan", metadataVersion: 4);
+        var service = CreateService();
+
+        var jobId = await service.StartAsync(new[] { "Shingeki", "Attack on Titan" });
+        var job = await WaitForCleanupAsync(service, jobId);
+
+        _cache.Verify(c => c.RefreshAsync("Attack on Titan", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(1, job.NotFound);
+        Assert.Equal(1, job.Successes);
+    }
+
+    [Fact]
+    public async Task RunJob_TitlesOfDifferentRecords_AreEachRefreshed()
+    {
+        // "Monster" is its own record, even though another series lists it as an alias.
+        SetupOwner("Pluto", "pluto", "Pluto");
+        SetupOwner("Monster", "monster", "Monster");
+        SetupRefreshOf("Pluto", "pluto", "Pluto", metadataVersion: 3);
+        SetupRefreshOf("Monster", "monster", "Monster", metadataVersion: 3);
+        var service = CreateService();
+
+        var jobId = await service.StartAsync(new[] { "Pluto", "Monster" });
+        await WaitForCleanupAsync(service, jobId);
+
+        _cache.Verify(c => c.RefreshAsync("Pluto", It.IsAny<CancellationToken>()), Times.Once);
+        _cache.Verify(c => c.RefreshAsync("Monster", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RunJob_FailedRefresh_IsNotRepeatedForTheRecordsOtherTitles()
+    {
+        SetupOwner("Attack on Titan", "shingeki-no-kyojin", "Attack on Titan");
+        SetupOwner("AoT", "shingeki-no-kyojin", "Attack on Titan");
+        _cache.Setup(c => c.RefreshAsync("Attack on Titan", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ExternalMetadataUnavailableException(
+                "MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex did not answer within 15s"));
+        var service = CreateService();
+
+        var jobId = await service.StartAsync(new[] { "Attack on Titan", "AoT" });
+        var job = await WaitForCleanupAsync(service, jobId);
+
+        _cache.Verify(c => c.RefreshAsync("AoT", It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(2, job.Failures);
+        Assert.All(job.RecentResults, r => Assert.Equal("MangaDex did not answer in time", r.Error));
+    }
+
+    [Fact]
+    public async Task RunJob_UnchangedMatch_DoesNotRetag()
+    {
+        // Refresh All of a matched library must not re-open every archive.
+        SetupOwner("Alpha", "alpha", "Alpha", metadataVersion: 3);
+        SetupRefreshOf("Alpha", "alpha", "Alpha", metadataVersion: 3);
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz"));
+        var service = CreateService();
+
+        var jobId = await service.StartAsync(new[] { "Alpha" });
+        var job = await WaitForCleanupAsync(service, jobId);
+
+        Assert.Equal(1, job.Successes);
+        _fileStore.Verify(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("success", 3, "Alpha New", "Alpha")] // canonical title changed
+    [InlineData("success", 4, "Alpha", "Alpha")] // aliases or localized titles changed (version bumped)
+    [InlineData("not_found", 3, "Alpha", "Alpha")] // newly matched
+    public async Task RunJob_ChangedMatch_Retags(string statusBefore, int versionAfter, string canonicalAfter, string canonicalBefore)
+    {
+        SetupOwner("Alpha", "alpha", canonicalBefore, statusBefore, metadataVersion: 3);
+        SetupRefreshOf("Alpha", "alpha", canonicalAfter, versionAfter);
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz"));
+        var normalized = new TaskCompletionSource<List<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<string>, bool, CancellationToken>((paths, _, _) => normalized.TrySetResult(paths.ToList()))
+            .ReturnsAsync(Guid.NewGuid());
+        var service = CreateService();
+
+        await service.StartAsync(new[] { "Alpha" });
+
+        Assert.Equal(new[] { "/library/Alpha/c001.cbz" }, await normalized.Task.WaitAsync(WaitTimeout));
+    }
+
+    [Fact]
+    public async Task RunJob_ProviderUnavailable_RecordsTheFailureWithItsReason()
+    {
+        _cache.Setup(c => c.RefreshAsync("Alpha", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ExternalMetadataUnavailableException(
+                "MangaDex", ExternalMetadataFailureKind.Timeout, "MangaDex request timed out: api.internal:443"));
+        SetupRefresh("Beta", "success");
+        var service = CreateService();
+
+        var jobId = await service.StartAsync(new[] { "Alpha", "Beta" });
+        var job = await WaitForCleanupAsync(service, jobId);
+
         Assert.Equal(JobStatus.Completed, job.Status);
         Assert.Equal(1, job.Failures);
+        Assert.Equal(0, job.NotFound);
+        Assert.Equal(1, job.Successes);
+        var failed = Assert.Single(job.RecentResults, r => r.SeriesTitle == "Alpha");
+        Assert.Equal("error", failed.Status);
+        Assert.Equal("MangaDex did not answer in time", failed.Error);
+        Assert.Null(Assert.Single(job.RecentResults, r => r.SeriesTitle == "Beta").Error);
     }
 
     [Fact]
     public async Task RunJob_NoTrackedFileMatches_DoesNotQueueNormalization()
     {
         SetupRefresh("Alpha", "success");
-        SetupTrackedFiles(TrackedFile("/library/Beta/c001.cbz", "Beta"), TrackedFile("/library/none.cbz", null));
+        SetupTrackedFiles(TrackedFile("/library/Beta/c001.cbz"), TrackedFile("/library/none.cbz"));
         var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Alpha" });
@@ -531,30 +816,12 @@ public class SeriesMetadataRefreshJobServiceTests
         Assert.Equal(0, job.Failures);
     }
 
-    [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    public async Task RunJob_WithoutFileStoreOrProcessor_SkipsRetag(bool withFileStore, bool withProcessor)
-    {
-        SetupRefresh("Alpha", "success");
-        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Alpha"));
-        var service = CreateService(withFileStore: withFileStore, withProcessor: withProcessor);
-
-        var jobId = await service.StartAsync(new[] { "Alpha" });
-        var job = await WaitForCleanupAsync(service, jobId);
-
-        Assert.Equal(JobStatus.Completed, job.Status);
-        _fileStore.Verify(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>()), Times.Never);
-        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
     [Fact]
     public async Task RunJob_EveryRefreshThrows_NothingToRetag()
     {
         _cache.Setup(c => c.RefreshAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("provider down"));
-        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz", "Alpha"));
+        SetupTrackedFiles(TrackedFile("/library/Alpha/c001.cbz"));
         var service = CreateService();
 
         var jobId = await service.StartAsync(new[] { "Alpha", "Beta" });
@@ -576,7 +843,7 @@ public class SeriesMetadataRefreshJobServiceTests
     public async Task GetJob_ReturnsASnapshotThatDoesNotExposeInternalState()
     {
         SetupRefresh("Alpha", "success", source: "AniList");
-        var service = CreateService(withFileStore: false, withProcessor: false);
+        var service = CreateService();
         var jobId = await service.StartAsync(new[] { "Alpha" });
         await WaitForCleanupAsync(service, jobId);
 
@@ -623,7 +890,7 @@ public class SeriesMetadataRefreshJobServiceTests
     public async Task StartAsync_ForgetsFinishedJobsOnceTheirRetentionHasPassed()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 5, 1, 12, 0, 0, TimeSpan.Zero));
-        var service = CreateService(withFileStore: false, withProcessor: false, timeProvider: clock);
+        var service = CreateService(timeProvider: clock);
 
         var first = await RunEmptyJobAsync(service);
         var finished = service.GetJob(first)!;
@@ -652,7 +919,7 @@ public class SeriesMetadataRefreshJobServiceTests
                 refreshStarted.TrySetResult();
                 return refreshResult.Task;
             });
-        var service = CreateService(withFileStore: false, withProcessor: false, timeProvider: clock);
+        var service = CreateService(timeProvider: clock);
         var running = await service.StartAsync(new[] { "Alpha" });
         await refreshStarted.Task.WaitAsync(WaitTimeout);
 
@@ -674,7 +941,7 @@ public class SeriesMetadataRefreshJobServiceTests
     [Fact]
     public async Task StartAsync_KeepsAtMostMaxFinishedJobs_ForgettingTheOldestFirst()
     {
-        var service = CreateService(withFileStore: false, withProcessor: false, timeProvider: new FakeTimeProvider());
+        var service = CreateService(timeProvider: new FakeTimeProvider());
         var jobIds = new List<Guid>();
         for (var i = 0; i <= SeriesMetadataRefreshJobService.MaxFinishedJobs; i++)
         {

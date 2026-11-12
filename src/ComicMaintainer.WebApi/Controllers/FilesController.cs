@@ -1,15 +1,11 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.Core.Configuration;
-using ComicMaintainer.Core.Data;
-using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
-using System.Text.RegularExpressions;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
@@ -18,28 +14,25 @@ namespace ComicMaintainer.WebApi.Controllers;
 [Authorize]
 public partial class FilesController : ControllerBase
 {
-    // Unicode-aware: keep any Unicode letter (\p{L}) or number (\p{N}) so
-    // non-ASCII titles (CJK, accented Latin, Cyrillic, etc.) produce rich,
-    // distinguishable keys instead of collapsing to a bare digit when every
-    // letter gets stripped. Pure-ASCII titles still produce the same output
-    // as the previous [^a-z0-9]+ sanitizer.
-    private static readonly Regex FolderCombineKeySanitizer = new(@"[^\p{L}\p{N}]+", RegexOptions.Compiled);
-    private static readonly Regex FileNameSeriesSuffixSanitizer = new(
-        @"\s*(?:-|_)?\s*(?:ch|chapter|issue|#)?\s*\d+(?:\.\d+)?[a-z]?\s*$",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly IProcessingHistoryService _historyService;
     private readonly ISeriesLibraryService _seriesLibrary;
     private readonly ILogger<FilesController> _logger;
     private readonly IOptionsMonitor<AppSettings> _settings;
-    private readonly IDbContextFactory<ComicMaintainerDbContext>? _dbContextFactory;
-    private readonly IEventBroadcaster? _eventBroadcaster;
-    private readonly ISeriesMetadataCacheService? _metadataCache;
-    private readonly ISeriesNameResolver? _seriesNameResolver;
-    private readonly ScheduledJobsHostedService? _scheduledJobsHostedService;
-    private readonly IMemoryCache? _memoryCache;
+    private readonly IFolderCombineService _folderCombine;
+    private readonly IEventBroadcaster _eventBroadcaster;
+    private readonly ISeriesNameResolver _seriesNameResolver;
+    private readonly IScheduledJobRunner _scheduledJobs;
+
+    /// <summary>
+    /// The per-file lock shared with the processor, the watcher and every job. Moves and deletes
+    /// done here hold it so they never land between another operation's read of an archive and
+    /// its replace or rename.
+    /// </summary>
+    private readonly IFileOperationLock _fileOperationLock;
+
+    private readonly INotificationPublisher _notifications;
 
     public FilesController(
         IFileStoreService fileStore,
@@ -48,25 +41,25 @@ public partial class FilesController : ControllerBase
         ISeriesLibraryService seriesLibrary,
         ILogger<FilesController> logger,
         IOptionsMonitor<AppSettings> settings,
-        IDbContextFactory<ComicMaintainerDbContext>? dbContextFactory = null,
-        IEventBroadcaster? eventBroadcaster = null,
-        ISeriesMetadataCacheService? metadataCache = null,
-        ISeriesNameResolver? seriesNameResolver = null,
-        ScheduledJobsHostedService? scheduledJobsHostedService = null,
-        IMemoryCache? memoryCache = null)
+        IFolderCombineService folderCombine,
+        IEventBroadcaster eventBroadcaster,
+        ISeriesNameResolver seriesNameResolver,
+        IScheduledJobRunner scheduledJobs,
+        IFileOperationLock fileOperationLock,
+        INotificationPublisher notifications)
     {
-        _memoryCache = memoryCache;
         _fileStore = fileStore;
         _processor = processor;
         _historyService = historyService;
         _seriesLibrary = seriesLibrary;
         _logger = logger;
         _settings = settings;
-        _dbContextFactory = dbContextFactory;
+        _folderCombine = folderCombine;
         _eventBroadcaster = eventBroadcaster;
-        _metadataCache = metadataCache;
         _seriesNameResolver = seriesNameResolver;
-        _scheduledJobsHostedService = scheduledJobsHostedService;
+        _scheduledJobs = scheduledJobs;
+        _fileOperationLock = fileOperationLock;
+        _notifications = notifications;
     }
 
     /// <summary>
@@ -136,6 +129,23 @@ public partial class FilesController : ControllerBase
             Success = success,
             ErrorMessage = errorMessage
         });
+    }
+
+    /// <summary>
+    /// Records a failed action in the processing history before its exception goes on to
+    /// GlobalExceptionHandler. Failing to write the row is only logged: it must not replace
+    /// the exception being reported.
+    /// </summary>
+    private async Task RecordFailureAsync(string filePath, string action, Exception failure)
+    {
+        try
+        {
+            await LogHistoryAsync(filePath, action, false, failure.Message);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(ex, "Could not record the failed {Action} in the processing history", action);
+        }
     }
 
     /// <summary>

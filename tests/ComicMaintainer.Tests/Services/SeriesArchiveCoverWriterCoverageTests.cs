@@ -27,6 +27,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     private readonly string _source;
     private readonly Mock<ISeriesLibraryService> _library = new();
     private readonly Mock<IFileWatcherService> _watcher = new();
+    private readonly Mock<ComicMaintainer.Core.Notifications.INotificationPublisher> _notifications = new();
     private readonly AppSettings _settings = new() { WriteCoverToFirstArchive = true };
 
     public SeriesArchiveCoverWriterCoverageTests()
@@ -120,7 +121,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         await CreateWriter().WriteAsync(Key, _source, "image/jpeg");
 
         Assert.Equal(garbage, File.ReadAllBytes(cbz));
-        Assert.False(File.Exists(cbz + ".cover.tmp"));
+        Assert.Empty(TempFilesIn(_root));
         _watcher.Verify(w => w.SuppressProcessing(It.IsAny<string>()), Times.Never);
     }
 
@@ -142,14 +143,52 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     // ---- watcher suppression -------------------------------------------------------
 
     [Fact]
-    public async Task WriteAsync_NoWatcherRegistered_StillEmbedsCover()
+    public async Task WriteAsync_FirstArchiveLookupFails_IsLoggedAtWarningAndSwallowed()
     {
-        var cbz = CreateCbz("issue1.cbz", ("01.jpg", PageBytes));
-        SetupFirstArchive(cbz);
+        _library
+            .Setup(l => l.GetFirstIssueFilePathForNormalizedKeyAsync(Key, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        var logger = new Mock<ILogger<SeriesArchiveCoverWriter>>();
+        var options = new Mock<IOptionsMonitor<AppSettings>>();
+        options.Setup(o => o.CurrentValue).Returns(_settings);
+        var writer = new SeriesArchiveCoverWriter(_library.Object, _watcher.Object, options.Object, logger.Object, new FileOperationLock(), Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
 
-        await CreateWriter(registerWatcher: false).WriteAsync(Key, _source, "image/jpeg");
+        await writer.WriteAsync(Key, _source, "image/jpeg");
 
-        Assert.Equal(NewCover, ReadEntry(cbz, "cover.jpg"));
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) => state!.ToString()!.Contains("Failed to resolve first archive for series cover embed/remove")),
+                It.IsAny<InvalidOperationException>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task WriteAsync_CancelledDuringLookup_PropagatesWithoutAWarning()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        _library
+            .Setup(l => l.GetFirstIssueFilePathForNormalizedKeyAsync(Key, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+        var logger = new Mock<ILogger<SeriesArchiveCoverWriter>>();
+        var options = new Mock<IOptionsMonitor<AppSettings>>();
+        options.Setup(o => o.CurrentValue).Returns(_settings);
+        var writer = new SeriesArchiveCoverWriter(_library.Object, _watcher.Object, options.Object, logger.Object, new FileOperationLock(), Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>());
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            writer.WriteAsync(Key, _source, "image/jpeg", cancellationToken: cts.Token));
+
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
     }
 
     [Fact]
@@ -165,6 +204,35 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
 
         Assert.Equal(NewCover, ReadEntry(cbz, "cover.jpg"));
         _watcher.Verify(w => w.SuppressProcessing(cbz), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task WriteAsync_BuildsTheCompleteArchiveNextToTheOriginalUnderARecoverableTempName()
+    {
+        var cbz = CreateCbz("issue1.cbz", ("01.jpg", PageBytes));
+        SetupFirstArchive(cbz);
+        string[]? tempFiles = null;
+        byte[]? tempCover = null;
+        _watcher
+            .Setup(w => w.SuppressProcessing(cbz))
+            .Callback(() =>
+            {
+                // The first call comes just before the rename: the new archive must already be
+                // complete, under a name the watcher ignores and the startup sweep cleans up.
+                if (tempFiles is null)
+                {
+                    tempFiles = TempFilesIn(_root);
+                    tempCover = tempFiles.Length == 1 ? ReadEntry(tempFiles[0], "cover.jpg") : null;
+                }
+            });
+
+        await CreateWriter().WriteAsync(Key, _source, "image/jpeg");
+
+        var temp = Assert.Single(tempFiles!);
+        Assert.True(ArchiveWriteRecoveryService.IsTempPath(temp), temp);
+        Assert.Equal(NewCover, tempCover);
+        Assert.Equal(NewCover, ReadEntry(cbz, "cover.jpg"));
+        Assert.Empty(TempFilesIn(_root));
     }
 
     [Fact]
@@ -188,7 +256,7 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         await CreateWriter().WriteAsync(Key, _source, "image/jpeg");
 
         Assert.True(Directory.Exists(cbz));
-        Assert.False(File.Exists(cbz + ".cover.tmp"));
+        Assert.Empty(TempFilesIn(_root));
         _watcher.Verify(w => w.SuppressProcessing(cbz), Times.Once);
     }
 
@@ -264,14 +332,17 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         var cbz = Path.Join(_root, "issue1.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
-            // Zeros, so the archive itself stays tiny. Written in small chunks so the fixture
+            // Random, so it stores at about 1:1 like a real page (the rewrite limits refuse a
+            // large entry that compresses too well). Written in small chunks so the fixture
             // doesn't need a LargeEntrySize buffer.
             var entry = zip.CreateEntry("big.bin", CompressionLevel.Fastest);
             entry.LastWriteTime = FixtureTimestamp;
             using var stream = entry.Open();
+            var random = new Random(1);
             var chunk = new byte[81920];
             for (var remaining = LargeEntrySize; remaining > 0; remaining -= chunk.Length)
             {
+                random.NextBytes(chunk);
                 stream.Write(chunk, 0, Math.Min(chunk.Length, remaining));
             }
         }
@@ -327,8 +398,48 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         await CreateWriter().WriteAsync(Key, _source, "image/jpeg");
 
         Assert.Equal(before, File.ReadAllBytes(cbz));
-        Assert.False(File.Exists(cbz + ".cover.tmp"));
+        Assert.Empty(TempFilesIn(_root));
         _watcher.Verify(w => w.SuppressProcessing(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task WriteAsync_ReplacingTheArchive_AsksMediaServersToRescan()
+    {
+        SetupFirstArchive(CreateCbz("issue1.cbz", ("01.jpg", PageBytes)));
+
+        await CreateWriter().WriteAsync(Key, _source, "image/jpeg");
+
+        _notifications.Verify(n => n.LibraryChanged(), Times.Once);
+    }
+
+    [Fact]
+    public async Task WriteAsync_ArchiveAlreadyHoldingTheCover_AsksForNoRescan()
+    {
+        SetupFirstArchive(CreateCbz("issue1.cbz", ("01.jpg", PageBytes), ("cover.jpg", NewCover)));
+
+        await CreateWriter().WriteAsync(Key, _source, "image/jpeg");
+
+        _notifications.Verify(n => n.LibraryChanged(), Times.Never);
+    }
+
+    [Fact]
+    public async Task RemoveAsync_TakingTheCoverOut_AsksMediaServersToRescan()
+    {
+        SetupFirstArchive(CreateCbz("issue1.cbz", ("01.jpg", PageBytes), ("cover.jpg", NewCover)));
+
+        await CreateWriter().RemoveAsync(Key);
+
+        _notifications.Verify(n => n.LibraryChanged(), Times.Once);
+    }
+
+    [Fact]
+    public async Task RemoveAsync_NothingToTakeOut_AsksForNoRescan()
+    {
+        SetupFirstArchive(CreateCbz("issue1.cbz", ("01.jpg", PageBytes)));
+
+        await CreateWriter().RemoveAsync(Key);
+
+        _notifications.Verify(n => n.LibraryChanged(), Times.Never);
     }
 
     // ---- RemoveAsync -----------------------------------------------------------------
@@ -383,6 +494,29 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task RemoveAsync_ArchiveRefusedByTheLimits_LogsWhyAndLeavesItAlone()
+    {
+        var cbz = Path.Join(_root, "refused.cbz");
+        var refused = ComicMaintainer.Tests.Utilities.ComicArchiveReaderTests.Rar5(dictionaryPower: 13);
+        File.WriteAllBytes(cbz, refused);
+        SetupFirstArchive(cbz);
+        var logger = new Mock<ILogger<SeriesArchiveCoverWriter>>();
+
+        await CreateWriter(logger: logger.Object).RemoveAsync(Key);
+
+        Assert.Equal(refused, File.ReadAllBytes(cbz));
+        Assert.DoesNotContain(Directory.GetFiles(_root, "*", SearchOption.AllDirectories), ArchiveWriteRecoveryService.IsTempPath);
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) => state!.ToString()!.Contains("decompression dictionary")),
+                null,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task RemoveAsync_LibraryThrows_IsSwallowed()
     {
         _library
@@ -427,18 +561,11 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
 
     // ---- helpers -----------------------------------------------------------------------
 
-    private SeriesArchiveCoverWriter CreateWriter(bool registerWatcher = true)
+    private SeriesArchiveCoverWriter CreateWriter(ILogger<SeriesArchiveCoverWriter>? logger = null)
     {
-        var services = new ServiceCollection();
-        services.AddScoped(_ => _library.Object);
-        if (registerWatcher)
-        {
-            services.AddScoped(_ => _watcher.Object);
-        }
-        var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
         var options = new Mock<IOptionsMonitor<AppSettings>>();
         options.Setup(o => o.CurrentValue).Returns(_settings);
-        return new SeriesArchiveCoverWriter(scopeFactory, options.Object, Mock.Of<ILogger<SeriesArchiveCoverWriter>>());
+        return new SeriesArchiveCoverWriter(_library.Object, _watcher.Object, options.Object, logger ?? Mock.Of<ILogger<SeriesArchiveCoverWriter>>(), new FileOperationLock(), _notifications.Object);
     }
 
     private void SetupFirstArchive(string? path)
@@ -467,6 +594,17 @@ public class SeriesArchiveCoverWriterCoverageTests : IDisposable
         }
         return path;
     }
+
+    /// <summary>
+    /// Files in <paramref name="directory"/> other than the source cover and the archives: the
+    /// temp files a rewrite left behind, whatever they are called.
+    /// </summary>
+    private string[] TempFilesIn(string directory) =>
+        Directory.GetFiles(directory)
+            .Where(path => !string.Equals(path, _source, StringComparison.Ordinal) &&
+                           !path.EndsWith(".cbz", StringComparison.OrdinalIgnoreCase) &&
+                           !path.EndsWith(".cbr", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
 
     private static List<string> ListEntries(string cbzPath)
     {

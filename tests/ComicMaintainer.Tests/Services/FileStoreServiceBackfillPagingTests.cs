@@ -49,7 +49,7 @@ public sealed class FileStoreServiceBackfillPagingTests : IAsyncLifetime
     [Fact]
     public async Task GetFilesNeedingBackfillAsync_PagesInPathOrderAfterTheCursor()
     {
-        var service = new FileStoreService(
+        var service = TestServices.CreateFileStore(
             new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = "/library" }),
             NullLogger<FileStoreService>.Instance,
             _factory);

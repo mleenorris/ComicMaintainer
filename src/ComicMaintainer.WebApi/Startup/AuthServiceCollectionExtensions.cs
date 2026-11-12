@@ -1,10 +1,11 @@
 using System.Text;
-using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Models.Auth;
+using ComicMaintainer.Core.Services.Auth;
 using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -14,10 +15,14 @@ using Serilog;
 namespace ComicMaintainer.WebApi.Startup;
 
 /// <summary>
-/// Registers Identity, JWT/Authelia authentication and the authorization policies.
+/// Registers Identity, the authentication schemes (Authelia, session and stream tokens, API keys) and the
+/// authorization policies.
 /// </summary>
 internal static class AuthServiceCollectionExtensions
 {
+    /// <summary>The environment variable that sets the first-run setup code; <c>SETUP_TOKEN_FILE</c> names a file that holds it.</summary>
+    public const string SetupTokenEnvironmentVariable = "SETUP_TOKEN";
+
     public static IServiceCollection AddComicMaintainerAuth(this IServiceCollection services, IConfiguration configuration)
     {
         // Configure Identity
@@ -29,11 +34,18 @@ internal static class AuthServiceCollectionExtensions
             options.Password.RequireUppercase = true;
             options.Password.RequireNonAlphanumeric = false;
             options.Password.RequiredLength = 8;
+
+            // Lockout: five wrong passwords in a row lock the account for 15 minutes (AuthService.LoginAsync).
+            // New accounts have lockout enabled; AuthService enables it on older accounts at their first failure.
+            options.Lockout.AllowedForNewUsers = true;
+            options.Lockout.MaxFailedAccessAttempts = 5;
+            options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
             
             // User settings
             options.User.RequireUniqueEmail = true;
         })
         .AddEntityFrameworkStores<ComicMaintainerDbContext>()
+        .AddPasswordValidator<PublishedPasswordValidator>()
         .AddDefaultTokenProviders();
 
         // Read settings through the same binder as IOptions<JwtSettings>, then resolve the signing secret once so
@@ -42,6 +54,10 @@ internal static class AuthServiceCollectionExtensions
         var jwtSecret = JwtSecretResolver.Resolve(configuration);
         services.AddSingleton(jwtSecret);
         services.PostConfigure<JwtSettings>(options => options.Secret = jwtSecret.Value);
+
+        // The one-time code first-run setup requires (see SetupTokenProvider): SETUP_TOKEN, or the file
+        // SETUP_TOKEN_FILE names, or a random code generated for this run and logged while setup is available.
+        services.AddSingleton<ISetupTokenProvider>(new SetupTokenProvider(SecretEnvironmentVariable.Read(SetupTokenEnvironmentVariable, out _)));
 
         // Check if Authelia is enabled. Read through the same binder as IOptions<AutheliaSettings> (used by the
         // handler), so the validation, schemes and CanAdminister fallback below match what the handler sees.
@@ -86,7 +102,11 @@ internal static class AuthServiceCollectionExtensions
             Log.Information("Authelia authentication configured with fallback to JWT for SSE connections");
         }
 
-        // Always add JWT Bearer for backward compatibility and API access
+        // Session tokens: signed in with a password (or minted for a password change), sent in the Authorization
+        // header. Never read from the query string: proxies log URLs. Every request checks that the session has not
+        // ended (IAuthSessionValidator): sign-out, password or role changes and disabled or deleted accounts revoke.
+        services.AddMemoryCache();
+        services.AddSingleton<IAuthSessionValidator, AuthSessionValidator>();
         authBuilder.AddJwtBearer(options =>
         {
             options.TokenValidationParameters = new TokenValidationParameters
@@ -99,68 +119,60 @@ internal static class AuthServiceCollectionExtensions
                 ValidAudience = jwtSettings.Audience,
                 IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret.Value))
             };
-            
-            // Configure events to return JSON for authentication failures and support token in query string
-            options.Events = new JwtBearerEvents
-            {
-                OnMessageReceived = context =>
-                {
-                    // Allow token to be passed via query string for EventSource/SSE connections
-                    // EventSource API doesn't support custom headers, so we need this for SSE endpoints
-                    if (string.IsNullOrEmpty(context.Token) && context.Request.Query.TryGetValue("access_token", out var accessToken))
-                    {
-                        context.Token = accessToken;
-                    }
-                    return Task.CompletedTask;
-                },
-                OnChallenge = context =>
-                {
-                    // Override the default behavior to return JSON instead of redirecting
-                    context.HandleResponse();
-                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                    context.Response.ContentType = "application/json; charset=utf-8";
-                    
-                    var result = JsonSerializer.Serialize(new { error = "Unauthorized", message = "Authentication required" });
-                    return context.Response.WriteAsync(result);
-                },
-                OnForbidden = context =>
-                {
-                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                    context.Response.ContentType = "application/json; charset=utf-8";
-                    
-                    var result = JsonSerializer.Serialize(new { error = "Forbidden", message = "Insufficient permissions" });
-                    return context.Response.WriteAsync(result);
-                }
-            };
+
+            // JSON 401/403 bodies instead of redirects, and the per-request session check.
+            options.Events = JwtSessionEvents.SessionTokens();
         });
+
+        // Stream tokens: one-minute, single-use tokens with their own audience, accepted only in the query string of
+        // the event stream, the one endpoint EventSource cannot send a header to (see StreamTokenAuthentication).
+        authBuilder.AddJwtBearer(StreamTokenAuthentication.SchemeName, options =>
+        {
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidateAudience = true,
+                ValidateLifetime = true,
+                ValidateIssuerSigningKey = true,
+                RequireExpirationTime = true,
+                ValidIssuer = jwtSettings.Issuer,
+                ValidAudience = AuthTokens.StreamAudience(jwtSettings.Audience),
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret.Value)),
+                // The default five minutes of clock skew would let a one-minute token live six.
+                ClockSkew = TimeSpan.FromSeconds(5)
+            };
+
+            options.Events = JwtSessionEvents.StreamTokens();
+        });
+
+        // API keys: long-lived credentials for scripts, in the X-API-Key header only (never a URL). A key acts as the
+        // account that owns it, with that account's current roles (see ApiKeyAuthenticationHandler).
+        authBuilder.AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(ApiKeyAuthenticationHandler.SchemeName, _ => { });
+
+        // HTTP Basic for the OPDS catalog only: registered as a scheme of its own and listed by no policy below except
+        // its own, so no other route ever checks Basic credentials or answers with a WWW-Authenticate: Basic challenge.
+        authBuilder.AddScheme<AuthenticationSchemeOptions, OpdsBasicAuthenticationHandler>(OpdsBasicAuthenticationHandler.SchemeName, _ => { });
 
         // Configure authorization policies to support multiple authentication schemes
         services.AddAuthorization(options =>
         {
-            // Default policy that accepts both Authelia and JWT authentication
-            // This allows SSE connections to work with JWT tokens even when Authelia is the default
-            if (autheliaSettings.Enabled)
-            {
-                options.DefaultPolicy = new AuthorizationPolicyBuilder()
-                    .AddAuthenticationSchemes("Authelia", JwtBearerDefaults.AuthenticationScheme)
-                    .RequireAuthenticatedUser()
-                    .Build();
-                
-                Log.Information("Authorization policy configured to accept both Authelia and JWT Bearer tokens");
-            }
-            else
-            {
-                options.DefaultPolicy = new AuthorizationPolicyBuilder()
-                    .AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme)
-                    .RequireAuthenticatedUser()
-                    .Build();
-            }
+            // A named policy, because [Authorize(AuthenticationSchemes = ...)] without one is combined with the
+            // default policy and would accept (and challenge with) every scheme that one lists.
+            options.AddPolicy(OpdsBasicAuthenticationHandler.PolicyName, policy => policy
+                .AddAuthenticationSchemes(OpdsBasicAuthenticationHandler.SchemeName)
+                .RequireAuthenticatedUser());
 
-            // Schemes accepted by every named policy, mirroring the default policy so
-            // SSE/EventSource JWT connections keep working under Authelia.
+            // Schemes accepted by the default and every named policy: Authelia (when enabled), session tokens in the
+            // Authorization header, and API keys. A request is meant to send one of them.
             var schemes = autheliaSettings.Enabled
-                ? new[] { "Authelia", JwtBearerDefaults.AuthenticationScheme }
-                : new[] { JwtBearerDefaults.AuthenticationScheme };
+                ? new[] { "Authelia", JwtBearerDefaults.AuthenticationScheme, ApiKeyAuthenticationHandler.SchemeName }
+                : new[] { JwtBearerDefaults.AuthenticationScheme, ApiKeyAuthenticationHandler.SchemeName };
+
+            options.DefaultPolicy = new AuthorizationPolicyBuilder()
+                .AddAuthenticationSchemes(schemes)
+                .RequireAuthenticatedUser()
+                .Build();
+            Log.Information("Authorization accepts {Schemes}", string.Join(", ", schemes));
 
             // Library mutations: allowed for any authenticated user except members of
             // the ReadOnly role. Denying by role (rather than requiring User/Admin)

@@ -30,6 +30,43 @@ public interface ISeriesLibraryService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// <see cref="GetSeriesAsync(string?, string?, int, int, string?, string?, CancellationToken)"/>
+    /// narrowed to the series that pass <paramref name="facets"/>; null applies no such filter.
+    /// </summary>
+    Task<SeriesLibraryResult> GetSeriesAsync(
+        string? filter,
+        string? search,
+        int page,
+        int perPage,
+        string? sort,
+        string? direction,
+        SeriesFacetFilter? facets,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// <see cref="GetSeriesSummariesAsync(string?, string?, int, int, string?, string?, int?, int?, CancellationToken)"/>
+    /// narrowed to the series that pass <paramref name="facets"/>; null applies no such filter.
+    /// Paging, sorting and totals apply to the narrowed list.
+    /// </summary>
+    Task<SeriesSummaryResult> GetSeriesSummariesAsync(
+        string? filter,
+        string? search,
+        int page,
+        int perPage,
+        string? sort,
+        string? direction,
+        int? offset,
+        int? limit,
+        SeriesFacetFilter? facets,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The genres and statuses present across the whole library, with how many series have
+    /// each, and how many series have no such data yet. Reads the cached grouping only.
+    /// </summary>
+    Task<SeriesFacetsResult> GetSeriesFacetsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns the full issue list for a single series card, paged. Returns
     /// null when no series with the given id is currently visible.
     /// </summary>

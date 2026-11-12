@@ -277,9 +277,12 @@ function installBrowserStubs(window, page, options) {
             this.listeners.get(type)?.delete(listener);
         }
         close() { this.readyState = 2; }
-        /** Test hook: deliver an event (`data` objects are JSON-encoded like the server does). */
+        /**
+         * Test hook: deliver an event (`data` objects are JSON-encoded like the server does). Only an open
+         * stream delivers events, so any event but an error marks a connecting stream open (without 'open').
+         */
         emit(type, data) {
-            if (type === 'open') this.readyState = 1;
+            if (type === 'open' || (type !== 'error' && this.readyState === 0)) this.readyState = 1;
             const event = { type, data: typeof data === 'string' || data === undefined ? data : JSON.stringify(data), target: this };
             const handler = this[`on${type}`];
             if (typeof handler === 'function') handler.call(this, event);
@@ -348,14 +351,15 @@ const SCRIPT_TAG = /<script\b([^>]*)>([\s\S]*?)<\/script\b[^>]*>/gi;
  * Disable the page's <script> elements (jsdom would otherwise run them without
  * coverage, or try to fetch them) and list them in document order.
  */
-function extractScripts(markup) {
+function extractScripts(markup, basePath = '') {
     const scripts = [];
     const disabled = markup.replace(SCRIPT_TAG, (_whole, attrs, body) => {
         const src = /\bsrc\s*=\s*"([^"]+)"/i.exec(attrs);
         const type = /\btype\s*=\s*"([^"]+)"/i.exec(attrs);
         const runnable = !type || /^(text|application)\/(java|ecma)script$/i.test(type[1]);
         if (runnable) {
-            scripts.push(src ? { src: src[1].split('?')[0].replace(/^\//, '') } : { code: body });
+            // Scripts are named by their place in wwwroot, whatever the base path.
+            scripts.push(src ? { src: src[1].split('?')[0].slice(basePath.length).replace(/^\//, '') } : { code: body });
         }
         return `<script type="text/x-disabled-in-tests"${attrs}>${body}</script>`;
     });
@@ -368,6 +372,7 @@ function extractScripts(markup) {
  * Options:
  *  - html: wwwroot-relative page (default 'index.html'); `markup` supplies raw HTML instead.
  *  - url: page URL (default http://localhost/<html>).
+ *  - basePath: what the server writes for __BASE_PATH__ (default: nothing).
  *  - scripts: wwwroot-relative scripts to run instead of the page's own
  *    external scripts. The page's inline scripts still run first unless
  *    `inlineScripts: false`. Entries may also be `{ code }` for ad-hoc code.
@@ -386,7 +391,10 @@ function extractScripts(markup) {
 function loadPage(options = {}) {
     const html = options.html || 'index.html';
     const source = options.markup ?? fs.readFileSync(path.join(WWWROOT, ...html.split('/')), 'utf8');
-    const { markup, scripts: pageScripts } = extractScripts(source.replaceAll('__APP_VERSION__', TEST_APP_VERSION));
+    const basePath = options.basePath ?? '';
+    const { markup, scripts: pageScripts } = extractScripts(
+        source.replaceAll('__APP_VERSION__', TEST_APP_VERSION).replaceAll('__BASE_PATH__', basePath),
+        basePath);
 
     const virtualConsole = new VirtualConsole();
     const page = {

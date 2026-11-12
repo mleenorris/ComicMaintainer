@@ -91,7 +91,7 @@ test('re-opening a series while its first load is in flight does not request it 
 
     page.click('#seriesDetailPanel .series-detail-back');
     await page.settle();
-    page.click('#fileList .series-card');
+    page.click('#fileList .series-card-open');
     await page.settle();
     assert.equal(page.window.location.hash, '#/series/saga');
     assert.equal(text(page.$('#seriesDetailPanel .loading')), 'Loading issues...');

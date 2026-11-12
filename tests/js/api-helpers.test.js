@@ -179,7 +179,7 @@ test('api.js leaves fetch alone', () => {
 });
 
 test('getPreferences returns the saved preferences, or {} when they cannot be loaded', async () => {
-    const prefs = { theme: 'dark', perPage: 50, libraryViewMode: 'series', filterMode: 'unmarked', sortMode: 'date' };
+    const prefs = { theme: 'dark', perPage: 50, filterMode: 'unmarked', sortMode: 'date' };
     const ok = apiPage({ routes: { 'GET /api/preferences': prefs } });
     assert.deepEqual(plain(await ok.run('getPreferences()')), prefs);
     const call = ok.fetchCalls.find(entry => entry.path === '/api/preferences');
@@ -187,7 +187,7 @@ test('getPreferences returns the saved preferences, or {} when they cannot be lo
 
     const failing = apiPage({ routes: { 'GET /api/preferences': 500 } });
     assert.deepEqual(Object.keys(await failing.run('getPreferences()')), []);
-    assert.ok(consoleLines(failing, 'error').includes('Failed to get preferences: 500'));
+    assert.ok(consoleLines(failing, 'error').some(line => line.startsWith('Error getting preferences:')));
     assert.equal(wentToLogin(failing), false);
 
     const offline = apiPage({ routes: { 'GET /api/preferences': () => { throw new TypeError('Failed to fetch'); } } });
@@ -214,7 +214,7 @@ test('setPreferences PUTs the changed preferences as JSON', async () => {
 test('setPreferences reports rejected and failed saves without throwing', async () => {
     const failing = apiPage({ routes: { 'PUT /api/preferences': 400 } });
     assert.equal(await failing.run("setPreferences({ perPage: 7 })"), undefined);
-    assert.ok(consoleLines(failing, 'error').includes('Failed to set preferences: 400'));
+    assert.ok(consoleLines(failing, 'error').some(line => line.startsWith('Error setting preferences:')));
 
     const offline = apiPage({ routes: { 'PUT /api/preferences': () => { throw new TypeError('Failed to fetch'); } } });
     await offline.run("setPreferences({ perPage: 7 })");
@@ -223,19 +223,7 @@ test('setPreferences reports rejected and failed saves without throwing', async 
     const expired = apiPage({ routes: { 'PUT /api/preferences': 401 } });
     await expired.run("setPreferences({ perPage: 7 })");
     assert.ok(wentToLogin(expired));
-    assert.deepEqual(consoleLines(expired, 'error'), []);
-});
-
-test('getFetchOptions sends credentials and auth headers and serialises object bodies', () => {
-    const token = validToken();
-    const page = apiPage({ localStorage: { jwt_token: token } });
-    const get = page.evaluate('getFetchOptions()');
-    assert.equal(get.method, 'GET');
-    assert.equal(get.credentials, 'include');
-    assert.equal(get.headers.Authorization, `Bearer ${token}`);
-    assert.equal('body' in get, false);
-    assert.equal(page.evaluate("getFetchOptions('POST', { files: ['a.cbz'] })").body, '{"files":["a.cbz"]}');
-    assert.equal(page.evaluate("getFetchOptions('PUT', 'raw text')").body, 'raw text');
+    assert.deepEqual(consoleLines(expired, 'error').filter(line => !line.startsWith('Error setting preferences:')), []);
 });
 
 test('encodeFilePathForUrl produces unpadded base64url of the UTF-8 path', () => {

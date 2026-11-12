@@ -153,18 +153,6 @@ test('a processed file reloads the issues of the open series in place', async ()
     assert.equal(page.window.location.hash, `#/series/${SERIES.id}`);
 });
 
-test('in the legacy files view a processed file only invalidates its folder cache', async () => {
-    const page = await boot({ hash: '#/library' });
-    page.run(`libraryViewMode = 'files'; folderFiles.set('Saga', { status: 'error', files: [] });`);
-    const fetches = page.fetchCalls.length;
-    serverEvent(page, 'file_processed', { filename: 'Saga/Saga 004.cbz', success: true, error: null });
-    assert.equal(page.run("folderFiles.has('Saga')"), false);
-    serverEvent(page, 'file_processed', { success: false, error: 'No file name' });
-    await page.settle(2);
-    assert.equal(page.fetchCalls.length, fetches);
-    assert.deepEqual(handlerErrors(page), []);
-});
-
 test('processed files are listed in the progress dialog of the running job', async () => {
     const page = await bootWithRunningJob();
     assert.ok(progressModalOpen(page));

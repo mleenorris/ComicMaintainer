@@ -62,6 +62,24 @@ public class OverviewServiceTests
         };
 
     [Fact]
+    public async Task GetOverviewAsync_CardsKeepTheProviderDetails()
+    {
+        var now = DateTime.UtcNow;
+        var entry = Entry("new-series", now.AddDays(-3), now.AddDays(-3), "/lib/new/1.cbz");
+        entry.Summary.Genres = new List<string> { "Action", "Drama" };
+        entry.Summary.PublicationStatus = SeriesPublicationStatus.Ongoing;
+        entry.Summary.SiteUrl = "https://example.org/new-series";
+        var service = CreateService(new[] { entry }, CreateFactory(out _));
+
+        var result = await service.GetOverviewAsync("user-1");
+
+        var card = Assert.Single(result.NewlyAddedSeries);
+        Assert.Equal(new[] { "Action", "Drama" }, card.Genres);
+        Assert.Equal(SeriesPublicationStatus.Ongoing, card.PublicationStatus);
+        Assert.Equal("https://example.org/new-series", card.SiteUrl);
+    }
+
+    [Fact]
     public async Task GetOverviewAsync_BucketsUpdatesNewlyAdded_RespectingThirtyDayWindow()
     {
         var now = DateTime.UtcNow;

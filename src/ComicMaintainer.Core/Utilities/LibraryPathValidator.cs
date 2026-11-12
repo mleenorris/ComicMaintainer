@@ -22,33 +22,8 @@ public static class LibraryPathValidator
     /// Resolves <paramref name="path"/> to its physical location and verifies it
     /// is inside one of <paramref name="allowedDirectories"/> (themselves resolved).
     /// </summary>
-    public static bool TryResolveWithin(string? path, out string resolvedPath, params string?[] allowedDirectories)
-    {
-        resolvedPath = string.Empty;
-
-        if (string.IsNullOrWhiteSpace(path))
-            return false;
-
-        try
-        {
-            var resolved = ResolveRealPath(Path.GetFullPath(path));
-
-            foreach (var allowedDirectory in allowedDirectories)
-            {
-                if (IsWithin(resolved, allowedDirectory))
-                {
-                    resolvedPath = resolved;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
-        {
-            return false;
-        }
-    }
+    public static bool TryResolveWithin(string? path, out string resolvedPath, params string?[] allowedDirectories) =>
+        new LibraryRoots(allowedDirectories).TryResolveWithin(path, out resolvedPath);
 
     /// <summary>
     /// Like <see cref="TryResolveWithin"/>, but for an operation on the directory entry
@@ -60,35 +35,8 @@ public static class LibraryPathValidator
     /// any ".." segment: the OS applies it after following links, so normalizing it away
     /// first could name a different entry.
     /// </summary>
-    public static bool TryResolveEntryWithin(string? path, out string entryPath, params string?[] allowedDirectories)
-    {
-        entryPath = string.Empty;
-
-        if (string.IsNullOrWhiteSpace(path) ||
-            Path.EndsInDirectorySeparator(path) ||
-            Path.GetFileName(path) == "." ||
-            path.Split(Separators).Contains(".."))
-            return false;
-
-        if (!TryResolveWithin(path, out _, allowedDirectories))
-            return false;
-
-        try
-        {
-            var fullPath = Path.GetFullPath(path);
-            var name = Path.GetFileName(fullPath);
-            if (string.IsNullOrEmpty(name) ||
-                !TryResolveWithin(Path.GetDirectoryName(fullPath), out var directory, allowedDirectories))
-                return false;
-
-            entryPath = Path.Join(directory, name);
-            return true;
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
-        {
-            return false;
-        }
-    }
+    public static bool TryResolveEntryWithin(string? path, out string entryPath, params string?[] allowedDirectories) =>
+        new LibraryRoots(allowedDirectories).TryResolveEntryWithin(path, out entryPath);
 
     /// <summary>
     /// Returns true when the already resolved <paramref name="fullPath"/> is the
@@ -150,7 +98,7 @@ public static class LibraryPathValidator
     public static bool IsSameOrUnder(string fullPath, string directory) =>
         IsSameOrUnder(fullPath, directory, PathComparison);
 
-    private static bool IsSameOrUnder(string fullPath, string directory, StringComparison comparison)
+    internal static bool IsSameOrUnder(string fullPath, string directory, StringComparison comparison)
     {
         var root = directory.TrimEnd(Separators);
         if (root.Length == 0)
@@ -178,7 +126,14 @@ public static class LibraryPathValidator
     /// <exception cref="IOException">
     /// More than 40 links have to be followed, e.g. because of a link loop.
     /// </exception>
-    public static string ResolveRealPath(string fullPath)
+    public static string ResolveRealPath(string fullPath) => ResolveRealPath(fullPath, knownNotLinks: null);
+
+    /// <summary>
+    /// <see cref="ResolveRealPath(string)"/> for many paths in a row:
+    /// <paramref name="knownNotLinks"/> holds the physical directories already found not to be
+    /// links, which are not asked about again, and gains those this walk finds.
+    /// </summary>
+    internal static string ResolveRealPath(string fullPath, HashSet<string>? knownNotLinks)
     {
         var path = Path.GetFullPath(fullPath);
         var resolved = Path.GetPathRoot(path)!;
@@ -198,9 +153,21 @@ public static class LibraryPathValidator
             }
 
             var candidate = Path.Join(resolved, segment);
+            if (knownNotLinks?.Contains(candidate) == true)
+            {
+                resolved = candidate;
+                continue;
+            }
+
             var target = ReadLinkTarget(candidate);
             if (target is null)
             {
+                // Only a segment with more to come is a directory other paths can share.
+                if (pending.Count > 0)
+                {
+                    knownNotLinks?.Add(candidate);
+                }
+
                 resolved = candidate;
                 continue;
             }

@@ -1,8 +1,8 @@
 using ComicMaintainer.Core.Telemetry;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
-using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Caching.Memory;
@@ -11,16 +11,16 @@ using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.Core.Services;
 
-public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
+/// <summary>
+/// External series metadata provider backed by the public MangaDex REST API
+/// (<c>/manga</c> search and <c>/manga/{id}</c>), throttled to
+/// <see cref="AppSettings.MangaDexRequestsPerSecond"/>.
+/// </summary>
+public class MangaDexSeriesMetadataService : ExternalSeriesMetadataProviderBase
 {
-    private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(12);
-    private static readonly TimeSpan HealthCacheDuration = TimeSpan.FromSeconds(60);
+    private const string MangaDexCdnBase = "https://uploads.mangadex.org";
+    private const string MangaDexSiteBase = "https://mangadex.org";
 
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IOptionsMonitor<AppSettings> _settings;
-    private readonly IMemoryCache _cache;
-    private readonly ILogger<MangaDexSeriesMetadataService> _logger;
-    private readonly ProviderHealthTracker _health;
     private readonly Lazy<ProviderRateLimiter> _rateLimiter;
 
     public MangaDexSeriesMetadataService(
@@ -29,129 +29,70 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
         IMemoryCache cache,
         ILogger<MangaDexSeriesMetadataService> logger,
         ComicMaintainerMetrics? metrics = null)
+        : base("MangaDex", httpClientFactory, settings, cache, logger, metrics)
     {
-        _health = new ProviderHealthTracker("MangaDex", metrics);
-        _httpClientFactory = httpClientFactory;
-        _settings = settings;
-        _cache = cache;
-        _logger = logger;
         _rateLimiter = new Lazy<ProviderRateLimiter>(
             () => new ProviderRateLimiter(
                 "MangaDex",
-                Math.Max(1, _settings.CurrentValue.MangaDexRequestsPerSecond),
+                Math.Max(1, Settings.CurrentValue.MangaDexRequestsPerSecond),
                 TimeSpan.FromSeconds(1)),
             LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
-    public string ProviderName => "MangaDex";
+    private protected override string HttpClientName => nameof(MangaDexSeriesMetadataService);
 
-    public async Task<ExternalSeriesMetadata?> LookupSeriesAsync(string seriesName, CancellationToken cancellationToken = default)
+    private protected override string CacheKeyPrefix => "mangadex-series";
+
+    private protected override ProviderRateLimiter RateLimiter => _rateLimiter.Value;
+
+    private protected override bool CanQuery(AppSettings settings) => settings.EnableMangaDexMetadata;
+
+    private protected override HttpRequestMessage CreateSearchRequest(AppSettings settings, string query, int limit)
+        => CreateJsonRequest(BuildSearchUri(settings, query, limit));
+
+    private protected override HttpRequestMessage CreateGetByIdRequest(AppSettings settings, string sourceId)
+        => CreateJsonRequest($"{settings.MangaDexBaseUrl.TrimEnd('/')}/manga/{Uri.EscapeDataString(sourceId)}?includes[]=cover_art");
+
+    private protected override IReadOnlyList<ExternalSeriesMetadata> ParseSearchResults(JsonElement root)
     {
-        if (string.IsNullOrWhiteSpace(seriesName))
-        {
-            return null;
-        }
-
-        var config = _settings.CurrentValue;
-        if (!config.EnableMangaDexMetadata)
-        {
-            return null;
-        }
-
-        var cacheKey = $"mangadex-series:{Normalize(seriesName)}";
-        if (_cache.TryGetValue(cacheKey, out ExternalSeriesMetadata? cached))
-        {
-            return cached;
-        }
-
-        var results = await SearchInternalAsync(config, seriesName, limit: 10, cancellationToken);
-        var result = PickBestMatch(results, seriesName);
-        if (result != null)
-        {
-            _cache.Set(cacheKey, result, CacheDuration);
-        }
-
-        return result;
-    }
-
-    public async Task<IReadOnlyList<ExternalSeriesMetadata>> SearchSeriesAsync(
-        string query,
-        int limit = 10,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(query))
+        if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
         {
             return Array.Empty<ExternalSeriesMetadata>();
         }
 
-        var config = _settings.CurrentValue;
-        if (!config.EnableMangaDexMetadata)
-        {
-            return Array.Empty<ExternalSeriesMetadata>();
-        }
-
-        return await SearchInternalAsync(config, query, Math.Clamp(limit, 1, 50), cancellationToken);
+        return data.EnumerateArray().Select(item => ParseManga(item)).OfType<ExternalSeriesMetadata>().ToList();
     }
 
-    private async Task<IReadOnlyList<ExternalSeriesMetadata>> SearchInternalAsync(
-        AppSettings config,
-        string seriesName,
-        int limit,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var requestUri = BuildRequestUri(config, seriesName, limit);
-            using var httpClient = _httpClientFactory.CreateClient(nameof(MangaDexSeriesMetadataService));
-            using var response = await RateLimitedHttpInvoker.SendAsync(
-                httpClient,
-                () => new HttpRequestMessage(HttpMethod.Get, requestUri),
-                _rateLimiter.Value,
-                _health,
-                _logger,
-                "MangaDex",
-                HttpCompletionOption.ResponseContentRead,
-                cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("MangaDex lookup failed for {SeriesName} with status code {StatusCode}", LoggingHelper.SanitizeForLog(seriesName), response.StatusCode);
-                if ((int)response.StatusCode == 429)
-                {
-                    _health.RecordRateLimited(TimeSpan.FromSeconds(5), $"HTTP 429 {response.ReasonPhrase}", recordFailedRequest: true);
-                }
-                else
-                {
-                    _health.RecordFailure($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
-                }
-                return Array.Empty<ExternalSeriesMetadata>();
-            }
+    private protected override ExternalSeriesMetadata? ParseGetByIdResult(JsonElement root)
+        => root.TryGetProperty("data", out var data) ? ParseManga(data) : null;
 
-            await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var document = await JsonDocument.ParseAsync(responseStream, cancellationToken: cancellationToken);
-            var results = ParseResults(document.RootElement);
-            _health.RecordSuccess();
-            return results;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    /// <summary>
+    /// MangaDex reports API errors as <c>{"result":"error","errors":[...]}</c>;
+    /// such a body is a failure even when it arrives with HTTP 200.
+    /// </summary>
+    private protected override ExternalMetadataUnavailableException? CheckResponseBody(JsonElement root)
+    {
+        if (root.ValueKind == JsonValueKind.Object
+            && root.TryGetProperty("result", out var result)
+            && result.ValueKind == JsonValueKind.String
+            && string.Equals(result.GetString(), "error", StringComparison.OrdinalIgnoreCase))
         {
-            // The caller gave up: neither "no match" nor a provider failure.
-            throw;
+            return new ExternalMetadataUnavailableException(
+                ProviderName,
+                ExternalMetadataFailureKind.InvalidResponse,
+                "MangaDex answered with an error result");
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            _logger.LogWarning(ex, "MangaDex lookup failed for {SeriesName}", LoggingHelper.SanitizeForLog(seriesName));
-            _health.RecordFailure(ex.Message);
-            return Array.Empty<ExternalSeriesMetadata>();
-        }
+
+        return null;
     }
 
-    public async Task<ProviderHealth> CheckHealthAsync(CancellationToken cancellationToken = default)
+    public override async Task<ProviderHealth> CheckHealthAsync(CancellationToken cancellationToken = default)
     {
-        var config = _settings.CurrentValue;
+        var config = Settings.CurrentValue;
         var enabled = config.EnableMangaDexMetadata;
         var configured = enabled && !string.IsNullOrWhiteSpace(config.MangaDexBaseUrl);
 
-        var snapshot = _health.Snapshot();
+        var snapshot = Health.Snapshot();
         snapshot.Enabled = enabled;
         snapshot.Configured = configured;
 
@@ -168,22 +109,12 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
             return snapshot;
         }
 
-        const string probeCacheKey = "mangadex-health-probe";
-        if (_cache.TryGetValue(probeCacheKey, out (bool Reachable, string Message)? cached) && cached.HasValue)
-        {
-            snapshot.Reachable = cached.Value.Reachable;
-            snapshot.StatusMessage = cached.Value.Message;
-            if (snapshot.RateLimited)
-            {
-                snapshot.StatusMessage = "Degraded - rate limited";
-            }
-            return snapshot;
-        }
-
-        var (reachable, message) = await ProbeReachabilityAsync(config, cancellationToken);
-        snapshot.Reachable = reachable;
-        snapshot.StatusMessage = message;
-        _cache.Set(probeCacheKey, (reachable, message), HealthCacheDuration);
+        await ApplyProbeAsync(
+            snapshot,
+            "mangadex-health-probe",
+            () => CreateJsonRequest(BuildSearchUri(config, "ping", limit: 1)),
+            HealthCacheDuration,
+            cancellationToken);
 
         // If we have observed a 429 within the back-off window, surface a
         // "degraded - rate limited" status even when reachability checks pass.
@@ -194,112 +125,110 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
         return snapshot;
     }
 
-    private async Task<(bool reachable, string message)> ProbeReachabilityAsync(AppSettings config, CancellationToken cancellationToken)
+    private static HttpRequestMessage CreateJsonRequest(string requestUri)
     {
-        try
-        {
-            var requestUri = BuildRequestUri(config, "ping", limit: 1);
-            using var httpClient = _httpClientFactory.CreateClient(nameof(MangaDexSeriesMetadataService));
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(TimeSpan.FromSeconds(5));
-            using var response = await RateLimitedHttpInvoker.SendAsync(
-                httpClient,
-                () =>
-                {
-                    var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
-                    request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-                    return request;
-                },
-                _rateLimiter.Value,
-                _health,
-                _logger,
-                "MangaDex",
-                HttpCompletionOption.ResponseHeadersRead,
-                cts.Token);
-            if (response.IsSuccessStatusCode)
-            {
-                return (true, "Reachable");
-            }
-            if ((int)response.StatusCode == 429)
-            {
-                return (false, "Rate limited (HTTP 429)");
-            }
-            return (false, $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // The caller gave up; that says nothing about the provider, so
-            // nothing is cached and the next check probes again.
-            throw;
-        }
-        catch (OperationCanceledException)
-        {
-            return (false, "Timed out");
-        }
-        catch (HttpRequestException ex)
-        {
-            return (false, $"Network error: {ex.Message}");
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            return (false, ex.Message);
-        }
+        var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        return request;
     }
 
-    private static string BuildRequestUri(AppSettings settings, string seriesName, int limit)
+    private static string BuildSearchUri(AppSettings settings, string seriesName, int limit)
     {
         var query = Uri.EscapeDataString(seriesName);
         var baseUrl = settings.MangaDexBaseUrl.TrimEnd('/');
         // Include the cover_art relationship so we can build a poster URL for
-        // the local series-image cache without a follow-up request.
-        return $"{baseUrl}/manga?title={query}&limit={limit}&includes[]=cover_art";
+        // the local series-image cache without a follow-up request. Order by
+        // relevance so the best title matches come first (the default order
+        // is by most recent upload).
+        return $"{baseUrl}/manga?title={query}&limit={limit}&includes[]=cover_art&order[relevance]=desc";
     }
 
-    private const string MangaDexCdnBase = "https://uploads.mangadex.org";
-
-    private static IReadOnlyList<ExternalSeriesMetadata> ParseResults(JsonElement root)
+    /// <summary>
+    /// Maps one MangaDex manga record to a candidate; null when it is
+    /// malformed or has no title.
+    /// </summary>
+    private static ExternalSeriesMetadata? ParseManga(JsonElement item)
     {
-        if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+        // TryGetProperty throws on anything but an object, so a malformed
+        // entry is skipped instead of failing the whole page.
+        if (item.ValueKind != JsonValueKind.Object
+            || !item.TryGetProperty("attributes", out var attributes)
+            || attributes.ValueKind != JsonValueKind.Object)
         {
-            return Array.Empty<ExternalSeriesMetadata>();
+            return null;
         }
 
-        var output = new List<ExternalSeriesMetadata>();
-        foreach (var item in data.EnumerateArray())
+        var localizedTitles = ExtractLocalizedTitles(attributes);
+        var canonicalTitle = localizedTitles.FirstOrDefault()?.Title;
+        if (string.IsNullOrWhiteSpace(canonicalTitle))
         {
-            // TryGetProperty throws on anything but an object, so a malformed
-            // entry is skipped instead of failing the whole page.
-            if (item.ValueKind != JsonValueKind.Object
-                || !item.TryGetProperty("attributes", out var attributes)
-                || attributes.ValueKind != JsonValueKind.Object)
-            {
-                continue;
-            }
-
-            var localizedTitles = ExtractLocalizedTitles(attributes);
-            var canonicalTitle = localizedTitles.FirstOrDefault()?.Title;
-            if (string.IsNullOrWhiteSpace(canonicalTitle))
-            {
-                continue;
-            }
-
-            var aliases = localizedTitles.Skip(1).Select(lt => lt.Title).ToList();
-            var (imageUrl, thumbnailUrl) = ExtractCoverUrls(item);
-
-            output.Add(new ExternalSeriesMetadata
-            {
-                CanonicalTitle = canonicalTitle,
-                Aliases = aliases,
-                Source = "MangaDex",
-                ImageUrl = imageUrl,
-                ThumbnailUrl = thumbnailUrl,
-                Synopsis = ExtractSynopsis(attributes),
-                LocalizedTitles = localizedTitles
-            });
+            return null;
         }
 
-        return output;
+        var aliases = localizedTitles.Skip(1).Select(lt => lt.Title).ToList();
+        var (imageUrl, thumbnailUrl) = ExtractCoverUrls(item);
+
+        return new ExternalSeriesMetadata
+        {
+            CanonicalTitle = canonicalTitle,
+            Aliases = aliases,
+            Source = "MangaDex",
+            SourceId = ReadId(item),
+            ImageUrl = imageUrl,
+            ThumbnailUrl = thumbnailUrl,
+            Synopsis = ExtractSynopsis(attributes),
+            SiteUrl = BuildSiteUrl(item),
+            Genres = ExtractGenres(attributes),
+            PublicationStatus = SeriesPublicationStatus.Normalize(ReadString(attributes, "status")),
+            TotalChapters = ParseLastChapter(ReadString(attributes, "lastChapter")),
+            Origin = ProviderMetadataText.PrimaryLanguage(ReadString(attributes, "originalLanguage")),
+            LocalizedTitles = localizedTitles
+        };
     }
+
+    /// <summary>The API has no site link; a title's page is addressed by its id.</summary>
+    private static string? BuildSiteUrl(JsonElement item)
+        => ReadId(item) is { } id ? ProviderMetadataText.HttpUrl($"{MangaDexSiteBase}/title/{Uri.EscapeDataString(id)}") : null;
+
+    /// <summary>
+    /// The names of the tags in MangaDex's <c>genre</c> group, in English when offered. Tags in
+    /// the theme, format and content groups are not genres.
+    /// </summary>
+    private static List<string> ExtractGenres(JsonElement attributes)
+    {
+        if (!attributes.TryGetProperty("tags", out var tags) || tags.ValueKind != JsonValueKind.Array)
+        {
+            return new List<string>();
+        }
+
+        var names = new List<string?>();
+        foreach (var tag in tags.EnumerateArray().Where(tag => tag.ValueKind == JsonValueKind.Object))
+        {
+            if (!tag.TryGetProperty("attributes", out var tagAttributes)
+                || !string.Equals(ReadString(tagAttributes, "group"), "genre", StringComparison.OrdinalIgnoreCase)
+                || !tagAttributes.TryGetProperty("name", out var name)
+                || name.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            names.Add(ReadString(name, "en")
+                ?? name.EnumerateObject().Where(entry => entry.Value.ValueKind == JsonValueKind.String)
+                    .Select(entry => entry.Value.GetString())
+                    .FirstOrDefault());
+        }
+
+        return ProviderMetadataText.Genres(names);
+    }
+
+    /// <summary>
+    /// The last chapter number as a total. MangaDex keeps it as text and it may be blank or a
+    /// half chapter such as "107.5", neither of which is a reliable count.
+    /// </summary>
+    private static int? ParseLastChapter(string? lastChapter)
+        => int.TryParse(lastChapter, NumberStyles.None, CultureInfo.InvariantCulture, out var chapter) && chapter > 0
+            ? chapter
+            : null;
 
     /// <summary>
     /// Reads the MangaDex localized <c>description</c> object, preferring the
@@ -401,29 +330,6 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
         return (null, null);
     }
 
-    private static ExternalSeriesMetadata? PickBestMatch(IReadOnlyList<ExternalSeriesMetadata> candidates, string requestedSeriesName)
-    {
-        var requestedNormalized = Normalize(requestedSeriesName);
-        ExternalSeriesMetadata? bestExact = null;
-        ExternalSeriesMetadata? bestAlias = null;
-
-        foreach (var metadata in candidates)
-        {
-            if (Normalize(metadata.CanonicalTitle) == requestedNormalized)
-            {
-                bestExact ??= metadata;
-                continue;
-            }
-
-            if (metadata.Aliases.Any(alias => Normalize(alias) == requestedNormalized))
-            {
-                bestAlias ??= metadata;
-            }
-        }
-
-        return bestExact ?? bestAlias ?? candidates.FirstOrDefault();
-    }
-
     /// <summary>
     /// Build a language-tagged title list from a MangaDex manga attributes
     /// object. The MangaDex API keys both <c>title</c> and <c>altTitles</c>
@@ -434,7 +340,7 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
     /// <para>
     /// English titles are always promoted to the front of the list (whether
     /// they come from <c>title.en</c> or from an <c>altTitles</c> entry).
-    /// Because <see cref="ParseResults"/> picks the first localized title as
+    /// Because <see cref="ParseManga"/> picks the first localized title as
     /// the candidate's <see cref="ExternalSeriesMetadata.CanonicalTitle"/>,
     /// this means a series whose primary MangaDex title is a romanization
     /// (e.g. Chinese pinyin) but has an English alt-title will default to
@@ -509,15 +415,5 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
         if (string.IsNullOrWhiteSpace(language)) return false;
         var primary = language.Split('-', 2)[0];
         return string.Equals(primary, "en", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string Normalize(string value)
-    {
-        var filtered = value
-            .ToLowerInvariant()
-            .Where(char.IsLetterOrDigit)
-            .ToArray();
-
-        return new string(filtered);
     }
 }

@@ -33,7 +33,6 @@ public class WriteOperationAuthorizationConvention : IActionModelConvention
     {
         ["Files"] = AuthorizationPolicies.CanModifyLibrary,
         ["Jobs"] = AuthorizationPolicies.CanModifyLibrary,
-        ["Process"] = AuthorizationPolicies.CanModifyLibrary,
         ["Metadata"] = AuthorizationPolicies.CanModifyLibrary,
         ["Status"] = AuthorizationPolicies.CanModifyLibrary,
         ["SeriesImages"] = AuthorizationPolicies.CanModifyLibrary,
@@ -45,7 +44,8 @@ public class WriteOperationAuthorizationConvention : IActionModelConvention
         ["ErrorReports"] = AuthorizationPolicies.CanAdminister,
         ["Backups"] = AuthorizationPolicies.CanAdminister,
         ["ScheduledJobs"] = AuthorizationPolicies.CanAdminister,
-        ["Settings"] = AuthorizationPolicies.CanAdminister
+        ["Settings"] = AuthorizationPolicies.CanAdminister,
+        ["Users"] = AuthorizationPolicies.CanAdminister
     };
 
     public void Apply(ActionModel action)

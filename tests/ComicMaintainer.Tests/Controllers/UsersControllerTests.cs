@@ -128,12 +128,12 @@ public class UsersControllerTests
             await _controller.Delete("target-id"),
         ];
 
-        foreach (var result in results)
+        var answers = results.Select(result => Assert.IsAssignableFrom<ObjectResult>(result)).ToList();
+        Assert.All(answers, answer =>
         {
-            var objectResult = Assert.IsAssignableFrom<ObjectResult>(result);
-            Assert.Equal((int)status, objectResult.StatusCode);
-            Assert.Equal("the reason", objectResult.Value?.GetType().GetProperty("error")?.GetValue(objectResult.Value));
-        }
+            Assert.Equal((int)status, answer.StatusCode);
+            Assert.Equal("the reason", answer.Value?.GetType().GetProperty("error")?.GetValue(answer.Value));
+        });
     }
 
     [Fact]

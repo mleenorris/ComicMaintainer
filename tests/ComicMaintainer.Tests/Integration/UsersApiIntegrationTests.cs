@@ -277,7 +277,7 @@ public sealed class UsersApiIntegrationTests : IClassFixture<SessionTokenIntegra
         Assert.Equal(HttpStatusCode.Conflict, role);
         Assert.Equal(UserAdministrationService.OwnRoleError, roleBody.GetProperty("error").GetString());
         Assert.Equal(HttpStatusCode.Conflict, password);
-        Assert.Equal(UserAdministrationService.OwnPasswordError, passwordBody.GetProperty("error").GetString());
+        Assert.Equal(UserAdministrationService.OwnResetError, passwordBody.GetProperty("error").GetString());
         Assert.Equal(HttpStatusCode.Conflict, active);
         Assert.Equal(UserAdministrationService.OwnActiveError, activeBody.GetProperty("error").GetString());
         Assert.Equal(HttpStatusCode.Conflict, delete);
@@ -389,7 +389,7 @@ public sealed class UsersApiAutheliaIntegrationTests : IClassFixture<AutheliaAut
         Assert.Equal(HttpStatusCode.Conflict, role);
         Assert.Equal(UserAdministrationService.AutheliaRoleError, roleBody.GetProperty("error").GetString());
         Assert.Equal(HttpStatusCode.Conflict, password);
-        Assert.Equal(UserAdministrationService.AutheliaPasswordError, passwordBody.GetProperty("error").GetString());
+        Assert.Equal(UserAdministrationService.AutheliaResetError, passwordBody.GetProperty("error").GetString());
     }
 
     [Fact]

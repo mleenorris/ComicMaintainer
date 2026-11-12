@@ -35,7 +35,7 @@ public sealed class UserAdministrationService : IUserAdministrationService
 
     public const string OwnRoleError =
         "You cannot change your own role. Another administrator has to do it.";
-    public const string OwnPasswordError =
+    public const string OwnResetError =
         "You cannot set your own password here. Use Change Password in the account menu, which asks for your current password.";
     public const string OwnActiveError = "You cannot disable or enable your own account.";
     public const string OwnDeleteError = "You cannot delete your own account.";
@@ -51,7 +51,7 @@ public sealed class UserAdministrationService : IUserAdministrationService
         "Authelia is enabled, so accounts are created when someone first signs in through Authelia. Add the person in Authelia instead.";
     public const string AutheliaRoleError =
         "Authelia is enabled, so roles come from Authelia groups (AUTHELIA_ADMIN_GROUPS) and are set again on every request. Change the person's groups in Authelia instead.";
-    public const string AutheliaPasswordError =
+    public const string AutheliaResetError =
         "Authelia is enabled, so people sign in with their Authelia password. A password set here would only be a way around Authelia. Change it in Authelia instead.";
 
     private const string AdminRole = "Admin";
@@ -264,7 +264,7 @@ public sealed class UserAdministrationService : IUserAdministrationService
 
         if (_autheliaSettings.Enabled)
         {
-            return Refuse(actor, "set the password of the account " + LoggingHelper.SanitizeForLog(userId), AutheliaPasswordError);
+            return Refuse(actor, "set the password of the account " + LoggingHelper.SanitizeForLog(userId), AutheliaResetError);
         }
 
         if (string.IsNullOrEmpty(newPassword))
@@ -284,7 +284,7 @@ public sealed class UserAdministrationService : IUserAdministrationService
             var target = LogName(user);
             if (IsActor(actor, user))
             {
-                return Refuse(actor, "set their own password", OwnPasswordError);
+                return Refuse(actor, "set their own password", OwnResetError);
             }
 
             if (await ConfirmActorAsync(actor) is { } refused)
@@ -413,11 +413,9 @@ public sealed class UserAdministrationService : IUserAdministrationService
                 return Refuse(actor, "delete " + target, LastAdministratorDeleteError);
             }
 
-            int devices;
-            int deliveries;
             await using (var transaction = await _db.Database.BeginTransactionAsync())
             {
-                (devices, deliveries) = await DeleteOwnDataAsync(user.Id);
+                await DeleteOwnDataAsync(user.Id);
                 EnsureSucceeded(await _userManager.DeleteAsync(user), "delete the account");
                 await transaction.CommitAsync();
             }
@@ -425,8 +423,8 @@ public sealed class UserAdministrationService : IUserAdministrationService
             _sessions.Invalidate(user.Id);
             _logger.LogInformation(
                 "{Administrator} deleted the account {Username} with its reading progress, read status, preferences, " +
-                "e-reader devices ({DeviceCount}) and email deliveries ({DeliveryCount})",
-                DescribeActor(actor), target, devices, deliveries);
+                "e-reader devices and email deliveries",
+                DescribeActor(actor), target);
             return UserAdministrationResult.Done(null);
         }
         finally
@@ -439,13 +437,13 @@ public sealed class UserAdministrationService : IUserAdministrationService
     // when no administrator existed to inherit them) belong to no one account and are shared by the administrators,
     // so they stay; so does everything other accounts own. Identity's own rows (roles, claims, logins, tokens) go
     // with the account through their cascading foreign keys.
-    private async Task<(int Devices, int Deliveries)> DeleteOwnDataAsync(string userId)
+    private async Task DeleteOwnDataAsync(string userId)
     {
         var ownDevices = _db.EreaderDevices.Where(d => d.OwnerUserId != null && d.OwnerUserId == userId);
         var ownDeviceIds = ownDevices.Select(d => d.Id);
         await _db.SeriesEmailSubscriptions.Where(s => ownDeviceIds.Contains(s.DeviceId)).ExecuteDeleteAsync();
-        var deliveries = await _db.ComicEmailDeliveries.Where(d => d.OwnerUserId != null && d.OwnerUserId == userId).ExecuteDeleteAsync();
-        var devices = await ownDevices.ExecuteDeleteAsync();
+        await _db.ComicEmailDeliveries.Where(d => d.OwnerUserId != null && d.OwnerUserId == userId).ExecuteDeleteAsync();
+        await ownDevices.ExecuteDeleteAsync();
 
         await _db.ReadingProgresses.Where(p => p.UserId == userId).ExecuteDeleteAsync();
         await _db.ReadingSessions.Where(s => s.UserId == userId).ExecuteDeleteAsync();
@@ -453,7 +451,6 @@ public sealed class UserAdministrationService : IUserAdministrationService
         await _db.ReaderPreferences.Where(p => p.UserId == userId).ExecuteDeleteAsync();
         await _db.UserPreferences.Where(p => p.UserId == userId).ExecuteDeleteAsync();
         await _db.RevokedTokens.Where(t => t.UserId == userId).ExecuteDeleteAsync();
-        return (devices, deliveries);
     }
 
     // Asks for the administrator's own password, unless they came through Authelia. Called outside any transaction:

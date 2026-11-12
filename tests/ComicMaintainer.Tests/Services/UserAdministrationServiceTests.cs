@@ -443,7 +443,7 @@ public sealed class UserAdministrationServiceTests : IAsyncLifetime
         var wrong = await WithServiceAsync(service => service.ResetPasswordAsync(Actor(null), user.Id, NewPassword));
 
         Assert.Equal(UserAdministrationOutcome.Conflict, own.Outcome);
-        Assert.Equal(UserAdministrationService.OwnPasswordError, own.Error);
+        Assert.Equal(UserAdministrationService.OwnResetError, own.Error);
         Assert.Equal(UserAdministrationOutcome.NotFound, unknown.Outcome);
         Assert.Equal(UserAdministrationOutcome.PasswordNotConfirmed, wrong.Outcome);
         Assert.True((await _host.WithAuthServiceAsync(auth => auth.LoginAsync("admin", Password))).Success);
@@ -461,7 +461,7 @@ public sealed class UserAdministrationServiceTests : IAsyncLifetime
             .ResetPasswordAsync(Actor(admin, null, autheliaSession: true), user.Id, NewPassword));
 
         Assert.Equal(UserAdministrationOutcome.Conflict, result.Outcome);
-        Assert.Equal(UserAdministrationService.AutheliaPasswordError, result.Error);
+        Assert.Equal(UserAdministrationService.AutheliaResetError, result.Error);
     }
 
     // ── Disable and enable ────────────────────────────────────────────────
@@ -616,7 +616,7 @@ public sealed class UserAdministrationServiceTests : IAsyncLifetime
             services.GetRequiredService<ComicMaintainerDbContext>().UserRoles.CountAsync(r => r.UserId == doomed.Id));
         Assert.Equal(0, roleRows);
         Assert.Contains(AdministrationLog(), e => e.Level == LogLevel.Information
-            && e.Message == "admin deleted the account doomed with its reading progress, read status, preferences, e-reader devices (1) and email deliveries (1)");
+            && e.Message == "admin deleted the account doomed with its reading progress, read status, preferences, e-reader devices and email deliveries");
     }
 
     [Fact]

@@ -121,7 +121,7 @@ requests through to ComicMaintainer without redirecting them. Then sign in with 
 
 ## Building
 
-You need the .NET 10 SDK, the Android workload, a JDK and the Android SDK.
+You need the .NET 11 SDK, the Android workload, a JDK and the Android SDK.
 
 On Windows, `scripts/android-local.ps1` installs all of them under `%USERPROFILE%\android-toolchain` without
 administrator rights. It builds the APK the same way CI does, checks it, and runs it on an emulator:
@@ -153,10 +153,10 @@ Open it in Visual Studio, or from the command line:
 dotnet build src/ComicMaintainer.Android.sln
 
 # Run on a connected device or emulator
-dotnet build src/ComicMaintainer.MauiApp -t:Run -f net10.0-android
+dotnet build src/ComicMaintainer.MauiApp -t:Run -f net11.0-android
 
-# Release APK: bin/Release/net10.0-android/publish/com.comicmaintainer.app-Signed.apk
-dotnet publish src/ComicMaintainer.MauiApp -c Release -f net10.0-android -p:AndroidPackageFormat=apk
+# Release APK: bin/Release/net11.0-android/publish/com.comicmaintainer.app-Signed.apk
+dotnet publish src/ComicMaintainer.MauiApp -c Release -f net11.0-android -p:AndroidPackageFormat=apk
 ```
 
 To sign with a key of your own, add `-p:AndroidKeyStore=true -p:AndroidSigningKeyStore=...`,

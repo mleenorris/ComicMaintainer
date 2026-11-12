@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   setup  Installs the tools CI uses, at the same versions, under -ToolsDir (default %USERPROFILE%\comicmaintainer-tools)
-         without administrator rights: the .NET 10 SDK (unless one is already installed), Node.js, the CodeQL CLI and
+         without administrator rights: the .NET 11 SDK (unless one is already installed), Node.js, the CodeQL CLI and
          Trivy. It then restores the repository's .NET tools and npm packages. With -Android it also installs the
          Android toolchain through scripts\android-local.ps1, which accepts the Android SDK licences.
 
@@ -59,7 +59,7 @@ $Only = Split-List $Only @('build', 'unit', 'integration', 'js', 'nuget', 'codeq
 $CodeQLLanguage = Split-List $CodeQLLanguage @('csharp', 'javascript', 'actions') '-CodeQLLanguage'
 
 # The versions CI uses. Update these when the workflows move on.
-$DotnetChannel = '10.0'    # actions/setup-dotnet with dotnet-version 10.0.x
+$DotnetChannel = '11.0'    # actions/setup-dotnet with dotnet-version 11.0.x
 $NodeMajor = 24            # actions/setup-node with node-version lts/*
 $CodeQLVersion = '2.27.4'  # the bundle github/codeql-action v4 downloads
 $TrivyVersion = '0.70.0'   # the Trivy that aquasecurity/trivy-action v0.36.0 installs

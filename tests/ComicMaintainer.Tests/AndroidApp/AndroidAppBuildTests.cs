@@ -90,7 +90,7 @@ public sealed class AndroidAppBuildTests
         var workflow = ReadWorkflow();
 
         Assert.Contains("dotnet publish src/ComicMaintainer.MauiApp/ComicMaintainer.MauiApp.csproj", workflow, StringComparison.Ordinal);
-        Assert.Contains("-f net10.0-android", Regex.Replace(workflow, @"`\s+", " "), StringComparison.Ordinal);
+        Assert.Contains("-f net11.0-android", Regex.Replace(workflow, @"`\s+", " "), StringComparison.Ordinal);
         Assert.Contains("-p:AndroidPackageFormat=apk", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("dotnet build", workflow, StringComparison.Ordinal);
     }
@@ -101,7 +101,7 @@ public sealed class AndroidAppBuildTests
     {
         var workflow = ReadWorkflow();
 
-        Assert.Contains("net10.0-android/publish\" -Filter \"*-Signed.apk\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("net11.0-android/publish\" -Filter \"*-Signed.apk\"", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("-Filter \"*.apk\"", workflow, StringComparison.Ordinal);
     }
 

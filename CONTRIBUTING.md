@@ -15,7 +15,7 @@ By taking part, you agree to keep this a respectful and inclusive project.
 
 You need:
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download)
+- [.NET 11 SDK](https://dotnet.microsoft.com/download)
 - Node.js 22.22+, 24.15+ or 26+, for the web UI's tests
 - Docker, for the container smoke test
 - CodeQL and Trivy, only to run the security scans locally
@@ -23,7 +23,7 @@ You need:
 ### Setting up a Windows machine
 
 `scripts/dev.ps1` installs everything above except Docker, at the versions CI uses, under
-`%USERPROFILE%\comicmaintainer-tools`. It needs no administrator rights, and it keeps an existing .NET 10 SDK or
+`%USERPROFILE%\comicmaintainer-tools`. It needs no administrator rights, and it keeps an existing .NET 11 SDK or
 Node.js if they are recent enough:
 
 ```powershell

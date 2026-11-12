@@ -5,7 +5,7 @@
 .DESCRIPTION
   Steps (run one, or "all" for build, verify and emulator):
     setup     Installs a JDK, the Android SDK, the emulator and an x86_64 system image under -ToolchainDir,
-              plus a .NET 10 SDK with the Android workload if none is found. This ACCEPTS THE ANDROID SDK
+              plus a .NET 11 SDK with the Android workload if none is found. This ACCEPTS THE ANDROID SDK
               LICENCES on your behalf: only run it if you agree to them.
     build     Publishes a signed Release APK, as the CI workflow does.
     verify    Checks the APK's signature and prints its package, version, minimum Android version,
@@ -167,14 +167,14 @@ function Invoke-Build {
     Write-Step 'Publishing the Release APK'
     $dotnet = Get-Dotnet
     if (-not $dotnet) { throw 'No .NET SDK found. Run the setup step first.' }
-    & $dotnet publish $Project -c Release -f net10.0-android -p:AndroidPackageFormat=apk "-p:AndroidSdkDirectory=$Sdk" "-p:JavaSdkDirectory=$Jdk"
+    & $dotnet publish $Project -c Release -f net11.0-android -p:AndroidPackageFormat=apk "-p:AndroidSdkDirectory=$Sdk" "-p:JavaSdkDirectory=$Jdk"
     Assert-Exit 'dotnet publish'
     return Find-Apk
 }
 
 function Find-Apk {
     if ($Apk) { return (Resolve-Path $Apk).Path }
-    $publish = Join-Path $Repo 'src\ComicMaintainer.MauiApp\bin\Release\net10.0-android\publish'
+    $publish = Join-Path $Repo 'src\ComicMaintainer.MauiApp\bin\Release\net11.0-android\publish'
     $signed = Get-ChildItem -Path $publish -Filter '*-Signed.apk' -Recurse -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime | Select-Object -Last 1
     if (-not $signed) { throw "No signed APK in $publish. Run the build step first, or pass -Apk." }

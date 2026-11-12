@@ -18,7 +18,7 @@ elsewhere.
 The `analyze-dotnet` job runs once for each language: `csharp`, `javascript` and `actions` (the workflow files). It uses
 the `security-and-quality` query suite.
 
-For C#, the job sets up .NET 10 and builds `ComicMaintainer.Core`, `ComicMaintainer.WebApi` and `ComicMaintainer.Tests` in
+For C#, the job sets up .NET 11 and builds `ComicMaintainer.Core`, `ComicMaintainer.WebApi` and `ComicMaintainer.Tests` in
 Release. The Android app is left out, because it needs a workload.
 
 These paths are excluded:

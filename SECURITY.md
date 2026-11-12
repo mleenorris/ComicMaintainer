@@ -55,6 +55,20 @@ container scan of its commit have passed.
 Image scan results, including medium-severity ones, are uploaded to the repository's code scanning
 alerts. Low and moderate NuGet advisories are listed in the job summary without failing the check.
 
+### Automatic fixes
+
+When a scan of `dotnet` finishes, `security-autofix.yml` looks at the open code scanning alerts. If
+any has a security severity of **medium** or higher, and can be fixed (Trivy findings count only once
+a fixed version exists), Claude fixes them, adds tests, and opens one pull request labelled
+`security-autofix`. It goes through the usual checks and review before it can be merged.
+
+- No new attempt starts while a `security-autofix` pull request is open.
+- Each set of alerts is attempted once; an alert that is still open is attempted again after about a
+  week, when the record of the attempt expires.
+- Alerts are never dismissed or suppressed automatically. Claude explains in the pull request any
+  alert it left alone.
+- It can also be started by hand from the Actions tab (**Security Autofix** → **Run workflow**).
+
 ### Running the scans locally
 
 ```bash

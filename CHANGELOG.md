@@ -12,6 +12,12 @@ for it.
 
 ## [Unreleased]
 
+### Changed
+
+- The server and the Android app now run on .NET 11. Building from source needs the .NET 11 SDK.
+- The Android app now needs Android 7.0 (API 24) or later, the oldest version .NET 11 supports. A phone
+  on Android 6.0 can keep using the 3.0.0 app.
+
 ## [3.0.0] - 2026-11-09
 
 Upgrading an existing install? Start with the [3.0 release notes](docs/RELEASE_NOTES_V3.0.md).

@@ -12,6 +12,6 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- API 23 is the first with the keystore SecureStorage relies on to encrypt the sign-in. -->
-    <uses-sdk android:minSdkVersion="23" android:targetSdkVersion="35" />
+    <!-- API 24 is the oldest .NET 11 builds for. SecureStorage needs API 23 or later to encrypt the sign-in. -->
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="35" />
 </manifest>

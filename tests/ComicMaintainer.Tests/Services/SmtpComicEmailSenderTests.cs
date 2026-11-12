@@ -400,6 +400,28 @@ public class SmtpComicEmailSenderTests : IDisposable
         Assert.Contains(server.Commands, c => c.StartsWith("MAIL", StringComparison.OrdinalIgnoreCase) && c.Contains("SIZE="));
     }
 
+    [Fact]
+    public async Task SendAsync_WhenTheServerAdvertisesSizeZero_TreatsItAsNoLimit()
+    {
+        // RFC 1870: "SIZE 0" means the server has no fixed maximum message size.
+        using var server = new FakeSmtpServer { MaxMessageSize = 0 };
+        _settings.SmtpPort = server.Port;
+        _settings.SmtpAllowInsecure = true;
+
+        var attachment = Path.Join(_workDir, "Series 001.epub");
+        var content = new byte[200_000];
+        new Random(7).NextBytes(content);
+        await File.WriteAllBytesAsync(attachment, content);
+
+        await _sender.SendAsync(
+            new ComicEmailMessage("kindle@example.com", "Series 001", "Body", attachment, "Series 001.epub", "application/epub+zip"),
+            _guard.Token);
+
+        var mime = await server.Message.WaitAsync(Timeout);
+        var part = Assert.IsType<MimePart>(Assert.Single(mime.Attachments));
+        Assert.Equal(content, Decode(part));
+    }
+
     public static TheoryData<Exception, bool> TransientClassificationCases() => new()
     {
         { new MailKit.Net.Smtp.SmtpCommandException(MailKit.Net.Smtp.SmtpErrorCode.MessageNotAccepted, MailKit.Net.Smtp.SmtpStatusCode.ServiceNotAvailable, "busy"), true },

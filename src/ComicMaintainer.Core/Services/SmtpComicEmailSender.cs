@@ -170,7 +170,7 @@ public class SmtpComicEmailSender : IComicEmailSender
         MimeMessage message,
         CancellationToken cancellationToken)
     {
-        if ((client.Capabilities & SmtpCapabilities.Size) == 0 || client.MaxSize == 0)
+        if (!client.Capabilities.Contains(SmtpCapability.Size) || client.MaxSize == 0)
         {
             return;
         }
@@ -187,7 +187,7 @@ public class SmtpComicEmailSender : IComicEmailSender
         throw new InvalidOperationException(
             $"The email is {FormatMegabytes(measure.Length)} once encoded, but the mail server accepts at most " +
             $"{FormatMegabytes(client.MaxSize)}. Lower the maximum email size in Settings to " +
-            $"{Math.Max(1, (long)client.MaxSize / (1024 * 1024))} MB or less so books are compressed to fit.");
+            $"{Math.Max(1, client.MaxSize / (1024 * 1024))} MB or less so books are compressed to fit.");
     }
 
     private static string FormatMegabytes(long bytes) =>

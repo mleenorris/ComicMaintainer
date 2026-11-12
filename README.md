@@ -4,7 +4,7 @@ ComicMaintainer is a self-hosted comic library manager. It watches a folder for 
 renames them, writes clean `ComicInfo.xml` metadata and flags duplicates. A web interface lets you browse the library
 as series, read in the browser, fix metadata, and send issues to an e-reader.
 
-It runs on ASP.NET Core and .NET 10, stores its state in SQLite, and is usually run with Docker.
+It runs on ASP.NET Core and .NET 11, stores its state in SQLite, and is usually run with Docker.
 
 ## Features
 
@@ -196,7 +196,7 @@ or when `API__ENABLESWAGGER=true`. Requests need a session token (`Authorization
 
 ## Building from source
 
-You need the .NET 10 SDK.
+You need the .NET 11 SDK.
 
 ```bash
 git clone https://github.com/mleenorris/ComicMaintainer.git

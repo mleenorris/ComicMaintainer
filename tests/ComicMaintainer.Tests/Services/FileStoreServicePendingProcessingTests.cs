@@ -166,7 +166,7 @@ public sealed class FileStoreServicePendingProcessingTests : IAsyncLifetime
     }
 
     private static Task InsertLegacyRowAsync(ComicMaintainerDbContext db, string path, bool isDuplicate, bool isProcessed) =>
-        db.Database.ExecuteSqlInterpolatedAsync($"""
+        db.Database.ExecuteSqlAsync($"""
             INSERT INTO "ComicFiles" ("FilePath", "FileName", "Directory", "FileSize", "LastModified",
                 "IsProcessed", "IsRenamed", "IsNormalized", "IsDuplicate", "IsRead", "CreatedAt", "UpdatedAt",
                 "SeriesMetadataVersion", "MetadataVersion", "WrittenMetadataVersion", "MetadataSource")

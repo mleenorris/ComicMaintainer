@@ -1,6 +1,6 @@
 # ComicMaintainer agent instructions
 
-ComicMaintainer is a self-hosted comic library manager: ASP.NET Core on .NET 10, EF Core with SQLite, a vanilla-JavaScript
+ComicMaintainer is a self-hosted comic library manager: ASP.NET Core on .NET 11, EF Core with SQLite, a vanilla-JavaScript
 SPA and PWA, and a small .NET MAUI Android client. The default branch is `dotnet`. There is no Python code any more;
 anything in `docs/archive` describes the past.
 

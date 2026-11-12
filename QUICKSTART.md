@@ -83,7 +83,7 @@ See [API.md](docs/API.md) for every route. Swagger UI is at `/swagger` when you 
 
 ## Run from source
 
-You need the .NET 10 SDK. The solution builds without the Android workload.
+You need the .NET 11 SDK. The solution builds without the Android workload.
 
 ```bash
 git clone https://github.com/mleenorris/ComicMaintainer.git

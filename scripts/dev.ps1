@@ -41,9 +41,9 @@ param(
     [string]$ToolsDir = (Join-Path ([Environment]::GetFolderPath('UserProfile')) 'comicmaintainer-tools'),
     [switch]$Android,
     [double]$CoverageGate = 0,
-    # Memory for CodeQL's query evaluation, in MB. By default CodeQL sizes it from the free memory when it starts, which
-    # can be too little while other builds run; on an 8 GB machine 4096 works.
-    [int]$CodeQLRamMb = 0,
+    # Memory for CodeQL's query evaluation, in MB. 4096 is enough for every language, even on an 8 GB machine. Left to
+    # itself (0), CodeQL sizes it from the free memory when it starts, which can be too little for the C# queries.
+    [int]$CodeQLRamMb = 4096,
     # The CodeQL languages to scan: csharp, javascript and actions by default; several separated by commas.
     [string[]]$CodeQLLanguage = @('csharp', 'javascript', 'actions')
 )

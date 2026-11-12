@@ -207,7 +207,7 @@ jobs:
 
           ## System Requirements
 
-          - Android 6.0 (API 23) or later
+          - Android 7.0 (API 24) or later
           - Internet/network connectivity
 
           ## Updating

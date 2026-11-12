@@ -18,7 +18,7 @@ are told they lack permission if they try to process or delete.
 
 ## Requirements
 
-- Android 6.0 (API 23) or later
+- Android 7.0 (API 24) or later
 - A ComicMaintainer 3.x server the device can reach, already set up. A new server has no accounts: create the
   administrator in a web browser first, and the app says so if you try to sign in before that.
 

@@ -140,7 +140,8 @@ public sealed class AndroidAppBuildTests
         var minimum = manifest.Root!.Element("uses-sdk")!.Attribute(android + "minSdkVersion")!.Value;
         var project = File.ReadAllText(Path.Join(AppDirectory, "ComicMaintainer.MauiApp.csproj"));
 
-        Assert.Equal("23", minimum);
+        // API 24 is the oldest .NET 11 builds for; SecureStorage encrypts from API 23.
+        Assert.Equal("24", minimum);
         Assert.Contains($">{minimum}.0</SupportedOSPlatformVersion>", project, StringComparison.Ordinal);
     }
 

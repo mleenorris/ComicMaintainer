@@ -105,7 +105,7 @@ The Android app is a client for a server you already run. It holds no comics its
 
 1. Create the administrator in a web browser first. The app cannot do this.
 2. Download `ComicMaintainer-vX.Y.Z-android.apk` from
-   [GitHub Releases](https://github.com/mleenorris/ComicMaintainer/releases) and install it. It needs Android 6.0 or later.
+   [GitHub Releases](https://github.com/mleenorris/ComicMaintainer/releases) and install it. It needs Android 7.0 or later.
 3. Sign in with the server's full address, such as `http://192.168.1.100:5000` or `https://comics.example.com`, and a
    password or an API key.
 

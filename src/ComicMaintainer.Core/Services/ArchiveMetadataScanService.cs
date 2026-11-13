@@ -27,7 +27,7 @@ public sealed class ArchiveMetadataScanService
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly ILogger<ArchiveMetadataScanService> _logger;
-    private readonly IFileCoverWarmupQueue? _coverWarmup;
+    private readonly IFileCoverWarmupQueue _coverWarmup;
 
     /// <summary>Archives that could not be read, with the stored stats they had at the time.</summary>
     private readonly ConcurrentDictionary<string, (long Size, DateTime Modified)> _unreadable = new(StringComparer.Ordinal);
@@ -37,13 +37,13 @@ public sealed class ArchiveMetadataScanService
     /// <param name="logger">Logger.</param>
     /// <param name="coverWarmup">
     /// Where the files whose metadata is recorded (new to the library, or changed) are queued so
-    /// their covers are generated before the library first shows them; none without it.
+    /// their covers are generated before the library first shows them.
     /// </param>
     public ArchiveMetadataScanService(
         IFileStoreService fileStore,
         IComicProcessorService processor,
         ILogger<ArchiveMetadataScanService> logger,
-        IFileCoverWarmupQueue? coverWarmup = null)
+        IFileCoverWarmupQueue coverWarmup)
     {
         _fileStore = fileStore;
         _processor = processor;
@@ -91,7 +91,7 @@ public sealed class ArchiveMetadataScanService
                     {
                         recorded++;
                         recordedInBatch++;
-                        _coverWarmup?.Enqueue(candidate.FilePath);
+                        _coverWarmup.Enqueue(candidate.FilePath);
                     }
                     else
                     {

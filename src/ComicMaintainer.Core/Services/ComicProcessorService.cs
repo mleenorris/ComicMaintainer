@@ -35,7 +35,7 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
     private readonly INotificationPublisher _notifications;
 
     // Where a rewritten or renamed file is queued, so its new cover is generated before the library shows it.
-    private readonly IFileCoverWarmupQueue? _coverWarmup;
+    private readonly IFileCoverWarmupQueue _coverWarmup;
     private readonly int _maxWorkers;
     private bool _disposed;
 
@@ -60,8 +60,8 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
         IComicEmailService comicEmail,
         IFileOperationLock fileLock,
         INotificationPublisher notifications,
-        ComicMaintainerMetrics? metrics = null,
-        IFileCoverWarmupQueue? coverWarmup = null)
+        IFileCoverWarmupQueue coverWarmup,
+        ComicMaintainerMetrics? metrics = null)
     {
         _notifications = notifications;
         _metrics = metrics;

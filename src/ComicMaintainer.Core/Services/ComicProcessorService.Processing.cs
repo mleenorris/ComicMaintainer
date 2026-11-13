@@ -388,7 +388,7 @@ public partial class ComicProcessorService
             // path and stamped with the file's size and time); make the new one in the background.
             if (fileChanged)
             {
-                _coverWarmup?.Enqueue(filePath);
+                _coverWarmup.Enqueue(filePath);
             }
 
             // Series marked for automatic ereader delivery get the freshly

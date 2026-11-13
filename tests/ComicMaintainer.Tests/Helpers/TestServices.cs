@@ -91,8 +91,8 @@ public static class TestServices
             comicEmail ?? Mock.Of<IComicEmailService>(),
             fileLock ?? new FileOperationLock(),
             notifications ?? Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>(),
-            metrics,
-            coverWarmup);
+            coverWarmup ?? Mock.Of<IFileCoverWarmupQueue>(),
+            metrics);
     }
 
     public static BatchJobRegistry CreateBatchJobRegistry(

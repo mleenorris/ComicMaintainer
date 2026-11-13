@@ -262,6 +262,30 @@ test('activate deletes caches of older versions but keeps image, offline-downloa
     assert.equal(sw.claims, 1);
 });
 
+test('activate turns navigation preload on where the browser has it', async () => {
+    const navigationPreload = { enabled: false, async enable() { this.enabled = true; } };
+    const sw = loadServiceWorker({ registration: { scope: 'http://localhost/', installing: null, waiting: null, active: null, navigationPreload } });
+    installRoutes(sw.network);
+
+    await sw.install();
+    await sw.activate();
+
+    assert.equal(navigationPreload.enabled, true);
+    assert.equal(sw.claims, 1);
+});
+
+test('a browser that refuses navigation preload still gets an active worker', async () => {
+    const navigationPreload = { async enable() { throw new Error('not supported here'); } };
+    const sw = loadServiceWorker({ registration: { scope: 'http://localhost/', installing: null, waiting: null, active: null, navigationPreload } });
+    installRoutes(sw.network);
+
+    await sw.install();
+    await sw.activate();
+
+    assert.equal(sw.claims, 1);
+    assert.equal(sw.logged('Navigation preload is unavailable').length, 1);
+});
+
 test('activate takes control only after the old caches are gone', async () => {
     const sw = loadServiceWorker();
     installRoutes(sw.network);

@@ -294,7 +294,7 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
     }
 
     [Fact]
-    public async Task StaticFiles_HtmlHasNoStoreCache()
+    public async Task StaticFiles_HtmlIsRevalidatedOnEveryVisit()
     {
         // Arrange
         var client = _factory.CreateClient();
@@ -302,11 +302,22 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
         // Act
         var response = await client.GetAsync("/index.html");
 
-        // Assert - HTML files should not be cached to ensure users get the latest version
+        // Assert - HTML is asked for again on every visit, so users always get the latest version, but an
+        // unchanged page is answered 304 rather than sent again.
         Assert.True(response.Headers.Contains("Cache-Control"));
         var cacheControl = response.Headers.GetValues("Cache-Control").First();
-        Assert.Contains("no-store", cacheControl);
+        Assert.Contains("no-cache", cacheControl);
         Assert.Contains("private", cacheControl);
+        Assert.DoesNotContain("max-age", cacheControl);
+        var etag = response.Headers.ETag;
+        Assert.NotNull(etag);
+        Assert.False(etag.IsWeak);
+
+        using var revisit = new HttpRequestMessage(HttpMethod.Get, "/index.html");
+        revisit.Headers.IfNoneMatch.Add(etag);
+        var notModified = await client.SendAsync(revisit);
+        Assert.Equal(System.Net.HttpStatusCode.NotModified, notModified.StatusCode);
+        Assert.Equal(etag, notModified.Headers.ETag);
     }
     
     [Fact]

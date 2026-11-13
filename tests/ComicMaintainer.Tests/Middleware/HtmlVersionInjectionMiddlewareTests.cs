@@ -64,7 +64,7 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
         Assert.Matches("/css/main\\.css\\?v=[^\"']+", body);
         Assert.Matches("/js/main\\.js\\?v=[^\"']+", body);
         Assert.Equal("text/html; charset=utf-8", ctx.Response.ContentType);
-        Assert.Equal("no-store, private", ctx.Response.Headers["Cache-Control"].ToString());
+        Assert.Equal("no-cache, private", ctx.Response.Headers["Cache-Control"].ToString());
     }
 
     [Fact]
@@ -174,6 +174,81 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
         Assert.Contains($"data-base-path=\"{expected}\"", body);
         Assert.Contains($"src=\"{expected}/js/x.js?v=", body);
         Assert.DoesNotContain("__BASE_PATH__", body);
+    }
+
+    [Fact]
+    public async Task APageTheBrowserHasAlready_IsAnswered304WithoutABody()
+    {
+        File.WriteAllText(Path.Join(_tempRoot, "index.html"), "<script src=\"/js/main.js?v=__APP_VERSION__\"></script>");
+        var mw = new HtmlVersionInjectionMiddleware(_ => Task.CompletedTask, _env.Object, _logger.Object, Options.Create(new AppSettings()));
+
+        var first = CreateContext("/");
+        await mw.InvokeAsync(first);
+        var etag = first.Response.Headers.ETag.ToString();
+        Assert.Matches("^\"[0-9A-F]{32}\"$", etag);
+        Assert.Equal(first.Response.ContentLength, (await ReadBodyAsync(first)).Length);
+
+        var revisit = CreateContext("/");
+        revisit.Request.Headers.IfNoneMatch = etag;
+        await mw.InvokeAsync(revisit);
+
+        Assert.Equal(StatusCodes.Status304NotModified, revisit.Response.StatusCode);
+        Assert.Equal(etag, revisit.Response.Headers.ETag.ToString());
+        Assert.Equal("no-cache, private", revisit.Response.Headers.CacheControl.ToString());
+        Assert.Equal(string.Empty, await ReadBodyAsync(revisit));
+    }
+
+    [Theory]
+    [InlineData("*")]
+    [InlineData("W/{0}")]
+    [InlineData("\"other\", {0}")]
+    public async Task IfNoneMatch_IsComparedWeakly(string ifNoneMatch)
+    {
+        File.WriteAllText(Path.Join(_tempRoot, "index.html"), "<p>__APP_VERSION__</p>");
+        var mw = new HtmlVersionInjectionMiddleware(_ => Task.CompletedTask, _env.Object, _logger.Object, Options.Create(new AppSettings()));
+        var first = CreateContext("/");
+        await mw.InvokeAsync(first);
+
+        var revisit = CreateContext("/");
+        revisit.Request.Headers.IfNoneMatch = string.Format(System.Globalization.CultureInfo.InvariantCulture, ifNoneMatch, first.Response.Headers.ETag.ToString());
+        await mw.InvokeAsync(revisit);
+
+        Assert.Equal(StatusCodes.Status304NotModified, revisit.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AnOutdatedETag_GetsTheWholePage()
+    {
+        File.WriteAllText(Path.Join(_tempRoot, "index.html"), "<p>__APP_VERSION__</p>");
+        var mw = new HtmlVersionInjectionMiddleware(_ => Task.CompletedTask, _env.Object, _logger.Object, Options.Create(new AppSettings()));
+
+        var revisit = CreateContext("/");
+        revisit.Request.Headers.IfNoneMatch = "\"0123456789ABCDEF0123456789ABCDEF\"";
+        await mw.InvokeAsync(revisit);
+
+        Assert.Equal(StatusCodes.Status200OK, revisit.Response.StatusCode);
+        Assert.StartsWith("<p>", await ReadBodyAsync(revisit));
+    }
+
+    // The page is built once and kept, but a changed file (an upgrade, or editing it in development) is noticed.
+    [Fact]
+    public async Task AChangedFile_IsServedWithANewETag()
+    {
+        var index = Path.Join(_tempRoot, "index.html");
+        File.WriteAllText(index, "<p>first</p>");
+        var mw = new HtmlVersionInjectionMiddleware(_ => Task.CompletedTask, _env.Object, _logger.Object, Options.Create(new AppSettings()));
+        var first = CreateContext("/");
+        await mw.InvokeAsync(first);
+
+        File.WriteAllText(index, "<p>second, longer</p>");
+        File.SetLastWriteTimeUtc(index, File.GetLastWriteTimeUtc(index).AddMinutes(1));
+        var second = CreateContext("/");
+        second.Request.Headers.IfNoneMatch = first.Response.Headers.ETag.ToString();
+        await mw.InvokeAsync(second);
+
+        Assert.Equal(StatusCodes.Status200OK, second.Response.StatusCode);
+        Assert.NotEqual(first.Response.Headers.ETag.ToString(), second.Response.Headers.ETag.ToString());
+        Assert.Equal("<p>second, longer</p>", await ReadBodyAsync(second));
     }
 
     [Fact]

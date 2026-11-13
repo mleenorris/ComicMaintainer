@@ -58,7 +58,9 @@ test('the SPA boots against the real index.html with a valid session', async () 
     assert.equal(page.run('APP_VERSION'), TEST_APP_VERSION);
     assert.equal(page.window.location.hash, '#/home');
     assert.equal(page.$('#sidebarUsername').textContent, 'alice');
-    assert.ok(page.fetchCalls.some(c => c.path === '/api/files/series'));
+    // The overview opens first; the library is fetched when it is first shown.
+    assert.ok(page.fetchCalls.some(c => c.path === '/api/overview'));
+    assert.ok(!page.fetchCalls.some(c => c.path === '/api/files/series'));
     assert.equal(page.fetchCalls.find(c => c.path === '/api/auth/user').headers.authorization.startsWith('Bearer '), true);
     assert.equal(page.eventSources.length, 1);
     assert.equal(page.eventSources[0].url, '/api/events/stream?access_token=stream-token-1', 'a stream token, never the session token, goes in the URL');

@@ -497,6 +497,45 @@
             });
         }
         
+        // Applies saved filter and sort preferences (from the server, or the
+        // copy this device remembered) to the header controls. Returns which
+        // of them changed, so the caller knows whether to reload the list.
+        function applyLibraryQueryPreferences(prefs) {
+            const oldFilterMode = filterMode;
+            const oldSortMode = sortMode;
+            const oldSortDirection = sortDirection;
+
+            if (prefs.filterMode) {
+                filterMode = prefs.filterMode;
+                document.getElementById('headerFilterLabel').textContent = FILTER_LABELS[filterMode] || FILTER_LABELS['all'];
+                document.querySelectorAll('#headerFilterMenu .header-dropdown-item').forEach(item => {
+                    item.classList.toggle('active', item.dataset.filter === filterMode);
+                });
+            }
+
+            if (prefs.sortMode) {
+                sortMode = prefs.sortMode;
+            }
+            if (VALID_SORT_DIRECTIONS.includes(prefs.sortDirection)) {
+                sortDirection = prefs.sortDirection;
+            }
+            if (prefs.sortMode || prefs.sortDirection) {
+                applySortUi();
+            }
+
+            return {
+                filterChanged: filterMode !== oldFilterMode,
+                sortChanged: sortMode !== oldSortMode || sortDirection !== oldSortDirection
+            };
+        }
+
+        // Whether the page the app opens on shows the library (or a series in
+        // it), so the library is needed straight away.
+        function startsOnLibrary() {
+            const { view } = parseHash();
+            return view === 'library' || view === 'series';
+        }
+
         async function setHeaderFilter(mode) {
             filterMode = mode;
             

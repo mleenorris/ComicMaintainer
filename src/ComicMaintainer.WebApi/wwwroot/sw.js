@@ -868,9 +868,31 @@ self.addEventListener('activate', (event) => {
             }
           })
         );
-      }).then(() => self.clients.claim())
+      })
+      .then(() => enableNavigationPreload())
+      .then(() => self.clients.claim())
   );
 });
+
+// With navigation preload the browser starts fetching a page while it is
+// still starting this worker, instead of only once the worker asks for it.
+async function enableNavigationPreload() {
+  try {
+    if (self.registration && self.registration.navigationPreload) {
+      await self.registration.navigationPreload.enable();
+    }
+  } catch (error) {
+    console.log('Service Worker: Navigation preload is unavailable', error);
+  }
+}
+
+// A page from the network: the navigation preload's answer when there is
+// one, otherwise a fetch. Either asks the server again (the pages are served
+// no-cache), so an unchanged page costs a 304 rather than the whole page.
+async function networkDocument(event) {
+  const preloaded = await Promise.resolve(event.preloadResponse).catch(() => undefined);
+  return preloaded || fetch(event.request, { cache: 'no-cache' });
+}
 
 // Fetch event - serve from cache when offline, with network-first strategy for API calls
 self.addEventListener('fetch', (event) => {
@@ -912,7 +934,7 @@ self.addEventListener('fetch', (event) => {
   if (isNavigationRequest || path.endsWith('.html')) {
     const isCacheableDocument = request.method === 'GET' && DOCUMENT_CACHE_PATHS.includes(path);
     event.respondWith(
-      fetch(request, { cache: 'no-store' })
+      networkDocument(event)
         .then((response) => {
           // Keep a copy of the app shell so pages downloaded for offline
           // reading can actually be opened without a network.

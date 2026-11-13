@@ -358,6 +358,8 @@ test('Authelia sessions fetch the stream token with their cookies', async () => 
     assert.equal(call.headers.authorization, undefined);
     assert.equal(page.eventSources[0].url, '/api/events/stream?access_token=stream-token-1');
     assert.ok(consoleLines(page, 'log').includes('SSE: Authentication mode - Authelia'));
+    // The app start has just checked the session; the stream does not ask again.
+    assert.equal(requests(page, 'GET', '/api/auth/status').length, 1);
 });
 
 for (const [description, body] of [['an empty object', {}], ['null', null]]) {

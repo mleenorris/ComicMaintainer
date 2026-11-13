@@ -1,4 +1,5 @@
 using ImageMagick;
+using ImageMagick.Formats;
 
 namespace ComicMaintainer.Core.Utilities;
 
@@ -65,7 +66,7 @@ public static class CoverThumbnailEncoder
                 return null;
             }
 
-            using var image = new MagickImage(source);
+            using var image = new MagickImage(source, ReadSettingsFor(info, maxWidth));
             image.AutoOrient();
             if (image.Width > (uint)maxWidth)
             {
@@ -95,5 +96,22 @@ public static class CoverThumbnailEncoder
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// How to read a page for a thumbnail <paramref name="maxWidth"/> wide. A JPEG (most comic pages) is decoded
+    /// straight at 1/2, 1/4 or 1/8 of its size, the smallest that is still at least <paramref name="maxWidth"/> both
+    /// ways: much faster, and a fraction of the memory, of decoding every pixel only to throw most away. Both sides
+    /// stay at least <paramref name="maxWidth"/>, so an EXIF rotation still leaves the width to scale down from.
+    /// </summary>
+    internal static MagickReadSettings ReadSettingsFor(IMagickImageInfo info, int maxWidth)
+    {
+        var settings = new MagickReadSettings();
+        if (info.Format is MagickFormat.Jpeg or MagickFormat.Jpg)
+        {
+            settings.Defines = new JpegReadDefines { Size = new MagickGeometry((uint)maxWidth, (uint)maxWidth) };
+        }
+
+        return settings;
     }
 }

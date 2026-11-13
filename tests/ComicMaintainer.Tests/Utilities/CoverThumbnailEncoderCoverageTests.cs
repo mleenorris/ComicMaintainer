@@ -136,6 +136,70 @@ public class CoverThumbnailEncoderCoverageTests
         image.Format = MagickFormat.Png;
         return image.ToByteArray();
     }
+
+    [Fact]
+    public void ReadSettingsFor_AJpeg_DecodesItScaledDownToNoLessThanTheThumbnailEitherWay()
+    {
+        var info = new MagickImageInfo(Encode(2000, 3000, MagickFormat.Jpeg));
+
+        var defines = Assert.IsType<ImageMagick.Formats.JpegReadDefines>(CoverThumbnailEncoder.ReadSettingsFor(info, 480).Defines);
+
+        Assert.Equal(480u, defines.Size!.Width);
+        Assert.Equal(480u, defines.Size.Height);
+    }
+
+    [Theory]
+    [InlineData(MagickFormat.Png)]
+    [InlineData(MagickFormat.WebP)]
+    public void ReadSettingsFor_OtherFormats_ReadsThemAsTheyAre(MagickFormat format)
+    {
+        var info = new MagickImageInfo(Encode(200, 300, format));
+
+        Assert.Null(CoverThumbnailEncoder.ReadSettingsFor(info, 100).Defines);
+    }
+
+    [Fact]
+    public void TryCreateThumbnail_ALargeJpeg_IsExactlyTheMaxWidthWithItsAspectRatio()
+    {
+        var thumb = CoverThumbnailEncoder.TryCreateThumbnail(Encode(2000, 3000, MagickFormat.Jpeg), 480, "jpeg", 80);
+
+        using var image = new MagickImage(thumb!.Value.Data);
+        Assert.Equal(480u, image.Width);
+        Assert.Equal(720u, image.Height);
+    }
+
+    // A page stored sideways with an EXIF rotation: the decode hint keeps both sides large enough that, once
+    // turned upright, the width is still scaled down to the thumbnail's, not up.
+    [Fact]
+    public void TryCreateThumbnail_ARotatedJpeg_IsTurnedUprightAtTheMaxWidth()
+    {
+        byte[] sideways;
+        using (var image = new MagickImage(MagickColors.SteelBlue, 3000, 2000))
+        {
+            // The orientation is only written to a JPEG through its EXIF profile, which ImageMagick fills in from
+            // the image's orientation when it writes the file.
+            var exif = new ExifProfile();
+            exif.SetValue(ExifTag.Orientation, (ushort)Orientation.RightTop);
+            image.SetProfile(exif);
+            image.Orientation = Orientation.RightTop;
+            image.Format = MagickFormat.Jpeg;
+            sideways = image.ToByteArray();
+        }
+        Assert.Equal(Orientation.RightTop, new MagickImage(sideways).Orientation);
+
+        var thumb = CoverThumbnailEncoder.TryCreateThumbnail(sideways, 480, "jpeg", 80);
+
+        using var upright = new MagickImage(thumb!.Value.Data);
+        Assert.Equal(480u, upright.Width);
+        Assert.Equal(720u, upright.Height);
+    }
+
+    private static byte[] Encode(uint width, uint height, MagickFormat format)
+    {
+        using var image = new MagickImage(MagickColors.SteelBlue, width, height);
+        image.Format = format;
+        return image.ToByteArray();
+    }
 }
 
 file static class PngFixture

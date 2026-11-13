@@ -552,23 +552,41 @@
             return n;
         }
 
-        // Given the issues array returned by the API, identify integer issue
-        // numbers that are missing between 1 and the highest known integer
-        // issue number. Returns a sorted array of missing integers.
-        function computeMissingIssueNumbers(issues) {
+        // Issue numbers above this are not counted when looking for gaps: they
+        // are dates or typos ("20240115"), not the length of a run. The
+        // Missing Issues Check job (MissingIssuesCheckJobHandler) uses the same
+        // limit.
+        const MAX_MISSING_ISSUE_NUMBER = 100000;
+        // A run of missing issues longer than this is shown as one card for
+        // the whole range instead of a card per issue.
+        const MAX_MISSING_PLACEHOLDERS_PER_RUN = 12;
+
+        // Given the issues array returned by the API, identify the runs of
+        // integer issue numbers missing between 1 and the highest known integer
+        // issue number. Returns sorted [start, end] pairs (inclusive). Works
+        // from the numbers present, so a large highest number costs nothing.
+        function computeMissingIssueRanges(issues) {
             if (!Array.isArray(issues) || !issues.length) return [];
             const present = new Set();
-            let maxIssue = 0;
             for (const issue of issues) {
                 const n = parseIntegerIssueNumber(issue && issue.issue);
-                if (n === null) continue;
+                if (n === null || n < 1 || n > MAX_MISSING_ISSUE_NUMBER) continue;
                 present.add(n);
-                if (n > maxIssue) maxIssue = n;
             }
-            if (maxIssue <= 0) return [];
+            const ranges = [];
+            let next = 1;
+            for (const n of [...present].sort((a, b) => a - b)) {
+                if (n > next) ranges.push([next, n - 1]);
+                next = n + 1;
+            }
+            return ranges;
+        }
+
+        // The missing integer issue numbers, one by one, in order.
+        function computeMissingIssueNumbers(issues) {
             const missing = [];
-            for (let n = 1; n <= maxIssue; n++) {
-                if (!present.has(n)) missing.push(n);
+            for (const [start, end] of computeMissingIssueRanges(issues)) {
+                for (let n = start; n <= end; n++) missing.push(n);
             }
             return missing;
         }
@@ -612,9 +630,14 @@
             // order everything by numeric value so decimals slot between the
             // integers they fall between (e.g. 1.5 sits between #1 and #2).
             const entries = numericIssues.map(ni => ({ value: ni.value, kind: 'issue', issue: ni.issue }));
-            const missing = computeMissingIssueNumbers(issues);
-            for (const n of missing) {
-                entries.push({ value: n, kind: 'missing', number: n });
+            for (const [start, end] of computeMissingIssueRanges(issues)) {
+                if (end - start + 1 > MAX_MISSING_PLACEHOLDERS_PER_RUN) {
+                    entries.push({ value: start, kind: 'missing', number: start, end });
+                    continue;
+                }
+                for (let n = start; n <= end; n++) {
+                    entries.push({ value: n, kind: 'missing', number: n });
+                }
             }
             // Stable sort by value; on ties keep a deterministic order (missing
             // placeholders after real issues, though values never collide today).
@@ -623,7 +646,9 @@
                 .sort((a, b) => (a.entry.value - b.entry.value) || (a.index - b.index))
                 .forEach(({ entry }) => {
                     if (entry.kind === 'missing') {
-                        items.push({ kind: 'missing', number: entry.number });
+                        items.push(entry.end === undefined
+                            ? { kind: 'missing', number: entry.number }
+                            : { kind: 'missing', number: entry.number, end: entry.end });
                     } else {
                         items.push({ kind: 'issue', issue: entry.issue });
                     }
@@ -792,24 +817,11 @@
         // Render a small banner above the issues grid summarizing any missing
         // integer issue numbers between #1 and the highest known issue number.
         function renderMissingIssuesBanner(issues, series) {
-            const missing = computeMissingIssueNumbers(issues);
-            if (!missing.length) return '';
-            // Compress runs of consecutive numbers into ranges (e.g. 2,3,4 -> "2-4").
-            const ranges = [];
-            let start = missing[0];
-            let prev = missing[0];
-            for (let i = 1; i < missing.length; i++) {
-                if (missing[i] === prev + 1) {
-                    prev = missing[i];
-                    continue;
-                }
-                ranges.push(start === prev ? `#${start}` : `#${start}-${prev}`);
-                start = missing[i];
-                prev = missing[i];
-            }
-            ranges.push(start === prev ? `#${start}` : `#${start}-${prev}`);
-            const label = ranges.join(', ');
-            const count = missing.length;
+            const runs = computeMissingIssueRanges(issues);
+            if (!runs.length) return '';
+            // Runs of consecutive numbers are shown as ranges (e.g. 2,3,4 -> "2-4").
+            const label = runs.map(([start, end]) => (start === end ? `#${start}` : `#${start}-${end}`)).join(', ');
+            const count = runs.reduce((total, [start, end]) => total + end - start + 1, 0);
             // The Suwayomi action is only useful when the integration is
             // configured, so it is rendered lazily once the status probe has
             // reported a reachable server (see refreshSuwayomiAvailability).
@@ -835,17 +847,19 @@
         // pages without rebuilding the surrounding panel.
         function renderSeriesIssueGridItemHtml(item) {
             if (item.kind === 'missing') {
+                const isRun = item.end !== undefined;
+                const label = isRun ? `Missing issues #${item.number}-${item.end}` : `Missing issue #${item.number}`;
                 return `
-                                <div class="series-issue-card series-issue-card--missing" aria-label="Missing issue #${item.number}" title="Missing issue #${item.number}">
+                                <div class="series-issue-card series-issue-card--missing" aria-label="${label}" title="${label}">
                                     <div class="series-issue-cover-button series-issue-cover-button--missing">
                                         <div class="series-issue-cover series-issue-cover--missing">
                                             <span class="series-issue-missing-icon">❔</span>
                                         </div>
-                                        <span class="series-issue-badge">#${item.number}</span>
+                                        <span class="series-issue-badge">#${isRun ? `${item.number}-${item.end}` : item.number}</span>
                                     </div>
                                     <div class="series-issue-body">
                                         <h3 class="series-issue-title">Missing</h3>
-                                        <p class="series-issue-subtitle">Issue #${item.number} is not in your collection</p>
+                                        <p class="series-issue-subtitle">${isRun ? `${item.end - item.number + 1} issues, #${item.number} to #${item.end}, are` : `Issue #${item.number} is`} not in your collection</p>
                                     </div>
                                 </div>`;
             }

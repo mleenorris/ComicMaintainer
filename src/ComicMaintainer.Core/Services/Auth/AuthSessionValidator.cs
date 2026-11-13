@@ -41,6 +41,12 @@ public interface IAuthSessionValidator
     /// status change right away. Call it after changing the account.
     /// </summary>
     void Invalidate(string userId);
+
+    /// <summary>
+    /// A number that changes each time <see cref="Invalidate"/> is called for <paramref name="userId"/>, so that a
+    /// cache of something read from the account can tell it is out of date.
+    /// </summary>
+    long GetAccountVersion(string userId);
 }
 
 /// <summary>
@@ -63,6 +69,9 @@ public sealed class AuthSessionValidator : IAuthSessionValidator
     private readonly IMemoryCache _cache;
     private readonly ILogger<AuthSessionValidator> _logger;
     private readonly ConcurrentDictionary<string, DateTime> _usedSingleUseTokens = new(StringComparer.Ordinal);
+
+    // Bumped by Invalidate. One entry per account changed since startup, so it stays as small as the user list.
+    private readonly ConcurrentDictionary<string, long> _accountVersions = new(StringComparer.Ordinal);
 
     public AuthSessionValidator(
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
@@ -153,7 +162,14 @@ public sealed class AuthSessionValidator : IAuthSessionValidator
     }
 
     /// <inheritdoc />
-    public void Invalidate(string userId) => _cache.Remove(AccountKeyPrefix + userId);
+    public void Invalidate(string userId)
+    {
+        _accountVersions.AddOrUpdate(userId, 1, (_, version) => version + 1);
+        _cache.Remove(AccountKeyPrefix + userId);
+    }
+
+    /// <inheritdoc />
+    public long GetAccountVersion(string userId) => _accountVersions.TryGetValue(userId, out var version) ? version : 0;
 
     private async Task<AccountSnapshot?> GetAccountAsync(string userId, CancellationToken cancellationToken)
     {

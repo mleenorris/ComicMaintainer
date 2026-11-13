@@ -170,6 +170,9 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.UserId).IsRequired().HasMaxLength(450);
             entity.Property(e => e.ContentId).IsRequired().HasMaxLength(2048);
             entity.HasIndex(e => new { e.UserId, e.ContentId }).IsUnique();
+            // Renaming or moving a file finds every user's progress by its path alone, which the unique index above
+            // (UserId first) cannot answer without reading the whole table.
+            entity.HasIndex(e => e.ContentId);
         });
 
         // Configure ReaderPreferencesEntity

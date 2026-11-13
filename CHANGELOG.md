@@ -17,6 +17,25 @@ for it.
 - The server and the Android app now run on .NET 11. Building from source needs the .NET 11 SDK.
 - The Android app now needs Android 7.0 (API 24) or later, the oldest version .NET 11 supports. A phone
   on Android 6.0 can keep using the 3.0.0 app.
+- With Authelia, each request no longer looks up the account in the database. The account is remembered for
+  30 seconds, as signed-in sessions are, and a change made on the Users page applies at once. The per-request
+  "Authenticating user via Authelia" lines in `auth.log` are now written to `debug.log` only.
+- Log files are written in the background, at most a second after each line, instead of on every line.
+  EF Core's debug messages, one for each database connection and transaction, are no longer written to
+  `debug.log`.
+- Library covers that are not cached yet are generated at most one per processor core at a time. JPEG pages
+  are decoded at a reduced size for the thumbnail, which takes a fraction of the time and memory.
+- In a series, a run of more than 12 missing issues is shown as one card for the whole range.
+
+### Fixed
+
+- On a phone, the library loaded every series one page after another as soon as it opened, instead of
+  as you scrolled.
+- A series with an issue numbered like a year or a date, such as #2024, no longer creates thousands of
+  missing-issue cards. Numbers above 100,000 are not counted when looking for missing issues, the same
+  limit the Missing Issues Check job uses.
+- Renaming or moving a file no longer reads every user's whole reading progress table to move the
+  progress with it.
 
 ## [3.0.0] - 2026-11-09
 

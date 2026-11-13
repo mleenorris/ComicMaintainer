@@ -122,3 +122,42 @@ test('an issue number too large to represent is listed with the non-numeric issu
     assert.deepEqual(layout(page), ['/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz', '/comics/Saga/Saga Huge.cbz']);
     assert.equal(banner(page), null, 'it does not count as the highest issue');
 });
+
+test('a run of up to 12 missing issues gets a card per issue', async () => {
+    const page = await bootSeries({ issues: [issue(1), issue(14)] });
+
+    assert.equal(bannerText(page), 'Missing 12 issues: #2-13');
+    assert.equal(page.$$('#seriesDetailPanel .series-issue-card--missing').length, 12);
+});
+
+test('a longer run of missing issues is one card for the whole range', async () => {
+    const page = await bootSeries({ issues: [issue(1), issue('1.5'), issue(3), issue(40)] });
+
+    assert.deepEqual(layout(page), [
+        '/comics/Saga/Saga 001.cbz',
+        '/comics/Saga/Saga 1.5.cbz',
+        '#2 missing',
+        '/comics/Saga/Saga 003.cbz',
+        '#4-39 missing',
+        '/comics/Saga/Saga 040.cbz'
+    ]);
+    const run = page.$$('#seriesDetailPanel .series-issue-card--missing')[1];
+    assert.equal(run.getAttribute('aria-label'), 'Missing issues #4-39');
+    assert.equal(run.getAttribute('title'), 'Missing issues #4-39');
+    assert.equal(text(run.querySelector('.series-issue-subtitle')), '36 issues, #4 to #39, are not in your collection');
+    assert.equal(bannerText(page), 'Missing 37 issues: #2, #4-39');
+});
+
+test('an issue numbered like a year is one card however far it is from the rest', async () => {
+    const page = await bootSeries({ issues: [issue(1), issue(2), issue(2024)] });
+
+    assert.deepEqual(layout(page), ['/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz', '#3-2023 missing', '/comics/Saga/Saga 2024.cbz']);
+    assert.equal(bannerText(page), 'Missing 2021 issues: #3-2023');
+});
+
+test('issue numbers above 100000, such as dates, leave no gap before them', async () => {
+    const page = await bootSeries({ issues: [issue(20240115), issue(2), issue(1)] });
+
+    assert.deepEqual(layout(page), ['/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz', '/comics/Saga/Saga 20240115.cbz']);
+    assert.equal(banner(page), null);
+});

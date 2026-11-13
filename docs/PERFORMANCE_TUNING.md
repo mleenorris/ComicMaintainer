@@ -117,6 +117,8 @@ Library covers (`/api/comicreader/cover`) are served from an on-disk cache of do
 | `FileCoverCacheEnabled` | `true` | Keep thumbnails on disk under `FileCoverCacheDirectory` (default `{ConfigDirectory}/file-covers`). |
 | `FileCoverCacheMaxMegabytes` | `512` | Soft cap. The least recently used entries are removed; a thumbnail's last-used time is refreshed at most once a day. |
 
+Covers that are not cached yet are generated at most one per processor core at a time, so opening a library page of uncached covers does not decode dozens of full-size pages at once. A JPEG page is decoded at 1/2, 1/4 or 1/8 of its size, the smallest that is still at least the thumbnail width.
+
 Covers are sent with `Cache-Control: private, max-age=3600` and a strong `ETag` that includes the source file's size and modification time and the thumbnail variant, so changing any of these settings regenerates entries on the next request. A revalidation answers 304 without reading the thumbnail or the archive. If a page cannot be decoded, the original image is served.
 
 ## Archive Limits
@@ -182,7 +184,7 @@ docker logs --tail 100 comicmaintainer
 docker logs -f comicmaintainer
 ```
 
-Log files are in the config folder: `app.log`, `debug.log`, `watcher.log`, `metadata.log` and `auth.log`. Set the size at which they rotate under **Settings > Log Rotation**. The change applies when the app restarts. The default is 10 MB.
+Log files are in the config folder: `app.log`, `debug.log`, `watcher.log`, `metadata.log` and `auth.log`. Set the size at which they rotate under **Settings > Log Rotation**. The change applies when the app restarts. The default is 10 MB. Lines reach the files within a second, and all of them are written when the app stops.
 
 ### Health
 

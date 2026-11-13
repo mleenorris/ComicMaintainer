@@ -48,7 +48,15 @@ public class FileCoverCacheService : IFileCoverCacheService
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<FileCoverCacheService> _logger;
 
+    /// <summary>
+    /// How many covers are generated at once, across all files. A library page asks for dozens of covers together;
+    /// with none of them cached, each would otherwise read an archive and decode a full-size page at the same time,
+    /// competing for the CPU and memory the covers already generated need to be served.
+    /// </summary>
+    internal static int MaxConcurrentGenerations { get; } = Math.Max(2, Environment.ProcessorCount);
+
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _keyLocks = new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim _generationSlots = new(MaxConcurrentGenerations, MaxConcurrentGenerations);
     private long _writesSinceLastPrune;
 
     public FileCoverCacheService(
@@ -229,6 +237,25 @@ public class FileCoverCacheService : IFileCoverCacheService
             : thumbnailVariant + "-l" + pageListVersion.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private async Task<FileCoverCacheEntry?> ExtractAsync(
+        string filePath,
+        DateTimeOffset sourceMtime,
+        long sourceLength,
+        AppSettings settings,
+        string variant,
+        CancellationToken cancellationToken)
+    {
+        await _generationSlots.WaitAsync(cancellationToken);
+        try
+        {
+            return await GenerateAsync(filePath, sourceMtime, sourceLength, settings, variant, cancellationToken);
+        }
+        finally
+        {
+            _generationSlots.Release();
+        }
+    }
+
+    private async Task<FileCoverCacheEntry?> GenerateAsync(
         string filePath,
         DateTimeOffset sourceMtime,
         long sourceLength,

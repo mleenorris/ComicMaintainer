@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -35,8 +36,17 @@ public class AutheliaAuthenticationHandlerTests
     private readonly Dictionary<string, List<string>> _rolesByUserName = new(StringComparer.Ordinal);
     private readonly HashSet<string> _existingRoles = new(StringComparer.Ordinal) { "Admin", "User", "ReadOnly" };
 
+    // Shared by every request of a test, as the app's cache and session validator are.
+    private readonly MemoryCache _cache = new(new MemoryCacheOptions());
+    private readonly Mock<ComicMaintainer.Core.Services.Auth.IAuthSessionValidator> _sessions = new();
+    private readonly Dictionary<string, long> _accountVersions = new(StringComparer.Ordinal);
+
     public AutheliaAuthenticationHandlerTests()
     {
+        _sessions
+            .Setup(s => s.GetAccountVersion(It.IsAny<string>()))
+            .Returns((string userId) => _accountVersions.GetValueOrDefault(userId));
+
         _userManager = new Mock<UserManager<ApplicationUser>>(
             Mock.Of<IUserStore<ApplicationUser>>(), null!, null!, null!, null!, null!, null!, null!, null!);
         _roleManager = new Mock<RoleManager<ApplicationRole>>(
@@ -168,6 +178,80 @@ public class AutheliaAuthenticationHandlerTests
 
         Assert.False(result.Succeeded);
         Assert.Equal("The account is disabled", result.Failure?.Message);
+    }
+
+    // Every request carries the Authelia headers (each cover of a library page among them), so the account is not
+    // looked up again for each one.
+    [Fact]
+    public async Task Authenticate_TheSameHeadersAgain_ReuseTheAccountWithoutLookingItUp()
+    {
+        var existing = ExistingUser("alice", email: "alice@example.com", fullName: "Alice A", "User");
+        (string, string)[] headers = [("Remote-User", "alice"), ("Remote-Email", "alice@example.com"), ("Remote-Groups", "readers")];
+
+        var first = await AuthenticateAsync(Enabled(), CreateContext(headers));
+        var second = await AuthenticateAsync(Enabled(), CreateContext(headers));
+
+        Assert.True(second.Succeeded);
+        var principal = second.Principal!;
+        Assert.Equal(existing.Id, principal.FindFirstValue(ClaimTypes.NameIdentifier));
+        Assert.Equal("alice", principal.FindFirstValue(ClaimTypes.Name));
+        Assert.Equal("alice@example.com", principal.FindFirstValue(ClaimTypes.Email));
+        Assert.Equal("authelia", principal.FindFirstValue("auth_method"));
+        Assert.Equal(new[] { "User" }, principal.FindAll(ClaimTypes.Role).Select(c => c.Value));
+        Assert.Equal(new[] { "readers" }, principal.FindAll("authelia_group").Select(c => c.Value));
+        Assert.Equal(
+            first.Principal!.Claims.Select(c => (c.Type, c.Value)),
+            principal.Claims.Select(c => (c.Type, c.Value)));
+
+        _userManager.Verify(u => u.FindByNameAsync("alice"), Times.Once);
+        _userManager.Verify(u => u.GetRolesAsync(It.IsAny<ApplicationUser>()), Times.Once);
+        _roleManager.Verify(r => r.RoleExistsAsync(It.IsAny<string>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Authenticate_AfterTheAccountChangesInTheApp_LooksItUpAgain()
+    {
+        var existing = ExistingUser("alice", email: "alice@example.com", fullName: "Alice A", "User");
+        Assert.True((await AuthenticateAsync(Enabled(), CreateContext(("Remote-User", "alice")))).Succeeded);
+
+        // An administrator disables the account on the Users page, which invalidates it.
+        existing.IsActive = false;
+        _accountVersions[existing.Id] = 1;
+        var result = await AuthenticateAsync(Enabled(), CreateContext(("Remote-User", "alice")));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("The account is disabled", result.Failure?.Message);
+        _userManager.Verify(u => u.FindByNameAsync("alice"), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task Authenticate_WithDifferentHeaders_LooksTheAccountUpAgain()
+    {
+        var existing = ExistingUser("alice", email: "alice@example.com", fullName: "Alice A", "User");
+        var settings = Enabled();
+        settings.AdminGroups = "admins";
+
+        await AuthenticateAsync(settings, CreateContext(("Remote-User", "alice"), ("Remote-Groups", "readers")));
+        var promoted = await AuthenticateAsync(settings, CreateContext(("Remote-User", "alice"), ("Remote-Groups", "admins")));
+
+        Assert.Equal(new[] { "Admin" }, promoted.Principal!.FindAll(ClaimTypes.Role).Select(c => c.Value));
+        _userManager.Verify(u => u.FindByNameAsync("alice"), Times.Exactly(2));
+        _userManager.Verify(u => u.AddToRoleAsync(existing, "Admin"), Times.Once);
+    }
+
+    [Fact]
+    public async Task Authenticate_ADisabledAccount_IsNotRemembered()
+    {
+        var existing = ExistingUser("alice", email: "alice@example.com", fullName: "Alice A", "User");
+        existing.IsActive = false;
+        Assert.False((await AuthenticateAsync(Enabled(), CreateContext(("Remote-User", "alice")))).Succeeded);
+
+        // Enabled again (re-enabling invalidates too, but the refusal was never remembered in the first place).
+        existing.IsActive = true;
+        var result = await AuthenticateAsync(Enabled(), CreateContext(("Remote-User", "alice")));
+
+        Assert.True(result.Succeeded);
+        _userManager.Verify(u => u.FindByNameAsync("alice"), Times.Exactly(2));
     }
 
     [Fact]
@@ -633,7 +717,8 @@ public class AutheliaAuthenticationHandlerTests
             _userManager.Object,
             _roleManager.Object,
             Mock.Of<IDbContextFactory<ComicMaintainerDbContext>>(),
-            Mock.Of<ComicMaintainer.Core.Services.Auth.IAuthSessionValidator>());
+            _sessions.Object,
+            _cache);
 
         await handler.InitializeAsync(
             new AuthenticationScheme(SchemeName, displayName: null, typeof(AutheliaAuthenticationHandler)),

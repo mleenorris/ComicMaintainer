@@ -8,15 +8,33 @@ namespace ComicMaintainer.WebApi.Startup;
 /// </summary>
 internal static class LoggingExtensions
 {
+    /// <summary>
+    /// How often buffered log files are written to disk. Log calls on the request path then only append to a buffer
+    /// instead of each writing and flushing the file; the buffers are also flushed when the app stops.
+    /// </summary>
+    internal static readonly TimeSpan FlushToDiskInterval = TimeSpan.FromSeconds(1);
+
     public static WebApplicationBuilder AddComicMaintainerLogging(this WebApplicationBuilder builder, string configDir, long logMaxBytes)
     {
         // Use Serilog for logging - configure with the builder context to ensure proper integration
-        //
+        builder.Host.UseSerilog((context, services, configuration) => ConfigureSinks(
+            configuration
+                .ReadFrom.Configuration(context.Configuration)
+                .ReadFrom.Services(services),
+            configDir,
+            logMaxBytes));
+
+        return builder;
+    }
+
+    /// <summary>Adds the console and log file sinks, and the levels the app logs at, to <paramref name="configuration"/>.</summary>
+    internal static LoggerConfiguration ConfigureSinks(LoggerConfiguration configuration, string configDir, long logMaxBytes)
+    {
         // Source-context predicates for routing logs to dedicated files. Anything
         // produced by these classes is routed to the matching log file AND excluded
         // from app.log so the general application log stays focused on high-signal
         // events. They still go to debug.log (which is the catch-all).
-        Func<Serilog.Events.LogEvent, bool> isWatcherSource = e =>
+        Func<LogEvent, bool> isWatcherSource = e =>
             e.Properties.TryGetValue("SourceContext", out var ctx)
             && (ctx.ToString().Contains("FileWatcherService")
                 || ctx.ToString().Contains("FileWatcherHostedService"));
@@ -25,7 +43,7 @@ internal static class LoggingExtensions
         // service, the cache, the refresh job, the provider health tracker, the
         // per-series image store, the MetadataController API surface, and (looser)
         // any other type whose SourceContext contains "Metadata".
-        Func<Serilog.Events.LogEvent, bool> isMetadataSource = e =>
+        Func<LogEvent, bool> isMetadataSource = e =>
         {
             if (!e.Properties.TryGetValue("SourceContext", out var ctx)) return false;
             var s = ctx.ToString();
@@ -46,7 +64,7 @@ internal static class LoggingExtensions
         // authentication handlers (WebApi.Authentication: Authelia, API keys). Routes all of these to a
         // dedicated auth.log so authentication activity can be audited without
         // sifting through the general application log.
-        Func<Serilog.Events.LogEvent, bool> isAuthSource = e =>
+        Func<LogEvent, bool> isAuthSource = e =>
         {
             if (!e.Properties.TryGetValue("SourceContext", out var ctx)) return false;
             var s = ctx.ToString();
@@ -56,9 +74,7 @@ internal static class LoggingExtensions
                 || s.Contains("ComicMaintainer.WebApi.Authentication.");
         };
 
-        builder.Host.UseSerilog((context, services, configuration) => configuration
-            .ReadFrom.Configuration(context.Configuration)
-            .ReadFrom.Services(services)
+        return configuration
             .Enrich.FromLogContext()
             // Every debug.log line carries the correlation id of the request that
             // produced it (pushed by RequestCorrelationMiddleware). Work that is not
@@ -80,6 +96,8 @@ internal static class LoggingExtensions
                     rollingInterval: RollingInterval.Day,
                     retainedFileCountLimit: 7,
                     fileSizeLimitBytes: logMaxBytes,
+                    buffered: true,
+                    flushToDiskInterval: FlushToDiskInterval,
                     outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] {Message:lj}{NewLine}{Exception}"))
             // Debug log file - capture everything at Debug level and above (including watcher and metadata)
             .WriteTo.File(
@@ -88,6 +106,8 @@ internal static class LoggingExtensions
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 3,
                 fileSizeLimitBytes: logMaxBytes,
+                buffered: true,
+                flushToDiskInterval: FlushToDiskInterval,
                 outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] [{SourceContext}] [{CorrelationId}] {Message:lj}{NewLine}{Exception}")
             // Watcher-specific log file - capture all watcher-related logs
             .WriteTo.Logger(lc => lc
@@ -98,6 +118,8 @@ internal static class LoggingExtensions
                     rollingInterval: RollingInterval.Day,
                     retainedFileCountLimit: 7,
                     fileSizeLimitBytes: logMaxBytes,
+                    buffered: true,
+                    flushToDiskInterval: FlushToDiskInterval,
                     outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] {Message:lj}{NewLine}{Exception}"))
             // Metadata-specific log file - capture external provider lookups, cache
             // updates, refresh jobs and image fetches. Makes debugging metadata
@@ -110,6 +132,8 @@ internal static class LoggingExtensions
                     rollingInterval: RollingInterval.Day,
                     retainedFileCountLimit: 7,
                     fileSizeLimitBytes: logMaxBytes,
+                    buffered: true,
+                    flushToDiskInterval: FlushToDiskInterval,
                     outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}"))
             // Auth-specific log file - capture login attempts, token issuance,
             // user CRUD, and Authelia reverse-proxy authentication. Kept separate
@@ -122,13 +146,14 @@ internal static class LoggingExtensions
                     rollingInterval: RollingInterval.Day,
                     retainedFileCountLimit: 7,
                     fileSizeLimitBytes: logMaxBytes,
+                    buffered: true,
+                    flushToDiskInterval: FlushToDiskInterval,
                     outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}"))
             // Override specific namespaces to reduce console noise
             .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
-            .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)
-            .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Migrations", LogEventLevel.Warning)
-            .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Model.Validation", LogEventLevel.Error));
-
-        return builder;
+            // EF Core logs every connection, transaction and tracked entity at Debug: on every query, signing in
+            // included. Its warnings (and errors) still come through.
+            .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
+            .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Model.Validation", LogEventLevel.Error);
     }
 }

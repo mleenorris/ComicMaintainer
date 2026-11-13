@@ -232,6 +232,34 @@ test('while the stream is down the active job is polled, until the stream is bac
     assert.equal(polls(), afterReconnect);
 });
 
+// Every file's result is one entry per file of the job, megabytes for a whole library: the
+// polls while the stream is down need only the counts, and the files are fetched again once
+// the stream is back, for the rows it did not deliver.
+test('polls while the stream is down leave out the per-file results, the catch-up on reconnecting asks for them', async t => {
+    useMockTimers(t);
+    const { job, routes } = activeJobRoutes(1);
+    const page = await boot({ routes });
+    page.eventSources[0].emit('open');
+    await page.settle(3);
+    const jobCalls = () => requests(page, 'GET', `/api/jobs/${JOB_ID}`);
+    const before = jobCalls().length;
+
+    page.route(STREAM_TOKEN, 503);
+    page.route(`GET /api/jobs/${JOB_ID}`, { ...job, processed_items: 3, current_file: 'Saga/Saga 003.cbz' });
+    await dropStream(page);
+    await advance(t, page, 15000);
+    const whileDown = jobCalls().slice(before);
+    assert.ok(whileDown.length >= 3);
+    assert.ok(whileDown.every(call => call.query.include === undefined), 'polls ask for the counts only');
+
+    page.route(STREAM_TOKEN, { token: 'back', expiresIn: 60 });
+    await advance(t, page, 60000);
+    page.eventSources.at(-1).emit('open');
+    await page.settle(3);
+
+    assert.equal(jobCalls().at(-1).query.include, 'results');
+});
+
 test('reconnecting catches up on the job, the watcher status and the library missed while disconnected', async t => {
     useMockTimers(t);
     const { job, routes } = activeJobRoutes(1);

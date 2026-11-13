@@ -51,7 +51,9 @@ public partial class FileStoreService
     {
         if (string.IsNullOrEmpty(search)) return q;
         var pattern = $"%{search}%";
-        return q.Where(f => EF.Functions.Like(f.FileName, pattern) || EF.Functions.Like(f.FilePath, pattern));
+        // The path ends with the file name, so matching the path alone finds every file a match on the
+        // name would, with one LIKE per row instead of two.
+        return q.Where(f => EF.Functions.Like(f.FilePath, pattern));
     }
 
     private static IOrderedQueryable<ComicFileEntity> ApplyEntityOrder(IQueryable<ComicFileEntity> q, string? sort, string? direction)
@@ -119,7 +121,8 @@ public partial class FileStoreService
         // against the store's change version and, because the read/unread filters depend on
         // it, the caller's own read-state version (which ChangeVersion does not track).
         var countCacheKey = $"FileStore.PageCount|{ChangeVersion}|{readUserId}|{GetReadStateVersion(readUserId)}|{filter}|{search}";
-        if (!_memoryCache.TryGetValue(countCacheKey, out int totalFiles))
+        if (!TryCountFromStatusCounts(filter, search, out var totalFiles)
+            && !_memoryCache.TryGetValue(countCacheKey, out totalFiles))
         {
             totalFiles = await query.CountAsync(cancellationToken);
             _memoryCache.Set(countCacheKey, totalFiles, DerivedCacheTtl);
@@ -181,6 +184,33 @@ public partial class FileStoreService
         };
     }
 
+    /// <summary>
+    /// The number of files a page query selects, from the counts kept with the in-memory copy, when
+    /// they can answer it: no search, and a status filter (or none) as <see cref="ApplyEntityFilter"/>
+    /// reads it. The read/unread filters and searches are counted in SQL.
+    /// </summary>
+    private bool TryCountFromStatusCounts(string? filter, string? search, out int count)
+    {
+        count = 0;
+        if (!string.IsNullOrEmpty(search) || !TryGetStatusCounts(out var kept))
+        {
+            return false;
+        }
+
+        int? selected = string.IsNullOrEmpty(filter) ? kept.Total : filter.ToLowerInvariant() switch
+        {
+            "processed" => kept.Processed,
+            "unprocessed" => kept.Unprocessed,
+            "duplicates" => kept.Duplicates,
+            "renamed" => kept.Renamed,
+            "normalized" => kept.Normalized,
+            "read" or "unread" => null,
+            _ => kept.Total,
+        };
+        count = selected ?? 0;
+        return selected.HasValue;
+    }
+
     public async Task<IReadOnlyList<FileDto>> GetFolderFilesAsync(
         string folderKey,
         string? filter = null,
@@ -190,20 +220,12 @@ public partial class FileStoreService
         CancellationToken cancellationToken = default)
     {
         var key = folderKey ?? string.Empty;
-        var watchedDir = _settings.CurrentValue?.WatchedDirectory;
 
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        // Resolve raw Directory values that map to the requested folder key.
-        // The set of distinct directories is typically small (one per folder)
-        // so loading and mapping in memory is cheap, and lets us do the
-        // file-level filter as `WHERE Directory IN (...)` which uses the
-        // Directory index.
-        var distinctDirs = await GetDistinctDirectoriesAsync(dbContext, cancellationToken);
-
-        var matchedDirs = distinctDirs
-            .Where(d => string.Equals(ComputeFolderKeyFromDirectory(d, watchedDir), key, StringComparison.Ordinal))
-            .ToList();
+        // The raw Directory values that map to the requested folder key, so the file-level
+        // filter is a `WHERE Directory IN (...)` that uses the Directory index.
+        var matchedDirs = await GetDirectoriesOfFolderAsync(dbContext, key, cancellationToken);
 
         if (matchedDirs.Count == 0)
         {
@@ -236,16 +258,30 @@ public partial class FileStoreService
     }
 
     /// <summary>
-    /// Distinct raw <c>Directory</c> values, cached until the file store
-    /// changes so opening folders in a large library doesn't re-run a
-    /// DISTINCT over every row each time.
+    /// The raw <c>Directory</c> values whose folder key (<see cref="ComputeFolderKeyFromDirectory"/>) is
+    /// <paramref name="folderKey"/>.
     /// </summary>
-    private async Task<List<string>> GetDistinctDirectoriesAsync(
+    private async Task<IReadOnlyList<string>> GetDirectoriesOfFolderAsync(
+        ComicMaintainerDbContext dbContext,
+        string folderKey,
+        CancellationToken cancellationToken)
+    {
+        var folders = await GetDirectoriesByFolderAsync(dbContext, cancellationToken);
+        return folders.TryGetValue(folderKey, out var directories) ? directories : Array.Empty<string>();
+    }
+
+    /// <summary>
+    /// Every distinct raw <c>Directory</c> value, grouped by its folder key, cached until the file
+    /// store changes (or the watched directory does), so opening a folder in a large library
+    /// neither re-runs a DISTINCT over every row nor resolves the full path of every directory.
+    /// </summary>
+    private async Task<Dictionary<string, List<string>>> GetDirectoriesByFolderAsync(
         ComicMaintainerDbContext dbContext,
         CancellationToken cancellationToken)
     {
-        var cacheKey = $"FileStore.DistinctDirectories|{ChangeVersion}";
-        if (_memoryCache.TryGetValue(cacheKey, out List<string>? cached) && cached != null)
+        var watchedDir = _settings.CurrentValue?.WatchedDirectory;
+        var cacheKey = $"FileStore.DirectoriesByFolder|{ChangeVersion}|{watchedDir}";
+        if (_memoryCache.TryGetValue(cacheKey, out Dictionary<string, List<string>>? cached) && cached != null)
         {
             return cached;
         }
@@ -256,12 +292,23 @@ public partial class FileStoreService
             .Distinct()
             .ToListAsync(cancellationToken);
 
-        _memoryCache.Set(cacheKey, directories, DerivedCacheTtl);
-        return directories;
+        var byFolder = directories
+            .GroupBy(d => ComputeFolderKeyFromDirectory(d, watchedDir), StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+
+        _memoryCache.Set(cacheKey, byFolder, DerivedCacheTtl);
+        return byFolder;
     }
 
     public async Task<int> GetUnmarkedCountAsync(CancellationToken cancellationToken = default)
     {
+        // Every status write moves ChangeVersion on, so during processing a cached count rarely
+        // survives; the counts kept with the in-memory copy need no query at all.
+        if (TryGetStatusCounts(out var kept))
+        {
+            return kept.Unprocessed;
+        }
+
         var changeVersion = ChangeVersion;
         var cacheKey = $"{UnmarkedCountCacheKeyPrefix}.{changeVersion}";
         if (_memoryCache.TryGetValue(cacheKey, out int cached))
@@ -287,7 +334,51 @@ public partial class FileStoreService
         int limit = 100,
         CancellationToken cancellationToken = default)
     {
+        var sorted = await GetSortedFolderSummariesAsync(filter, search, sort, direction, cancellationToken);
+
+        var total = sorted.Count;
+        var safeOffset = Math.Max(0, offset);
+        var safeLimit = Math.Max(0, limit);
+
+        var page = safeLimit <= 0
+            ? new List<FolderSummaryDto>()
+            : sorted.Skip(safeOffset).Take(safeLimit).ToList();
+
+        return new FolderSummariesResult
+        {
+            Folders = page,
+            Offset = safeOffset,
+            Limit = safeLimit,
+            TotalFolders = total
+        };
+    }
+
+    /// <summary>
+    /// Every folder the query selects, summarized and sorted. Paging through the folder list asks for
+    /// the same list once per page, and grouping it means reading every matching row, so it is cached
+    /// against the store's change version and, for the read/unread filters, the caller's read-state
+    /// version (which <see cref="ChangeVersion"/> does not track).
+    /// </summary>
+    private async Task<IReadOnlyList<FolderSummaryDto>> GetSortedFolderSummariesAsync(
+        string? filter,
+        string? search,
+        string? sort,
+        string? direction,
+        CancellationToken cancellationToken)
+    {
         var watchedDir = _settings.CurrentValue?.WatchedDirectory;
+        var filterKey = filter?.ToLowerInvariant();
+        var dir = (direction ?? "asc").ToLowerInvariant();
+        var sortKey = (sort ?? "name").ToLowerInvariant();
+        var readUserId = ReadScopeUserId;
+        var readState = filterKey is "read" or "unread"
+            ? $"{readUserId}|{GetReadStateVersion(readUserId)}"
+            : string.Empty;
+        var cacheKey = $"FileStore.FolderSummaries|{ChangeVersion}|{watchedDir}|{readState}|{filterKey}|{sortKey}|{dir}|{search}";
+        if (_memoryCache.TryGetValue(cacheKey, out IReadOnlyList<FolderSummaryDto>? cached) && cached != null)
+        {
+            return cached;
+        }
 
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -297,7 +388,7 @@ public partial class FileStoreService
 
         // Aggregate per raw Directory in the database. The number of distinct
         // directories is typically small relative to the file count, so the
-        // post-processing (map Directory -> folder key, then sort/page) runs
+        // post-processing (map Directory -> folder key, then sort) runs
         // on a tiny in-memory set.
         var rawGroups = await query
             .GroupBy(f => f.Directory)
@@ -327,9 +418,7 @@ public partial class FileStoreService
             })
             .ToList();
 
-        var dir = (direction ?? "asc").ToLowerInvariant();
-        var sortKey = (sort ?? "name").ToLowerInvariant();
-        grouped = sortKey switch
+        IReadOnlyList<FolderSummaryDto> sorted = sortKey switch
         {
             "date" => (dir == "desc"
                 ? grouped.OrderByDescending(g => g.LastModified)
@@ -342,20 +431,7 @@ public partial class FileStoreService
                 : grouped.OrderBy(g => g.Path, StringComparer.OrdinalIgnoreCase)).ToList(),
         };
 
-        var total = grouped.Count;
-        var safeOffset = Math.Max(0, offset);
-        var safeLimit = Math.Max(0, limit);
-
-        var page = safeLimit <= 0
-            ? new List<FolderSummaryDto>()
-            : grouped.Skip(safeOffset).Take(safeLimit).ToList();
-
-        return new FolderSummariesResult
-        {
-            Folders = page,
-            Offset = safeOffset,
-            Limit = safeLimit,
-            TotalFolders = total
-        };
+        _memoryCache.Set(cacheKey, sorted, DerivedCacheTtl);
+        return sorted;
     }
 }

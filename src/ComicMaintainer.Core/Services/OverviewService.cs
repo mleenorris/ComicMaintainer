@@ -60,10 +60,12 @@ public class OverviewService : IOverviewService
         // either an in-progress issue (some progress, not completed) or a
         // completed issue. Completed records are needed so a series stays in
         // Continue Reading after an issue is finished but more issues remain.
+        // Only the columns the row is built from: a user who has read a lot has many records.
         var activity = await db.ReadingProgresses
             .AsNoTracking()
             .Where(p => p.UserId == userId
                 && (p.CompletedAt != null || p.PercentComplete > 0))
+            .Select(p => new Progress(p.ContentId, p.CurrentPage, p.PercentComplete, p.LastReadAt, p.CompletedAt))
             .ToListAsync(cancellationToken);
 
         if (activity.Count == 0)
@@ -80,21 +82,27 @@ public class OverviewService : IOverviewService
         var cards = new List<(OverviewSeriesCard Card, DateTime LastReadAt)>();
         foreach (var entry in entries)
         {
-            // Issues marked read via the file read flag (outside the reader) count
-            // as read even though they have no reading-progress record.
-            var readFilePaths = new HashSet<string>(entry.ReadFilePaths, StringComparer.OrdinalIgnoreCase);
-
             // The most recently read issue (in-progress or completed) anchors the
             // user's place in the series.
-            var anchor = entry.FilePaths
-                .Select(path => progressByPath.GetValueOrDefault(path))
-                .OfType<ReadingProgressEntity>()
-                .MaxBy(p => p.LastReadAt);
+            Progress? anchor = null;
+            foreach (var path in entry.FilePaths)
+            {
+                if (progressByPath.TryGetValue(path, out var progress)
+                    && (anchor is null || progress.LastReadAt > anchor.LastReadAt))
+                {
+                    anchor = progress;
+                }
+            }
 
             if (anchor is null)
             {
                 continue;
             }
+
+            // Issues marked read via the file read flag (outside the reader) count
+            // as read even though they have no reading-progress record. Only needed,
+            // and so only worked out, for a series the user has progress in.
+            var readFilePaths = new HashSet<string>(entry.ReadFilePaths, StringComparer.OrdinalIgnoreCase);
 
             string resumePath;
             int resumePage;
@@ -147,7 +155,7 @@ public class OverviewService : IOverviewService
     private static string? FindNextUnreadIssue(
         IReadOnlyList<string> orderedPaths,
         string completedPath,
-        IReadOnlyDictionary<string, ReadingProgressEntity> progressByPath,
+        IReadOnlyDictionary<string, Progress> progressByPath,
         IReadOnlySet<string> readFilePaths)
     {
         var startIndex = -1;
@@ -193,7 +201,7 @@ public class OverviewService : IOverviewService
     /// </summary>
     private static bool IsPathRead(
         string path,
-        IReadOnlyDictionary<string, ReadingProgressEntity> progressByPath,
+        IReadOnlyDictionary<string, Progress> progressByPath,
         IReadOnlySet<string> readFilePaths)
     {
         if (readFilePaths.Contains(path))
@@ -213,8 +221,11 @@ public class OverviewService : IOverviewService
     /// issue of a series read in webcomic mode), so a fully-read series is not
     /// kept on Continue Reading.
     /// </summary>
-    private static bool IsIssueRead(ReadingProgressEntity progress)
+    private static bool IsIssueRead(Progress progress)
         => progress.CompletedAt is not null || progress.PercentComplete >= 100.0;
+
+    /// <summary>The columns of a <see cref="ReadingProgressEntity"/> the Continue Reading row uses.</summary>
+    private sealed record Progress(string ContentId, int CurrentPage, double PercentComplete, DateTime LastReadAt, DateTime? CompletedAt);
 
     private static List<OverviewSeriesCard> BuildSeriesUpdates(
         IReadOnlyList<SeriesOverviewEntry> entries,

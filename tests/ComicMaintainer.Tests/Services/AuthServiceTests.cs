@@ -3,6 +3,7 @@ using System.Security.Claims;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Tests.Helpers;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -283,22 +284,21 @@ public class AuthServiceTests
         var user = new ApplicationUser { Id = "test-user-id", IsActive = true };
         _mockUserManager.Setup(x => x.FindByIdAsync("test-user-id")).ReturnsAsync(user);
         _mockUserManager.Setup(x => x.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
-        _mockUserManager.Setup(x => x.Users).Returns(new List<ApplicationUser> { user }.AsQueryable());
         var (_, apiKey, _) = await _authService.GenerateApiKeyAsync("test-user-id");
+        _mockUserManager.Setup(x => x.Users).Returns(InMemoryUsers.Of(user));
 
         // Act
         var owner = await _authService.GetUserByApiKeyAsync(apiKey!);
 
         // Assert
-        Assert.Same(user, owner);
+        Assert.Equal(user.Id, owner?.Id);
     }
 
     [Fact]
     public async Task GetUserByApiKeyAsync_WithAnUnknownKey_ReturnsNull()
     {
         // Arrange
-        _mockUserManager.Setup(x => x.Users)
-            .Returns(new List<ApplicationUser>().AsQueryable());
+        _mockUserManager.Setup(x => x.Users).Returns(InMemoryUsers.Of());
 
         // Act
         var owner = await _authService.GetUserByApiKeyAsync("invalid-api-key");

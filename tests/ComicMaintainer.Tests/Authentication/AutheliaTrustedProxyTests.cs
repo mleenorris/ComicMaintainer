@@ -260,11 +260,13 @@ public sealed class AutheliaTrustedProxyTests
             loggerFactory,
             UrlEncoder.Default,
             Options.Create(new AutheliaSettings { Enabled = true, TrustedProxies = trustedProxies }),
-            _userManager.Object,
-            _roleManager.Object,
             Mock.Of<IDbContextFactory<ComicMaintainerDbContext>>(),
             Mock.Of<ComicMaintainer.Core.Services.Auth.IAuthSessionValidator>(),
             new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()));
+        context.RequestServices = new ServiceCollection()
+            .AddSingleton(_userManager.Object)
+            .AddSingleton(_roleManager.Object)
+            .BuildServiceProvider();
         await handler.InitializeAsync(new AuthenticationScheme("Authelia", displayName: null, typeof(AutheliaAuthenticationHandler)), context);
         return await handler.AuthenticateAsync();
     }

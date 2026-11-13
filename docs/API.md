@@ -526,7 +526,7 @@ The combine answers `202` with `{"jobId","job_id","totalItems","total_items","de
 |---|---|---|---|
 | `POST` | `/api/jobs/{operation}-{scope}` | Library write | Start a batch job |
 | `GET` | `/api/jobs` | Signed in | List jobs |
-| `GET` | `/api/jobs/{jobId}` | Signed in | One job's status and results |
+| `GET` | `/api/jobs/{jobId}` | Signed in | One job's status, and each file's result with `?include=results` |
 | `POST` | `/api/jobs/{jobId}/cancel` | Library write | Cancel a running job |
 | `DELETE` | `/api/jobs/{jobId}` | Library write | Delete a job's record |
 | `GET` | `/api/active-job` | Signed in | The running job, if any |
@@ -591,12 +591,13 @@ When nothing qualifies, the id is the empty GUID and `total_items` is 0.
   "current_file": "...",
   "start_time": "2026-01-01T00:00:00Z",
   "end_time": null,
-  "results": [{ "file": "...", "success": false, "error": "the reason" }],
   "reported_problems": [{ "subject": "/watched_dir/Old", "message": "..." }]
 }
 ```
 
 `status` is `queued`, `running`, `completed`, `failed`, `cancelled` or `interrupted`. `interrupted` means the app stopped while the job was running.
+
+Add `?include=results` for the outcome of every file of the job, in the job's order, as `"results": [{ "file": "...", "success": false, "error": "the reason" }]`. A file not reached yet has `success` false and no `error`. The list has an entry for every file, so it is left out unless asked for: to follow progress, read the counts.
 
 **`GET /api/jobs`** returns `{"jobs":[...],"count":3}`, with the summary fields above. **`POST /api/jobs/{jobId}/cancel`** returns `{"success":true}`, or `404`. **`DELETE /api/jobs/{jobId}`** answers `204`, or `404`.
 

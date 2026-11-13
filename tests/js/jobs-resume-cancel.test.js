@@ -37,6 +37,9 @@ test('a job still running at boot reopens the progress modal and keeps being tra
     const lookups = h.requests(page, 'GET', JOB_PATH);
     assert.equal(lookups.length, 2, 'the job is checked, then polled to fill in the modal');
     assert.match(lookups[0].headers.authorization, /^Bearer /);
+    // Only the poll that fills in the modal needs every file's result; the check needs the counts.
+    assert.equal(lookups[0].query.include, undefined);
+    assert.equal(lookups[1].query.include, 'results');
     h.assertProgress(page, {
         open: true,
         title: 'Renaming All Files...',
@@ -72,36 +75,22 @@ test('a queued job without a title resumes under a generic one', async (t) => {
 });
 
 const FINISHED_WHILE_AWAY = [
+    // Counted from the job's counters: the check at boot does not ask for the per-file results.
     {
         name: 'completed with some failures',
-        status: h.jobStatus({
-            status: 'completed',
-            processed_items: 3,
-            failed_items: 1,
-            results: [
-                finished('Comics/A.cbz', true),
-                finished('Comics/B.cbz', false, 'Corrupt archive'),
-                finished('Comics/C.cbz', true),
-                finished('Comics/D.cbz', true)
-            ]
-        }),
+        status: h.jobStatus({ status: 'completed', processed_items: 3, failed_items: 1, results: undefined }),
         message: { type: 'success', text: 'Batch processing completed: 3 of 4 files processed successfully, 1 failed' },
         reloads: 1
     },
     {
         name: 'completed without failures',
-        status: h.jobStatus({ status: 'completed', total_items: 1, processed_items: 1, results: [finished('Comics/A.cbz', true)] }),
+        status: h.jobStatus({ status: 'completed', total_items: 1, processed_items: 1, results: undefined }),
         message: { type: 'success', text: 'Batch processing completed: 1 of 1 files processed successfully' },
         reloads: 1
     },
     {
         name: 'completed with every file failed',
-        status: h.jobStatus({
-            status: 'completed',
-            total_items: 2,
-            failed_items: 2,
-            results: [finished('Comics/A.cbz', false, 'Corrupt archive'), finished('Comics/B.cbz', false, 'Corrupt archive')]
-        }),
+        status: h.jobStatus({ status: 'completed', total_items: 2, failed_items: 2, results: undefined }),
         message: { type: 'warning', text: 'Batch processing completed: 0 of 2 files processed successfully, 2 failed' },
         reloads: 1
     },

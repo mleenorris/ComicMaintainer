@@ -49,6 +49,20 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource,
     /// </summary>
     private readonly ConcurrentDictionary<string, ComicFile> _files = new();
 
+    /// <summary>
+    /// Counts of the rows in <see cref="_files"/> by status, updated with them under
+    /// <see cref="_statusCountsLock"/>, so the file counts need no scan of the table.
+    /// </summary>
+    private FileStatusCounts _statusCounts;
+
+    private readonly object _statusCountsLock = new();
+
+    /// <summary>
+    /// Whether <see cref="_files"/> holds every row of the table: set once it has been loaded from the
+    /// database. Until then the counts are read from the database, as the file list is.
+    /// </summary>
+    private bool _mirrorsDatabase;
+
     /// <summary>Serializes refreshing <see cref="_files"/> from the database; see <see cref="MirrorCommittedRowsAsync"/>.</summary>
     private readonly SemaphoreSlim _mirrorLock = new(1, 1);
     private readonly IOptionsMonitor<AppSettings> _settings;
@@ -89,11 +103,68 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource,
     /// with the database instead of ahead of it.
     /// </summary>
     private void ApplyCommittedRow(ComicFileEntity entity)
-        => _files[entity.FilePath] = ToInMemoryCopy(entity);
+    {
+        var copy = ToInMemoryCopy(entity);
+        lock (_statusCountsLock)
+        {
+            if (_files.TryGetValue(entity.FilePath, out var previous))
+            {
+                _statusCounts.Count(previous, -1);
+            }
+
+            _files[entity.FilePath] = copy;
+            _statusCounts.Count(copy, 1);
+        }
+    }
 
     /// <summary>Drops the in-memory copy of a row whose deletion was just committed.</summary>
     private void ForgetCommittedRow(string filePath)
-        => _files.TryRemove(filePath, out _);
+    {
+        lock (_statusCountsLock)
+        {
+            if (_files.TryRemove(filePath, out var previous))
+            {
+                _statusCounts.Count(previous, -1);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The status counts of every tracked file, kept as rows are applied and forgotten, once the
+    /// in-memory copy holds the whole table (<see cref="InitializeFromDatabaseAsync"/> has loaded it);
+    /// <see langword="false"/> before that, when only the database can answer.
+    /// </summary>
+    private bool TryGetStatusCounts(out FileStatusCounts counts)
+    {
+        lock (_statusCountsLock)
+        {
+            counts = _statusCounts;
+            return _mirrorsDatabase;
+        }
+    }
+
+    /// <summary>How many tracked files are in each status, by the predicates of the file filters.</summary>
+    private struct FileStatusCounts
+    {
+        public int Total;
+        public int Processed;
+        public int Unprocessed;
+        public int Duplicates;
+        public int Renamed;
+        public int Normalized;
+
+        /// <summary>Adds (<paramref name="sign"/> 1) or removes (-1) one file from the counts.</summary>
+        public void Count(ComicFile file, int sign)
+        {
+            var processed = file.IsRenamed && file.IsNormalized;
+            Total += sign;
+            if (processed) Processed += sign;
+            if (!processed && !file.IsDuplicate) Unprocessed += sign;
+            if (file.IsDuplicate) Duplicates += sign;
+            if (file.IsRenamed) Renamed += sign;
+            if (file.IsNormalized) Normalized += sign;
+        }
+    }
 
     /// <summary>Refreshes the in-memory copy of one row after its write committed.</summary>
     private Task MirrorCommittedRowAsync(ComicFileEntity saved)

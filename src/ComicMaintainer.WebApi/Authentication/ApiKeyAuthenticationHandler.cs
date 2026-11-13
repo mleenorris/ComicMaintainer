@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using System.Text.Encodings.Web;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
@@ -9,6 +8,7 @@ using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Authentication;
@@ -18,6 +18,8 @@ namespace ComicMaintainer.WebApi.Authentication;
 /// account that owns the key, with that account's current roles. Keys are never read from the query string or any
 /// other place a proxy or browser history would record. Requests without the header are left to the other schemes;
 /// a wrong key, or the key of a disabled account, fails and is logged to the auth log with the client's address.
+/// The account a key stands for is remembered briefly (<see cref="RememberedAccount"/>); any change to it made in the
+/// app applies to the next request.
 /// </summary>
 public sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {
@@ -27,25 +29,29 @@ public sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authenti
     /// <summary>How stale <see cref="ApplicationUser.ApiKeyLastUsedAt"/> may get before a request updates it.</summary>
     public static readonly TimeSpan LastUsedResolution = TimeSpan.FromMinutes(1);
 
-    private readonly IAuthService _authService;
-    private readonly UserManager<ApplicationUser> _userManager;
+    private const string CacheKeyPrefix = "api-key:account:";
+
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly ClientAddressResolver _clientAddresses;
+    private readonly IAuthSessionValidator _sessions;
+    private readonly IMemoryCache _cache;
 
+    // Every policy lists this scheme, so a handler is made for every request, nearly all of them without a key. It
+    // takes only singletons; the account services (a DbContext and its stores) are resolved once a key is to be read.
     public ApiKeyAuthenticationHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder,
-        IAuthService authService,
-        UserManager<ApplicationUser> userManager,
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
-        ClientAddressResolver clientAddresses)
+        ClientAddressResolver clientAddresses,
+        IAuthSessionValidator sessions,
+        IMemoryCache cache)
         : base(options, logger, encoder)
     {
-        _authService = authService;
-        _userManager = userManager;
         _dbContextFactory = dbContextFactory;
         _clientAddresses = clientAddresses;
+        _sessions = sessions;
+        _cache = cache;
     }
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
@@ -56,8 +62,8 @@ public sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authenti
         }
 
         var apiKey = values.Count == 1 ? values[0]?.Trim() : null;
-        var user = string.IsNullOrEmpty(apiKey) ? null : await _authService.GetUserByApiKeyAsync(apiKey);
-        if (user is null)
+        var account = string.IsNullOrEmpty(apiKey) ? null : await FindAccountAsync(apiKey);
+        if (account is null)
         {
             Logger.LogWarning(
                 "Refused an API key from {ClientAddress} for {Method} {Path}: no active account has it",
@@ -67,20 +73,47 @@ public sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authenti
             return AuthenticateResult.Fail("Invalid API key");
         }
 
-        var claims = new List<Claim>
+        await RecordUseAsync(_dbContextFactory, account, Logger, Context.RequestAborted);
+        Logger.LogDebug("Authenticated {Username} with an API key", LoggingHelper.SanitizeForLog(account.UserName));
+
+        return AuthenticateResult.Success(new AuthenticationTicket(account.ToPrincipal(Scheme.Name, ApiKeys.AuthMethod), Scheme.Name));
+    }
+
+    /// <summary>
+    /// The active account whose key <paramref name="apiKey"/> is, remembered by the key's hash (the memory never holds
+    /// the key) for <see cref="AuthSessionValidator.CacheDuration"/> unless the account changes in the meantime.
+    /// </summary>
+    private async Task<RememberedAccount?> FindAccountAsync(string apiKey)
+    {
+        var cacheKey = CacheKeyPrefix + ApiKeys.Hash(apiKey);
+        if (_cache.TryGetValue(cacheKey, out RememberedAccount? remembered) && remembered is not null && remembered.IsCurrent(_sessions))
         {
-            new(ClaimTypes.NameIdentifier, user.Id),
-            new(ClaimTypes.Name, user.UserName ?? string.Empty),
-            new(ClaimTypes.Email, user.Email ?? string.Empty),
-            new("auth_method", ApiKeys.AuthMethod),
-        };
-        claims.AddRange((await _userManager.GetRolesAsync(user)).Select(role => new Claim(ClaimTypes.Role, role)));
+            return remembered;
+        }
 
-        await RecordUseAsync(_dbContextFactory, user, Logger, Context.RequestAborted);
-        Logger.LogDebug("Authenticated {Username} with an API key", LoggingHelper.SanitizeForLog(user.UserName));
+        var authService = Context.RequestServices.GetRequiredService<IAuthService>();
+        var owner = await authService.GetUserByApiKeyAsync(apiKey);
+        if (owner is null)
+        {
+            _cache.Remove(cacheKey);
+            return null;
+        }
 
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, Scheme.Name));
-        return AuthenticateResult.Success(new AuthenticationTicket(principal, Scheme.Name));
+        // The version is read before what is remembered with it: the key is looked up again, so a change committed
+        // before the version was read (a new key, a disabled account) is in what is read, and one committed after it
+        // has moved the version on.
+        var version = _sessions.GetAccountVersion(owner.Id);
+        var roles = await Context.RequestServices.GetRequiredService<UserManager<ApplicationUser>>().GetRolesAsync(owner);
+        var current = await authService.GetUserByApiKeyAsync(apiKey);
+        if (current is null || current.Id != owner.Id)
+        {
+            _cache.Remove(cacheKey);
+            return null;
+        }
+
+        var account = new RememberedAccount(current.Id, current.UserName, current.Email, roles, version, current.ApiKeyLastUsedAt);
+        _cache.Set(cacheKey, account, AuthSessionValidator.CacheDuration);
+        return account;
     }
 
     // Several schemes answer the challenge of a policy that lists them; the session-token scheme writes the JSON body.
@@ -107,12 +140,12 @@ public sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authenti
     // Records when the key was last used, to the minute, so that scripts polling the API do not write on every request.
     internal static async Task RecordUseAsync(
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
-        ApplicationUser user,
+        RememberedAccount account,
         ILogger logger,
         CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
-        if (user.ApiKeyLastUsedAt is { } lastUsed && now - lastUsed < LastUsedResolution)
+        if (account.ApiKeyLastUsedAt is { } lastUsed && now - lastUsed < LastUsedResolution)
         {
             return;
         }
@@ -122,13 +155,17 @@ public sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<Authenti
             var threshold = now - LastUsedResolution;
             await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
             await db.Users
-                .Where(u => u.Id == user.Id && (u.ApiKeyLastUsedAt == null || u.ApiKeyLastUsedAt < threshold))
+                .Where(u => u.Id == account.UserId && (u.ApiKeyLastUsedAt == null || u.ApiKeyLastUsedAt < threshold))
                 .ExecuteUpdateAsync(set => set.SetProperty(u => u.ApiKeyLastUsedAt, now), cancellationToken);
+
+            // Whether this request wrote it or another did, the use is now recorded: the account remembered for the
+            // key need not try again within the resolution.
+            account.ApiKeyLastUsedAt = now;
         }
         catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or Microsoft.Data.Sqlite.SqliteException)
         {
             // Bookkeeping only: a busy database must not refuse the request.
-            logger.LogDebug(ex, "Could not record the use of the API key of {UserId}", LoggingHelper.SanitizeForLog(user.Id));
+            logger.LogDebug(ex, "Could not record the use of the API key of {UserId}", LoggingHelper.SanitizeForLog(account.UserId));
         }
     }
 }

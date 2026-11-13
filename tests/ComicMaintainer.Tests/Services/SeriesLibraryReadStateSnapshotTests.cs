@@ -162,6 +162,32 @@ public class SeriesLibraryReadStateSnapshotTests
         Assert.False(Assert.Single(Assert.Single(bobsSeries.Series).Issues).Read);
     }
 
+    // The home page asks for these on every visit: the summaries and path lists are made once per
+    // snapshot and only each user's read paths are worked out per request.
+    [Fact]
+    public async Task OverviewEntries_ShareOneSummaryPerSeriesAcrossUsersAndKeepEachUsersReadPaths()
+    {
+        MarkRead("alice", "/library/Saga/Saga 001.cbz");
+        var service = CreateService();
+
+        var alices = await service.GetSeriesOverviewEntriesAsync();
+        _user.UserId = "bob";
+        var bobs = await service.GetSeriesOverviewEntriesAsync();
+        MarkRead("bob", "/library/Batman/Batman 002.cbz");
+        var bobsAfterReading = await service.GetSeriesOverviewEntriesAsync();
+
+        Assert.Equal(1, Builds(null));
+        foreach (var alice in alices)
+        {
+            Assert.Same(alice.Summary, bobs.Single(b => b.Summary.Id == alice.Summary.Id).Summary);
+            Assert.Same(alice.FilePaths, bobs.Single(b => b.Summary.Id == alice.Summary.Id).FilePaths);
+        }
+
+        Assert.Equal(["/library/Saga/Saga 001.cbz"], alices.SelectMany(e => e.ReadFilePaths));
+        Assert.Empty(bobs.SelectMany(e => e.ReadFilePaths));
+        Assert.Equal(["/library/Batman/Batman 002.cbz"], bobsAfterReading.SelectMany(e => e.ReadFilePaths));
+    }
+
     [Fact]
     public async Task ReadFilters_AreCachedPerUserAndInvalidatedOnlyByThatUsersReadChanges()
     {

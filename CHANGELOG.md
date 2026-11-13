@@ -26,6 +26,18 @@ for it.
 - Library covers that are not cached yet are generated at most one per processor core at a time. JPEG pages
   are decoded at a reduced size for the thumbnail, which takes a fraction of the time and memory.
 - In a series, a run of more than 12 missing issues is shown as one card for the whole range.
+- A request with an API key, and an OPDS reader repeating its username and password or API key, no longer reads
+  the account and its roles from the database each time. The account is remembered for 30 seconds, and a new or
+  revoked key, a password or role change, a disabled account or a lockout applies to the next request.
+- The unmarked count, `/api/files/counts`, Scan Unmarked and the file list's total are kept up to date in memory
+  instead of counting the whole file table on each request.
+- The folder list groups the library once and serves every page from that until something changes, instead of
+  grouping every file again for each page.
+- The home page no longer builds every series' card and issue list again on each visit, and reads only the
+  reading progress columns it shows.
+- `GET /api/jobs/{jobId}` leaves out the result of every file unless asked with `?include=results`. The web
+  page asks for them only when it starts following a job or its real-time connection comes back, so following a
+  whole-library job no longer downloads megabytes on each check.
 
 ### Fixed
 

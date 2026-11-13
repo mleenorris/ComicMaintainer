@@ -75,7 +75,7 @@ public class JobsControllerTests
         };
         _jobRegistry.Setup(p => p.GetJob(jobId)).Returns(job);
 
-        var result = _controller.GetJob(jobId);
+        var result = _controller.GetJob(jobId, include: "results");
 
         var json = JObject.FromObject(Assert.IsType<OkObjectResult>(result.Result).Value!);
         Assert.Equal(1, json["failed_items"]!.Value<int>());

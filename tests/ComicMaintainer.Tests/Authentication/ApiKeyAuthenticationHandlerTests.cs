@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -32,14 +33,33 @@ public sealed class ApiKeyAuthenticationHandlerTests : IAsyncLifetime
     private readonly Mock<IAuthService> _authService = new();
     private readonly Mock<UserManager<ApplicationUser>> _userManager = new(
         Mock.Of<IUserStore<ApplicationUser>>(), null!, null!, null!, null!, null!, null!, null!, null!);
+
+    // Shared by every request of a test, as the app's cache and session validator are.
+    private readonly ManualClock _clock = new();
+    private readonly MemoryCache _cache;
+    private readonly Mock<IAuthSessionValidator> _sessions = new();
+    private readonly Dictionary<string, long> _accountVersions = new(StringComparer.Ordinal);
     private ServiceProvider _provider = null!;
     private IDbContextFactory<ComicMaintainerDbContext> _factory = null!;
+
+    public ApiKeyAuthenticationHandlerTests()
+    {
+        _cache = new MemoryCache(new MemoryCacheOptions { Clock = _clock });
+        _sessions
+            .Setup(s => s.GetAccountVersion(It.IsAny<string>()))
+            .Returns((string userId) => _accountVersions.GetValueOrDefault(userId));
+        _sessions
+            .Setup(s => s.Invalidate(It.IsAny<string>()))
+            .Callback((string userId) => _accountVersions[userId] = _accountVersions.GetValueOrDefault(userId) + 1);
+    }
 
     public async Task InitializeAsync()
     {
         await _connection.OpenAsync();
         var services = new ServiceCollection();
         services.AddDbContextFactory<ComicMaintainerDbContext>(o => o.UseSqlite(_connection));
+        services.AddSingleton(_ => _authService.Object);
+        services.AddSingleton(_ => _userManager.Object);
         _provider = services.BuildServiceProvider();
         _factory = _provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         await using var db = await _factory.CreateDbContextAsync();
@@ -50,6 +70,7 @@ public sealed class ApiKeyAuthenticationHandlerTests : IAsyncLifetime
     {
         await _provider.DisposeAsync();
         await _connection.DisposeAsync();
+        _cache.Dispose();
     }
 
     [Fact]
@@ -59,6 +80,105 @@ public sealed class ApiKeyAuthenticationHandlerTests : IAsyncLifetime
 
         Assert.True(result.None);
         _authService.Verify(a => a.GetUserByApiKeyAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    // Every policy lists the scheme, so this runs on nearly every request: it must not build a DbContext for them.
+    [Fact]
+    public async Task Authenticate_WithoutTheHeader_ResolvesNoAccountServices()
+    {
+        var context = CreateContext();
+        using var empty = new ServiceCollection().BuildServiceProvider();
+        var handler = await CreateHandlerAsync(context, requestServices: empty);
+
+        var result = await handler.AuthenticateAsync();
+
+        Assert.True(result.None);
+    }
+
+    [Fact]
+    public async Task Authenticate_AKeyUsedAgain_IsAnsweredWithoutReadingTheAccountAgain()
+    {
+        var user = await SeedOwnerAsync(lastUsed: null);
+        SignInAs(user);
+
+        Assert.True((await AuthenticateAsync(CreateContext(Key))).Succeeded);
+        var again = await AuthenticateAsync(CreateContext(Key));
+
+        Assert.True(again.Succeeded);
+        Assert.Equal(user.Id, again.Principal!.FindFirstValue(ClaimTypes.NameIdentifier));
+        Assert.Equal("User", again.Principal.FindFirstValue(ClaimTypes.Role));
+        // The first request reads the key twice: once to find its owner, once more after taking the account version.
+        _authService.Verify(a => a.GetUserByApiKeyAsync(Key), Times.Exactly(2));
+        _userManager.Verify(u => u.GetRolesAsync(It.IsAny<ApplicationUser>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Authenticate_ARememberedKey_IsReadAgainAfterTheCacheDuration()
+    {
+        var user = await SeedOwnerAsync(lastUsed: null);
+        SignInAs(user);
+        Assert.True((await AuthenticateAsync(CreateContext(Key))).Succeeded);
+
+        _clock.Advance(AuthSessionValidator.CacheDuration + TimeSpan.FromSeconds(1));
+        _authService.Setup(a => a.GetUserByApiKeyAsync(Key)).ReturnsAsync(default(ApplicationUser?));
+
+        Assert.Equal("Invalid API key", (await AuthenticateAsync(CreateContext(Key))).Failure?.Message);
+    }
+
+    [Fact]
+    public async Task Authenticate_ARememberedKey_IsRefusedAsSoonAsItsAccountChanges()
+    {
+        var user = await SeedOwnerAsync(lastUsed: null);
+        SignInAs(user);
+        Assert.True((await AuthenticateAsync(CreateContext(Key))).Succeeded);
+
+        // A revoked or replaced key, a disabled account: each change made in the app invalidates the account.
+        _authService.Setup(a => a.GetUserByApiKeyAsync(Key)).ReturnsAsync(default(ApplicationUser?));
+        _sessions.Object.Invalidate(user.Id);
+
+        Assert.Equal("Invalid API key", (await AuthenticateAsync(CreateContext(Key))).Failure?.Message);
+    }
+
+    [Fact]
+    public async Task Authenticate_ARememberedKey_CarriesTheRolesOfTheAccountAfterAChange()
+    {
+        var user = await SeedOwnerAsync(lastUsed: null);
+        SignInAs(user);
+        Assert.True((await AuthenticateAsync(CreateContext(Key))).Succeeded);
+
+        _userManager.Setup(u => u.GetRolesAsync(user)).ReturnsAsync(["ReadOnly"]);
+        _sessions.Object.Invalidate(user.Id);
+
+        var result = await AuthenticateAsync(CreateContext(Key));
+
+        Assert.Equal("ReadOnly", Assert.Single(result.Principal!.FindAll(ClaimTypes.Role)).Value);
+    }
+
+    // The key was replaced between the two reads of the first request: what was read first is not trusted.
+    [Fact]
+    public async Task Authenticate_WhenTheKeyStopsWorkingWhileItIsRead_FailsAndRemembersNothing()
+    {
+        var user = await SeedOwnerAsync(lastUsed: null);
+        _authService.SetupSequence(a => a.GetUserByApiKeyAsync(Key)).ReturnsAsync(user).ReturnsAsync(default(ApplicationUser?));
+        _userManager.Setup(u => u.GetRolesAsync(user)).ReturnsAsync(["User"]);
+
+        var result = await AuthenticateAsync(CreateContext(Key));
+
+        Assert.Equal("Invalid API key", result.Failure?.Message);
+        Assert.Equal(0, _cache.Count);
+    }
+
+    [Fact]
+    public async Task Authenticate_ARememberedKeyWhoseUseWasJustRecorded_DoesNotWriteAgain()
+    {
+        var user = await SeedOwnerAsync(lastUsed: null);
+        SignInAs(user);
+        Assert.True((await AuthenticateAsync(CreateContext(Key))).Succeeded);
+        var factory = new Mock<IDbContextFactory<ComicMaintainerDbContext>>();
+
+        Assert.True((await AuthenticateAsync(CreateContext(Key), factory.Object)).Succeeded);
+
+        factory.Verify(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
@@ -332,16 +452,17 @@ public sealed class ApiKeyAuthenticationHandlerTests : IAsyncLifetime
     }
 
     private async Task<ApiKeyAuthenticationHandler> CreateHandlerAsync(
-        HttpContext context, IDbContextFactory<ComicMaintainerDbContext>? factory = null)
+        HttpContext context, IDbContextFactory<ComicMaintainerDbContext>? factory = null, IServiceProvider? requestServices = null)
     {
         var handler = new ApiKeyAuthenticationHandler(
             new TestOptionsMonitor<AuthenticationSchemeOptions>(new AuthenticationSchemeOptions()),
             NullLoggerFactory.Instance,
             UrlEncoder.Default,
-            _authService.Object,
-            _userManager.Object,
             factory ?? _factory,
-            ClientAddressResolver.Direct);
+            ClientAddressResolver.Direct,
+            _sessions.Object,
+            _cache);
+        context.RequestServices = requestServices ?? _provider;
         await handler.InitializeAsync(
             new AuthenticationScheme(ApiKeyAuthenticationHandler.SchemeName, displayName: null, typeof(ApiKeyAuthenticationHandler)),
             context);
@@ -356,5 +477,12 @@ public sealed class ApiKeyAuthenticationHandlerTests : IAsyncLifetime
     private sealed class StartedResponseFeature : HttpResponseFeature
     {
         public override bool HasStarted => true;
+    }
+
+    private sealed class ManualClock : Microsoft.Extensions.Internal.ISystemClock
+    {
+        public DateTimeOffset UtcNow { get; private set; } = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        public void Advance(TimeSpan by) => UtcNow += by;
     }
 }

@@ -568,7 +568,7 @@ public sealed class FilesControllerFileActionsTests
     [Fact]
     public async Task ScanUnmarked_StoreThrows_Escapes()
     {
-        _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("not loaded"));
+        _fileStore.Setup(f => f.GetFileCountsAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("not loaded"));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => _controller.ScanUnmarked());
     }

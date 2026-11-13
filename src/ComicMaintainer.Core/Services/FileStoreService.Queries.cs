@@ -89,13 +89,19 @@ public partial class FileStoreService
 
     /// <summary>Counts all files, the processed and unprocessed ones, and the duplicates.</summary>
     /// <remarks>
-    /// Counted in SQL with the same predicates as <see cref="GetUnmarkedCountAsync"/> and the
-    /// file-list filters, so <c>/api/files/counts</c>, the list's <c>unmarked_count</c> and the
-    /// filtered pages always agree. Cached against <see cref="ChangeVersion"/> like the
-    /// unmarked count, so polling the counts does not re-scan the table.
+    /// Counted with the same predicates as <see cref="GetUnmarkedCountAsync"/> and the file-list
+    /// filters, so <c>/api/files/counts</c>, the list's <c>unmarked_count</c> and the filtered
+    /// pages always agree. Once the store is loaded they are the counts kept with the in-memory
+    /// copy, which every commit updates; before that they are counted in SQL and cached against
+    /// <see cref="ChangeVersion"/>.
     /// </remarks>
     public async Task<(int total, int processed, int unprocessed, int duplicates)> GetFileCountsAsync(CancellationToken cancellationToken = default)
     {
+        if (TryGetStatusCounts(out var kept))
+        {
+            return (kept.Total, kept.Processed, kept.Unprocessed, kept.Duplicates);
+        }
+
         var cacheKey = $"FileStore.FileCounts.{ChangeVersion}";
         if (_memoryCache.TryGetValue(cacheKey, out (int, int, int, int) cached))
         {

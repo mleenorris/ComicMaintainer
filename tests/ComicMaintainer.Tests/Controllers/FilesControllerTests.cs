@@ -1336,31 +1336,33 @@ public class FilesControllerTests
     [Fact]
     public async Task ScanUnmarked_ReturnsOkWithCounts()
     {
-        // Arrange
-        var allFiles = new List<ComicFile>
-        {
-            new() { FilePath = "/test/file1.cbz", IsProcessed = true },
-            new() { FilePath = "/test/file2.cbz", IsProcessed = false },
-            new() { FilePath = "/test/file3.cbz", IsProcessed = false }
-        };
-        _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(allFiles);
-        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync("unprocessed", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(allFiles.Where(f => !f.IsProcessed).ToList());
-        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync("processed", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(allFiles.Where(f => f.IsProcessed).ToList());
+        // Arrange: 4 files, 1 processed, 2 unprocessed and 1 duplicate (counted as neither).
+        _mockFileStore.Setup(fs => fs.GetFileCountsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((4, 1, 2, 1));
 
         // Act
         var result = await _controller.ScanUnmarked();
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
-        Assert.NotNull(okResult.Value);
-        var resultValue = okResult.Value;
-        var totalCountProp = resultValue?.GetType().GetProperty("total_count");
-        Assert.NotNull(totalCountProp);
-        var totalCount = (int?)totalCountProp.GetValue(resultValue);
-        Assert.Equal(3, totalCount);
+        var value = okResult.Value!;
+        int Count(string name) => (int)value.GetType().GetProperty(name)!.GetValue(value)!;
+        Assert.Equal(4, Count("total_count"));
+        Assert.Equal(2, Count("unmarked_count"));
+        Assert.Equal(1, Count("marked_count"));
+    }
+
+    // Counting used to copy the whole library three times, read state included.
+    [Fact]
+    public async Task ScanUnmarked_CountsWithoutCopyingTheLibrary()
+    {
+        _mockFileStore.Setup(fs => fs.GetFileCountsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((0, 0, 0, 0));
+
+        await _controller.ScanUnmarked();
+
+        _mockFileStore.Verify(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        _mockFileStore.Verify(fs => fs.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

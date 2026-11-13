@@ -48,7 +48,7 @@ public class JobsControllerCoverageTests
         };
         _jobRegistry.Setup(p => p.GetJob(jobId)).Returns(job);
 
-        var json = OkJson(_controller.GetJob(jobId));
+        var json = OkJson(_controller.GetJob(jobId, include: "results"));
 
         Assert.Equal(jobId.ToString(), json["job_id"]!.ToString());
         Assert.Equal("running", json["status"]!.ToString());
@@ -76,6 +76,52 @@ public class JobsControllerCoverageTests
         Assert.Equal("/c/c.cbz", results[2]["file"]!.ToString());
         Assert.False(results[2]["success"]!.Value<bool>());
         Assert.Equal(JTokenType.Null, results[2]["error"]!.Type);
+    }
+
+    // A whole-library job has an entry per file: megabytes that polling for progress does not need.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("problems")]
+    [InlineData("result")]
+    public void GetJob_WithoutAskingForResults_LeavesThemOut(string? include)
+    {
+        var jobId = Guid.NewGuid();
+        _jobRegistry.Setup(p => p.GetJob(jobId)).Returns(new ProcessingJob
+        {
+            JobId = jobId,
+            Status = JobStatus.Running,
+            Files = new List<string> { "/c/a.cbz", "/c/b.cbz" },
+            TotalFiles = 2,
+            ProcessedFiles = 1,
+        });
+
+        var json = OkJson(_controller.GetJob(jobId, include));
+
+        Assert.Null(json["results"]);
+        Assert.Equal(1, json["processed_items"]!.Value<int>());
+        Assert.Empty(Assert.IsType<JArray>(json["reported_problems"]));
+    }
+
+    [Theory]
+    [InlineData("results")]
+    [InlineData("RESULTS")]
+    [InlineData("problems, results")]
+    public void GetJob_AskedForResults_ListsOnePerFile(string include)
+    {
+        var jobId = Guid.NewGuid();
+        _jobRegistry.Setup(p => p.GetJob(jobId)).Returns(new ProcessingJob
+        {
+            JobId = jobId,
+            Status = JobStatus.Running,
+            Files = new List<string> { "/c/a.cbz", "/c/b.cbz" },
+            TotalFiles = 2,
+            ProcessedFiles = 1,
+        });
+
+        var json = OkJson(_controller.GetJob(jobId, include));
+
+        Assert.Equal(2, Assert.IsType<JArray>(json["results"]).Count);
     }
 
     // ---- GetActiveJob -------------------------------------------------------------------

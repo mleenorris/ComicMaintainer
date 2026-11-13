@@ -730,6 +730,12 @@ public partial class SeriesLibraryService
         /// slice instead of a full re-sort. Lives and dies with the snapshot.
         /// </summary>
         public ConcurrentDictionary<string, IReadOnlyList<SeriesAccumulator>> SummaryViews { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// The part of each series' overview entry that is the same for every user, made the first
+        /// time the overview asks for it. Lives and dies with the snapshot.
+        /// </summary>
+        public SharedOverviewEntry[]? OverviewEntries { get; set; }
     }
 
     private sealed class SeriesAccumulator

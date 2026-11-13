@@ -9,6 +9,10 @@ namespace ComicMaintainer.Core.Models;
 /// </summary>
 public class SeriesOverviewEntry
 {
+    private List<string>? _readFilePaths;
+    private Func<List<string>>? _readFilePathsSource;
+
+    /// <summary>The series card; shared by every request for the same library, so not to be modified.</summary>
     public SeriesSummaryDto Summary { get; set; } = new();
 
     /// <summary>Earliest file CreatedAt for the series (when it first appeared).</summary>
@@ -17,16 +21,31 @@ public class SeriesOverviewEntry
     /// <summary>Latest file CreatedAt for the series (most recent file added).</summary>
     public DateTime LatestCreatedAt { get; set; }
 
-    /// <summary>Every tracked file path belonging to the series.</summary>
+    /// <summary>
+    /// Every tracked file path belonging to the series, in issue order; shared by every request
+    /// for the same library, so not to be modified.
+    /// </summary>
     public List<string> FilePaths { get; set; } = new();
 
     /// <summary>
     /// File paths within the series that are marked read via the file read flag
     /// (<see cref="ComicFile.IsRead"/>). This is independent of per-user reading
     /// progress and lets Continue Reading treat issues marked read outside the
-    /// reader as read so a fully-read series is not kept on the row.
+    /// reader as read so a fully-read series is not kept on the row. Worked out
+    /// on first use: the overview needs it only for the series the user is reading.
     /// </summary>
-    public List<string> ReadFilePaths { get; set; } = new();
+    public List<string> ReadFilePaths
+    {
+        get => _readFilePaths ??= _readFilePathsSource?.Invoke() ?? new List<string>();
+        set => _readFilePaths = value;
+    }
+
+    /// <summary>Sets how <see cref="ReadFilePaths"/> is worked out when it is first read.</summary>
+    internal void SetReadFilePaths(Func<List<string>> source)
+    {
+        _readFilePaths = null;
+        _readFilePathsSource = source;
+    }
 }
 
 /// <summary>

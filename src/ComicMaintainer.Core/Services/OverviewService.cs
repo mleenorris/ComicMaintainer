@@ -85,10 +85,11 @@ public class OverviewService : IOverviewService
             // The most recently read issue (in-progress or completed) anchors the
             // user's place in the series.
             Progress? anchor = null;
-            foreach (var path in entry.FilePaths)
+            foreach (var progress in entry.FilePaths
+                         .Select(path => progressByPath.GetValueOrDefault(path))
+                         .OfType<Progress>())
             {
-                if (progressByPath.TryGetValue(path, out var progress)
-                    && (anchor is null || progress.LastReadAt > anchor.LastReadAt))
+                if (anchor is null || progress.LastReadAt > anchor.LastReadAt)
                 {
                     anchor = progress;
                 }

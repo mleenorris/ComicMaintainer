@@ -36,7 +36,7 @@ public sealed class RememberedAccountTests : IAsyncLifetime
     {
         _host = await AuthTestHost.StartAsync(configureServices: services =>
         {
-            services.AddSingleton<IMemoryCache>(new MemoryCache(new MemoryCacheOptions { Clock = _clock }));
+            services.AddSingleton<IMemoryCache>(_ => new MemoryCache(new MemoryCacheOptions { Clock = _clock }));
             services.AddSingleton(ClientAddressResolver.Direct);
             services.AddSingleton<AuthenticationAttemptLimiter>();
         });

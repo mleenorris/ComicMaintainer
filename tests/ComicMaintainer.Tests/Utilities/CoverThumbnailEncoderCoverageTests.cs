@@ -185,7 +185,10 @@ public class CoverThumbnailEncoderCoverageTests
             image.Format = MagickFormat.Jpeg;
             sideways = image.ToByteArray();
         }
-        Assert.Equal(Orientation.RightTop, new MagickImage(sideways).Orientation);
+        using (var reread = new MagickImage(sideways))
+        {
+            Assert.Equal(Orientation.RightTop, reread.Orientation);
+        }
 
         var thumb = CoverThumbnailEncoder.TryCreateThumbnail(sideways, 480, "jpeg", 80);
 

@@ -7,7 +7,7 @@
         // depends on a script loaded after it.
 
         // Shared state declared in state.js and reassigned here.
-        /* global seriesTotal: true */
+        /* global seriesTotal: true, scrollObserver: true, scrollObserverOnMobile: true */
 
         async function loadActiveLibraryView({ refresh = false, keepLoaded = false } = {}) {
             return loadSeriesLibrary({ refresh, keepLoaded });

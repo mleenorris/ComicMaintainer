@@ -9,8 +9,29 @@
         // Shared state declared in state.js and reassigned here.
         /* global seriesTotal: true, scrollObserverOnMobile: true */
 
-        async function loadActiveLibraryView({ refresh = false, keepLoaded = false } = {}) {
-            return loadSeriesLibrary({ refresh, keepLoaded });
+        async function loadActiveLibraryView({ refresh = false, keepLoaded = false, quiet = false } = {}) {
+            return loadSeriesLibrary({ refresh, keepLoaded, quiet });
+        }
+
+        // Whether a background refresh was skipped while the library was off
+        // screen; the library refreshes when it is shown again.
+        let libraryRefreshDeferred = false;
+
+        // Something changed on the server (a file arrived or was renamed, a
+        // job finished): refresh the series already loaded in place, with no
+        // spinner and the scroll position kept, instead of starting the list
+        // over from the first page. While neither the library nor a series is
+        // on screen nothing is fetched until the user comes back to it.
+        // `refresh` also reloads the library health and the genre and status
+        // filters (callers that schedule the health refresh themselves pass
+        // false).
+        function refreshActiveLibraryView({ refresh = true } = {}) {
+            if (currentView !== 'library' && currentView !== 'series') {
+                libraryRefreshDeferred = true;
+                return Promise.resolve();
+            }
+            libraryRefreshDeferred = false;
+            return loadActiveLibraryView({ refresh, keepLoaded: true, quiet: true });
         }
 
         // ── Series layout (List / Grid / Compact) ─────────────────────────────
@@ -87,9 +108,32 @@
         // soon as the aborted request settles instead of after a full
         // (possibly slow, on large libraries) response.
         let seriesLoadController = null;
+        // Whether every reload queued behind the one in flight was quiet.
+        let seriesReloadQuiet = true;
 
         function isAbortError(error) {
             return !!error && error.name === 'AbortError';
+        }
+
+        // Whether two series lists would render the same.
+        function sameSeriesList(a, b) {
+            return a.length === b.length && JSON.stringify(a) === JSON.stringify(b);
+        }
+
+        // Runs `render` (which replaces the list's content) without moving the
+        // list: the list scrolls itself on wide screens and the page on phones.
+        function keepingLibraryScroll(render) {
+            const fileList = document.getElementById('fileList');
+            const listTop = fileList ? fileList.scrollTop : 0;
+            const pageTop = window.scrollY;
+            render();
+            restoreLibraryScroll({ listTop, pageTop });
+        }
+
+        function restoreLibraryScroll({ listTop, pageTop }) {
+            const fileList = document.getElementById('fileList');
+            if (fileList) fileList.scrollTop = listTop;
+            window.scrollTo(0, pageTop);
         }
 
         async function loadSeriesLibrary(opts, legacyRefresh) {
@@ -105,11 +149,16 @@
             // down the list stay selected and the list keeps its length.
             let keepLoaded = false;
             let keepCount = 0;
+            // quiet: a background refresh. The series on screen stay there
+            // until the answer arrives (no spinner), are only redrawn if
+            // something changed, and keep their scroll position.
+            let quiet = false;
             if (typeof opts === 'object' && opts !== null) {
                 append = !!opts.append;
                 refresh = !!opts.refresh;
                 keepLoaded = !!opts.keepLoaded;
                 keepCount = Number(opts.keepCount) || 0;
+                quiet = !!opts.quiet && !append;
             } else if (typeof opts === 'boolean') {
                 refresh = opts;
             } else if (typeof opts === 'number') {
@@ -125,6 +174,8 @@
                 // (label updated, content stale) until a manual page refresh.
                 if (!append) {
                     seriesReloadPending = true;
+                    // The reload stays quiet only if every request for it was.
+                    seriesReloadQuiet = seriesReloadQuiet && quiet;
                     // The load in flight may have emptied the list already,
                     // so keep the count it was fetching too; overlapping
                     // keepLoaded refreshes keep the largest count.
@@ -143,17 +194,21 @@
                 ? Math.max(SERIES_PAGE_SIZE, seriesLibrary.length, keepCount)
                 : SERIES_PAGE_SIZE;
 
-            if (refresh || !append) {
+            const replacing = refresh || !append;
+            // A quiet refresh keeps what is on screen until its answer arrives.
+            const previousSeries = quiet ? seriesLibrary : null;
+            if (replacing && !quiet) {
                 seriesLibrary = [];
                 seriesOffset = 0;
                 seriesTotal = 0;
             }
+            const requestOffset = replacing ? 0 : seriesOffset;
 
             // Render an immediate loading state into the file list so that
             // switching to the series view always gives the user feedback,
             // even if the underlying API call is slow on large libraries.
             const fileListEl = document.getElementById('fileList');
-            if (!append && fileListEl && !currentSeriesDetailId) {
+            if (!append && !quiet && fileListEl && !currentSeriesDetailId) {
                 // Restore/close any open action menu (which may be portaled to
                 // <body>) before the list's DOM is replaced below.
                 closeActionDropdowns();
@@ -170,7 +225,7 @@
             const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
             seriesLoadController = controller;
             try {
-                let path = `/api/files/series?offset=${seriesOffset}&limit=${limit}`;
+                let path = `/api/files/series?offset=${requestOffset}&limit=${limit}`;
                 if (refresh) {
                     path += '&refresh=true';
                 }
@@ -195,13 +250,19 @@
 
                 const data = await apiFetch(path, { signal: controller ? controller.signal : undefined });
                 const newSeries = data.series || [];
-                seriesLibrary = seriesLibrary.concat(newSeries);
-                seriesOffset += newSeries.length;
+                seriesLibrary = replacing ? newSeries : seriesLibrary.concat(newSeries);
+                seriesOffset = requestOffset + newSeries.length;
                 seriesTotal = data.total_series || 0;
                 unmarkedCount = data.unmarked_count || 0;
 
                 if (currentSeriesDetailId) {
                     renderSeriesDetail(currentSeriesDetailId);
+                } else if (previousSeries) {
+                    // Most events change nothing that is shown; redraw (and
+                    // re-hydrate every cover) only when something did.
+                    if (!sameSeriesList(previousSeries, seriesLibrary)) {
+                        keepingLibraryScroll(renderSeriesLibrary);
+                    }
                 } else if (!(append && appendSeriesLibraryItems(newSeries))) {
                     renderSeriesLibrary();
                 }
@@ -237,7 +298,9 @@
                     seriesReloadWaiters = [];
                     const reloadKeepCount = seriesReloadKeepCount;
                     seriesReloadKeepCount = 0;
-                    const reload = loadSeriesLibrary({ refresh: false, keepLoaded: reloadKeepCount > 0, keepCount: reloadKeepCount });
+                    const reloadQuiet = seriesReloadQuiet;
+                    seriesReloadQuiet = true;
+                    const reload = loadSeriesLibrary({ refresh: false, keepLoaded: reloadKeepCount > 0, keepCount: reloadKeepCount, quiet: reloadQuiet });
                     waiters.forEach(resolve => resolve(reload));
                 }
             }
@@ -434,6 +497,45 @@
             });
         }
         
+        // Applies saved filter and sort preferences (from the server, or the
+        // copy this device remembered) to the header controls. Returns which
+        // of them changed, so the caller knows whether to reload the list.
+        function applyLibraryQueryPreferences(prefs) {
+            const oldFilterMode = filterMode;
+            const oldSortMode = sortMode;
+            const oldSortDirection = sortDirection;
+
+            if (prefs.filterMode) {
+                filterMode = prefs.filterMode;
+                document.getElementById('headerFilterLabel').textContent = FILTER_LABELS[filterMode] || FILTER_LABELS['all'];
+                document.querySelectorAll('#headerFilterMenu .header-dropdown-item').forEach(item => {
+                    item.classList.toggle('active', item.dataset.filter === filterMode);
+                });
+            }
+
+            if (prefs.sortMode) {
+                sortMode = prefs.sortMode;
+            }
+            if (VALID_SORT_DIRECTIONS.includes(prefs.sortDirection)) {
+                sortDirection = prefs.sortDirection;
+            }
+            if (prefs.sortMode || prefs.sortDirection) {
+                applySortUi();
+            }
+
+            return {
+                filterChanged: filterMode !== oldFilterMode,
+                sortChanged: sortMode !== oldSortMode || sortDirection !== oldSortDirection
+            };
+        }
+
+        // Whether the page the app opens on shows the library (or a series in
+        // it), so the library is needed straight away.
+        function startsOnLibrary() {
+            const { view } = parseHash();
+            return view === 'library' || view === 'series';
+        }
+
         async function setHeaderFilter(mode) {
             filterMode = mode;
             
@@ -597,6 +699,18 @@
         }
 
         /**
+         * The image a series card shows: the provider's series art, asked for
+         * at `width` (the server keeps copies 160, 320, 480 and 640 pixels
+         * wide; the stored original can be 2048), or else the first issue's
+         * cover. The art URL already carries `?v=<hash>`.
+         */
+        function seriesCoverImage(series, width) {
+            if (!series.has_external_image || !series.external_image_url) return series.cover_file_path;
+            const url = series.external_image_url;
+            return `${url}${url.includes('?') ? '&' : '?'}w=${width}`;
+        }
+
+        /**
          * Resolve a `data-protected-image` token to an API path. Tokens
          * that look like API paths (start with "/api/") are used as they are;
          * anything else is treated as a comic file path and routed through the
@@ -617,16 +731,53 @@
         // so each image is only fetched when it (or its container) is close
         // to entering the viewport. The original eager-batch behaviour is
         // kept as a fallback for environments without IntersectionObserver.
+        //
+        // Covers near the viewport load a few at a time, in the order they came
+        // near it. Flinging through a long list would otherwise start a request
+        // for every cover passed, and the covers the user stops at would wait
+        // behind all of them; a cover that scrolled away again before its turn
+        // is skipped, and stays watched so it loads if it comes back.
+        const PROTECTED_IMAGE_CONCURRENCY = 8;
+        const protectedImagesNearViewport = new WeakSet();
+        const protectedImagesQueued = new WeakSet();
+        const protectedImageQueue = [];
+        let protectedImageLoadsRunning = 0;
+
         const PROTECTED_IMAGE_OBSERVER = (typeof IntersectionObserver !== 'undefined')
             ? new IntersectionObserver(entries => {
                 for (const entry of entries) {
-                    if (!entry.isIntersecting) continue;
                     const el = entry.target;
-                    PROTECTED_IMAGE_OBSERVER.unobserve(el);
-                    hydrateOneProtectedImage(el);
+                    if (!entry.isIntersecting) {
+                        protectedImagesNearViewport.delete(el);
+                        continue;
+                    }
+                    protectedImagesNearViewport.add(el);
+                    if (!protectedImagesQueued.has(el)) {
+                        protectedImagesQueued.add(el);
+                        protectedImageQueue.push(el);
+                    }
                 }
+                loadQueuedProtectedImages();
             }, { rootMargin: '400px 0px' })
             : null;
+
+        function loadQueuedProtectedImages() {
+            while (protectedImageLoadsRunning < PROTECTED_IMAGE_CONCURRENCY && protectedImageQueue.length) {
+                const image = protectedImageQueue.shift();
+                protectedImagesQueued.delete(image);
+                if (!image.isConnected || image.dataset.protectedImageLoaded === '1') {
+                    PROTECTED_IMAGE_OBSERVER.unobserve(image);
+                    continue;
+                }
+                if (!protectedImagesNearViewport.has(image)) continue;
+                PROTECTED_IMAGE_OBSERVER.unobserve(image);
+                protectedImageLoadsRunning++;
+                hydrateOneProtectedImage(image).finally(() => {
+                    protectedImageLoadsRunning--;
+                    loadQueuedProtectedImages();
+                });
+            }
+        }
 
         // A cover that failed to load is watched again after a pause that
         // doubles with each failure, so it is fetched once more when it is
@@ -917,18 +1068,46 @@
             }
         }
 
+        // At most this many series' issue lists are fetched at once: "Select all
+        // series" with a thousand series loaded would otherwise send a thousand
+        // requests together. The rest wait their turn, in order.
+        const SERIES_PATH_LOAD_CONCURRENCY = 6;
+        let seriesPathLoadsRunning = 0;
+        const seriesPathLoadQueue = [];
+
+        function queueSeriesFilePaths(seriesId) {
+            return new Promise(resolve => {
+                const run = () => {
+                    seriesPathLoadsRunning++;
+                    fetchSeriesFilePaths(seriesId).then(paths => {
+                        seriesPathLoadsRunning--;
+                        const next = seriesPathLoadQueue.shift();
+                        if (next) next();
+                        resolve(paths);
+                    });
+                };
+                if (seriesPathLoadsRunning < SERIES_PATH_LOAD_CONCURRENCY) {
+                    run();
+                } else {
+                    seriesPathLoadQueue.push(run);
+                }
+            });
+        }
+
         // Toggle selection of a single series in the series list view. Selecting
         // a series adds all of its file paths to `selectedFiles` so the bulk
         // process / rename / normalize actions act on those files.
-        async function toggleSeriesSelection(seriesId, checked) {
+        // `updateUi` false leaves the page to the caller, which selects many
+        // series and updates the page once for all of them.
+        async function toggleSeriesSelection(seriesId, checked, updateUi = true) {
             if (!seriesId) return;
             if (checked) {
                 if (selectedSeries.has(seriesId)) return;
                 selectedSeries.add(seriesId);
                 // Reflect the pending state immediately, then resolve files.
-                const pathLoad = fetchSeriesFilePaths(seriesId);
+                const pathLoad = queueSeriesFilePaths(seriesId);
                 selectedSeriesPathLoads.set(seriesId, pathLoad);
-                updateSeriesSelectionUI();
+                if (updateUi) updateSeriesSelectionUI();
                 const paths = await pathLoad;
                 // A newer selection of this series replaces its pending load, and a
                 // deselect removes it: only the load still registered may apply.
@@ -945,13 +1124,21 @@
                 paths.forEach(p => selectedFiles.delete(p));
                 selectedSeriesFilePaths.delete(seriesId);
             }
-            updateSeriesSelectionUI();
-            updateSelectInfo();
+            if (updateUi) {
+                updateSeriesSelectionUI();
+                updateSelectInfo();
+            }
         }
 
         async function toggleSelectAllSeries(checked) {
             if (checked) {
-                await Promise.all(seriesLibrary.map(s => toggleSeriesSelection(s.id, true)));
+                // Every series shows as selected at once; the page is updated
+                // again when all their files are known, not once per series.
+                const selections = seriesLibrary.map(s => toggleSeriesSelection(s.id, true, false));
+                updateSeriesSelectionUI();
+                await Promise.all(selections);
+                updateSeriesSelectionUI();
+                updateSelectInfo();
             } else {
                 clearSeriesSelection();
             }
@@ -1030,7 +1217,7 @@
                             ${renderSeriesSelectBox(series)}
                             <button class="series-card-open" ${seriesOpenButtonAttributes(series)}>
                                 <div class="series-cover-wrapper">
-                                    <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                    <img class="series-cover" data-protected-image="${escapeHtml(seriesCoverImage(series, 480))}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                     <div class="series-cover-overlay"></div>
                                     <span class="series-count-badge">${series.issue_count}</span>
                                     ${renderLookupStatusBadge(series)}
@@ -1056,7 +1243,7 @@
                             ${renderSeriesSelectBox(series)}
                             <button class="series-card-open" ${seriesOpenButtonAttributes(series)}>
                                 <div class="series-cover-wrapper">
-                                    <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                    <img class="series-cover" data-protected-image="${escapeHtml(seriesCoverImage(series, 480))}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                     <span class="series-count-badge">${series.issue_count}</span>
                                     ${renderLookupStatusBadge(series)}
                                 </div>
@@ -1082,7 +1269,7 @@
                             ${renderSeriesSelectBox(series)}
                             <button class="series-list-row-open" ${seriesOpenButtonAttributes(series)}>
                                 <div class="series-list-thumb-wrapper">
-                                    <img class="series-list-thumb" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                    <img class="series-list-thumb" data-protected-image="${escapeHtml(seriesCoverImage(series, 160))}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                 </div>
                                 <div class="series-list-info">
                                     <h3 class="series-list-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>

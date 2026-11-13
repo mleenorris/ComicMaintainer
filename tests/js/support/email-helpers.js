@@ -314,13 +314,14 @@ function pressKey(page, target, key) {
     return event;
 }
 
-/** Clicks the item of an issue's action menu on a series page. */
+/** Opens an issue's action menu on a series page (its items are built then) and clicks one of them. */
 function clickIssueAction(page, filePath, label) {
     const card = page.$$('.series-issue-card').find(element => element.dataset.filePath === filePath);
     if (!card) throw new Error(`No issue card for ${filePath}`);
-    const item = [...card.querySelectorAll('.dropdown-item')].find(button => button.textContent.trim() === label);
-    if (!item) throw new Error(`No "${label}" action for ${filePath}`);
     page.click(card.querySelector('.dropdown-toggle'));
+    const menu = page.document.getElementById(page.run(`getDropdownId(${JSON.stringify(filePath)})`));
+    const item = menu && [...menu.querySelectorAll('.dropdown-item')].find(button => button.textContent.trim() === label);
+    if (!item) throw new Error(`No "${label}" action for ${filePath}`);
     return page.click(item);
 }
 

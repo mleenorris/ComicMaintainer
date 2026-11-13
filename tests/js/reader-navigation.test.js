@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const { respond } = require('./support/dom');
 const {
     FILE, NEXT_FILE, PREV_FILE, readerUrl, pageImage, adjacentInfo, openReader, press, toasts, pageRequests,
-    progressPosts, adjacentRequests, shownPage, waitForShownPage
+    progressPosts, adjacentRequests, shownPage, waitForShownPage, loadReader
 } = require('./support/reader-helpers');
 
 /**
@@ -299,6 +299,53 @@ test('preloaded neighbours appear instantly while other pages show a spinner', a
     assert.equal(page.$('#readerContent .loading-state').textContent, 'Loading page…');
     assert.ok(page.$('#readerContent #tapZoneRight'));
     await waitForShownPage(page, 'Page 10');
+});
+
+test('turning to a page whose preload is still loading waits for it instead of requesting it again', async () => {
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const page = await openReader({
+        progress: 3,
+        routes: {
+            'GET /api/ComicReader/page': async call => {
+                if (call.query.page === '4') await gate;
+                return pageImage(call);
+            }
+        }
+    });
+    assert.equal(page.run('mangaPageLoads.has(4)'), true, 'page 4 is still being preloaded');
+
+    press(page, 'ArrowRight');
+    await page.settle();
+    release();
+    await waitForShownPage(page, 'Page 4');
+
+    assert.equal(pageRequests(page).filter(request => request.page === 4).length, 1);
+    assert.equal(page.run('mangaPageLoads.size'), 0);
+});
+
+test('preloaded pages are decoded ahead of time; the page being shown is not', async () => {
+    const page = loadReader({
+        progress: 3,
+        beforeScripts(window) {
+            window.decodedImages = [];
+            window.HTMLImageElement.prototype.decode = function decode() {
+                window.decodedImages.push(this.src);
+                return this.src.endsWith('#fail') ? Promise.reject(new Error('EncodingError')) : Promise.resolve();
+            };
+        }
+    });
+    await page.waitFor(() => page.run('mangaPageCache.size') === 4);
+    await page.settle();
+
+    const urlOf = n => page.run(`mangaPageCache.get(${n})`);
+    assert.deepEqual(page.run('decodedImages').slice().sort(), [urlOf(2), urlOf(4), urlOf(5)].sort());
+
+    // A page that cannot be decoded ahead is simply decoded when shown.
+    page.run("predecodeMangaPage('blob:nothing#fail')");
+    page.run('predecodeMangaPage(null)');
+    await page.settle();
+    assert.deepEqual(page.errors, []);
 });
 
 test('a slow page never replaces a page the reader has already moved on to', async () => {

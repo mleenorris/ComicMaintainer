@@ -71,7 +71,8 @@ public static class TestServices
         ComicMaintainerMetrics? metrics = null,
         ILoggerFactory? loggerFactory = null,
         IFileOperationLock? fileLock = null,
-        ComicMaintainer.Core.Notifications.INotificationPublisher? notifications = null)
+        ComicMaintainer.Core.Notifications.INotificationPublisher? notifications = null,
+        IFileCoverWarmupQueue? coverWarmup = null)
     {
         var cache = seriesMetadataCache ?? Mock.Of<ISeriesMetadataCacheService>();
         return new ComicProcessorService(
@@ -90,6 +91,7 @@ public static class TestServices
             comicEmail ?? Mock.Of<IComicEmailService>(),
             fileLock ?? new FileOperationLock(),
             notifications ?? Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>(),
+            coverWarmup ?? Mock.Of<IFileCoverWarmupQueue>(),
             metrics);
     }
 

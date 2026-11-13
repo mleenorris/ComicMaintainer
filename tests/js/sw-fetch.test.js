@@ -10,6 +10,7 @@ const {
     VERSIONED_CACHE,
     DEFAULT_CACHE,
     IMAGE_CACHE,
+    PAGE_CACHE,
     OFFLINE_CACHE,
     OFFLINE_PAGE,
     PRECACHED_READER_PAGE,
@@ -70,6 +71,41 @@ test('API writes and server-sent event streams are left to the browser', async (
 
 // --- documents ----------------------------------------------------------------
 
+test('a navigation the browser preloaded is answered with the preload, not fetched again', async () => {
+    const sw = await installedWorker();
+    sw.network.route('GET /', html(INDEX_PAGE));
+    const preloaded = new Response('<title>preloaded</title>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+
+    const { responded, lifetime } = sw.dispatch('fetch', {
+        request: navigationRequest('/'),
+        clientId: '',
+        resultingClientId: 'window-1',
+        preloadResponse: Promise.resolve(preloaded)
+    });
+    const response = await responded();
+    await Promise.all(lifetime);
+
+    assert.equal(await response.text(), '<title>preloaded</title>');
+    assert.equal(sw.network.calls.length, 0);
+});
+
+test('a navigation whose preload failed or was not made is fetched', async () => {
+    const sw = await installedWorker();
+    sw.network.route('GET /', html(INDEX_PAGE));
+
+    for (const preloadResponse of [Promise.reject(new Error('preload failed')), Promise.resolve(undefined)]) {
+        const { responded, lifetime } = sw.dispatch('fetch', {
+            request: navigationRequest('/'),
+            clientId: '',
+            resultingClientId: 'window-1',
+            preloadResponse
+        });
+        assert.equal(await (await responded()).text(), INDEX_PAGE);
+        await Promise.all(lifetime);
+    }
+    assert.equal(sw.network.calls.length, 2);
+});
+
 test('documents are fetched network-first and the app shell is stored by path for offline use', async () => {
     const sw = await installedWorker();
     sw.network.route('GET /reader.html', html(READER_PAGE));
@@ -79,7 +115,7 @@ test('documents are fetched network-first and the app shell is stored by path fo
 
     assert.equal(await response.text(), READER_PAGE);
     assert.equal(sw.network.calls[0].url, absolute('/reader.html?file=Series%2Fa.cbz'));
-    assert.equal(sw.network.calls[0].init.cache, 'no-store');
+    assert.equal(sw.network.calls[0].init.cache, 'no-cache');
     // Every ?file= URL renders the same document, so it is stored once, by path.
     assert.equal(await sw.caches.text(VERSIONED_CACHE, '/reader.html'), READER_PAGE);
     assert.equal(allCached(sw).some(url => url.includes('?file=')), false);
@@ -182,13 +218,13 @@ test('documents are recognised by navigation mode, destination, Accept header, t
         await sw.respond(request);
     }
 
-    // Documents bypass the HTTP cache...
+    // Documents are revalidated with the server every time...
     assert.deepEqual(sw.network.calls.map(call => [call.path, call.init.cache]), [
-        ['/series/1', 'no-store'],
-        ['/series/2', 'no-store'],
-        ['/series/3', 'no-store'],
-        ['/', 'no-store'],
-        ['/login.html', 'no-store']
+        ['/series/1', 'no-cache'],
+        ['/series/2', 'no-cache'],
+        ['/series/3', 'no-cache'],
+        ['/', 'no-cache'],
+        ['/login.html', 'no-cache']
     ]);
     // ...and the root document is stored even when a script fetched it.
     assert.equal(await sw.caches.text(VERSIONED_CACHE, '/'), '<title>page</title>');
@@ -267,8 +303,8 @@ test('reader requests for comics that were not downloaded use the image cache or
     const info = await sw.respond('/api/ComicReader/info?filePath=b.cbz');
     assert.deepEqual(await info.json(), { filePath: 'b.cbz', fileName: 'b.cbz', pageCount: 2 });
     await sw.idle();
-    // The page is kept in the (bounded) image cache; info is never cached and nothing counts as downloaded.
-    assert.deepEqual(sw.caches.urls(IMAGE_CACHE), [absolute('/api/ComicReader/page?filePath=b.cbz&page=1')]);
+    // The page is kept in the (bounded) page cache; info is never cached and nothing counts as downloaded.
+    assert.deepEqual(sw.caches.urls(PAGE_CACHE), [absolute('/api/ComicReader/page?filePath=b.cbz&page=1')]);
     assert.deepEqual(sw.caches.urls(OFFLINE_CACHE), []);
 
     sw.network.offline = true;
@@ -412,7 +448,7 @@ test('images are cached per sign-in session, so the next user cannot read them f
 
 test('an image that cannot be stored is still served', async () => {
     const sw = await installedWorker();
-    const cache = await sw.caches.open(IMAGE_CACHE);
+    const cache = await sw.caches.open(PAGE_CACHE);
     cache.put = async () => {
         throw new DOMException('Quota exceeded', 'QuotaExceededError');
     };
@@ -420,7 +456,7 @@ test('an image that cannot be stored is still served', async () => {
 
     assert.equal(await (await sw.respond('/api/ComicReader/page?filePath=a.cbz&page=1')).text(), 'page 1');
     await sw.idle();
-    assert.deepEqual(sw.caches.urls(IMAGE_CACHE), []);
+    assert.deepEqual(sw.caches.urls(PAGE_CACHE), []);
 });
 
 test('a failed eviction is ignored', async () => {
@@ -450,6 +486,86 @@ test('the image cache keeps at most 400 entries, evicting the oldest first', asy
     assert.equal(urls.length, 400);
     assert.equal(urls[0], absolute('/api/ComicReader/cover?filePath=c1.cbz'));
     assert.equal(urls[399], absolute('/api/ComicReader/cover?filePath=new.cbz'));
+});
+
+test('reader pages have a cache of their own, so reading does not push the library covers out', async () => {
+    const sw = await installedWorker();
+    const covers = {};
+    for (let i = 0; i < 400; i++) covers[`/api/ComicReader/cover?filePath=c${i}.cbz`] = image(`cover ${i}`);
+    await sw.caches.seed(IMAGE_CACHE, covers);
+    sw.network.route('GET /api/ComicReader/page', call => image(`page ${call.query.page}`));
+
+    for (let page = 1; page <= 3; page++) {
+        await sw.respond(`/api/ComicReader/page?filePath=a.cbz&page=${page}`);
+    }
+    await sw.idle();
+
+    assert.equal(sw.caches.urls(IMAGE_CACHE).length, 400);
+    assert.equal(sw.caches.urls(IMAGE_CACHE)[0], absolute('/api/ComicReader/cover?filePath=c0.cbz'));
+    assert.equal(sw.caches.urls(PAGE_CACHE).length, 3);
+});
+
+test('the page cache keeps at most 150 pages, evicting the oldest first', async () => {
+    const sw = await installedWorker();
+    const pages = {};
+    for (let i = 1; i <= 150; i++) pages[`/api/ComicReader/page?filePath=a.cbz&page=${i}`] = image(`page ${i}`);
+    await sw.caches.seed(PAGE_CACHE, pages);
+    sw.network.route('GET /api/ComicReader/page', image('next page'));
+
+    await sw.respond('/api/ComicReader/page?filePath=b.cbz&page=1');
+    await sw.idle();
+
+    const urls = sw.caches.urls(PAGE_CACHE);
+    assert.equal(urls.length, 150);
+    assert.equal(urls[0], absolute('/api/ComicReader/page?filePath=a.cbz&page=2'));
+    assert.equal(urls[149], absolute('/api/ComicReader/page?filePath=b.cbz&page=1'));
+});
+
+test('series art is cached with the covers', async () => {
+    const sw = await installedWorker();
+    const ART = '/api/series-images/saga?w=480';
+    sw.network.route('GET /api/series-images/saga', image('saga art'));
+
+    assert.equal(await (await sw.respond(ART)).text(), 'saga art');
+    await sw.idle();
+    assert.deepEqual(sw.caches.urls(IMAGE_CACHE), [absolute(ART)]);
+
+    sw.network.offline = true;
+    assert.equal(await (await sw.respond(ART)).text(), 'saga art');
+});
+
+test('an image cached in the last 10 minutes is served without asking the server again', async () => {
+    const sw = await installedWorker();
+    const fetchedAt = minutesAgo => new Date(Date.now() - minutesAgo * 60 * 1000).toUTCString();
+    const cachedImage = (body, minutesAgo) => reply(200, body, { headers: { 'Content-Type': 'image/jpeg', Date: fetchedAt(minutesAgo) } });
+    const OLDER = '/api/ComicReader/cover?filePath=older.cbz';
+    await sw.caches.seed(IMAGE_CACHE, { [COVER]: cachedImage('recent cover', 9), [OLDER]: cachedImage('older cover', 11) });
+    sw.network.route('GET /api/ComicReader/cover', image('cover from the server'));
+
+    assert.equal(await (await sw.respond(COVER)).text(), 'recent cover');
+    assert.equal(await (await sw.respond(OLDER)).text(), 'older cover');
+    await sw.idle();
+
+    // Only the older one was revalidated (and replaced).
+    assert.deepEqual(sw.network.callsTo('/api/ComicReader/cover').map(call => call.query.filePath), ['older.cbz']);
+    assert.equal(await sw.caches.text(IMAGE_CACHE, COVER), 'recent cover');
+    assert.equal(await sw.caches.text(IMAGE_CACHE, OLDER), 'cover from the server');
+});
+
+test('refreshing an image already cached does not trim the cache; storing a new one does', async () => {
+    const sw = await installedWorker();
+    const covers = {};
+    for (let i = 0; i < 401; i++) covers[`/api/ComicReader/cover?filePath=c${i}.cbz`] = image(`cover ${i}`);
+    await sw.caches.seed(IMAGE_CACHE, covers);
+    sw.network.route('GET /api/ComicReader/cover', call => image(`cover of ${call.query.filePath}`));
+
+    await sw.respond('/api/ComicReader/cover?filePath=c5.cbz');
+    await sw.idle();
+    assert.equal(sw.caches.urls(IMAGE_CACHE).length, 401);
+
+    await sw.respond('/api/ComicReader/cover?filePath=new.cbz');
+    await sw.idle();
+    assert.equal(sw.caches.urls(IMAGE_CACHE).length, 400);
 });
 
 // --- other API reads -----------------------------------------------------------

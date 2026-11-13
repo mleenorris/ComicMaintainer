@@ -50,29 +50,66 @@ public class SeriesImagesController : ControllerBase
         _logger = logger;
     }
 
+    /// <summary>Cache policy for an image requested without the current content version.</summary>
+    internal const string RevalidatedCacheControl = "private, max-age=300";
+
+    /// <summary>
+    /// Cache policy for an image requested with <c>v</c> equal to its content hash: that URL only
+    /// ever names these bytes, since a new image is stored under a new hash and the library links
+    /// to it with a new <c>v</c>.
+    /// </summary>
+    internal const string VersionedCacheControl = "private, max-age=31536000, immutable";
+
     /// <summary>
     /// Stream the locally cached series image. Returns 404 when no image is
     /// available so the front-end can fall back to the file-based first-page
     /// cover.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <paramref name="w"/> asks for a copy at most that many pixels wide, for a
+    /// card drawn small: one of 160, 320, 480 or 640 (anything else is a 400). It
+    /// is made once, as WebP, and kept beside the original; an image that is no
+    /// wider is sent as it is, never upscaled. Each width has its own strong ETag.
+    /// </para>
+    /// <para>
+    /// <paramref name="v"/> is the content hash the library's
+    /// <c>external_image_url</c> carries. When it matches the stored image the
+    /// response may be cached for a year (<c>immutable</c>); without it, or when
+    /// it is out of date, for five minutes, then revalidated.
+    /// </para>
+    /// <para>
+    /// Only the image's file, content type and status are looked up, from
+    /// memory after the first request, so a revalidation costs a <c>stat</c>.
+    /// </para>
+    /// </remarks>
     [HttpGet("{normalizedKey}")]
-    public async Task<IActionResult> Get(string normalizedKey, CancellationToken cancellationToken)
+    public async Task<IActionResult> Get(
+        string normalizedKey,
+        CancellationToken cancellationToken,
+        [FromQuery] int? w = null,
+        [FromQuery] string? v = null)
     {
         if (string.IsNullOrWhiteSpace(normalizedKey))
         {
             return BadRequest("Series key is required");
         }
 
-        var record = await _cache.GetAsync(normalizedKey, cancellationToken);
-        if (record is null
-            || string.IsNullOrEmpty(record.LocalImageFile)
-            || string.IsNullOrEmpty(record.ImageContentType)
-            || !record.HasImage)
+        if (w is { } width && !SeriesImageVariants.IsAllowedWidth(width))
+        {
+            return BadRequest(new { error = $"Width must be one of {string.Join(", ", SeriesImageVariants.Widths)}" });
+        }
+
+        var image = await _cache.GetImageAsync(normalizedKey, cancellationToken);
+        if (image is null
+            || string.IsNullOrEmpty(image.LocalImageFile)
+            || string.IsNullOrEmpty(image.ImageContentType)
+            || !image.HasImage)
         {
             return NotFound();
         }
 
-        var path = _imageStore.ResolveAbsolutePath(record.LocalImageFile);
+        var path = _imageStore.ResolveAbsolutePath(image.LocalImageFile);
         if (path is null)
         {
             return NotFound();
@@ -81,14 +118,19 @@ public class SeriesImagesController : ControllerBase
         // Use the file's last-write time and length as a strong ETag (no W/
         // prefix) so browsers can avoid re-downloading unchanged images. Image
         // filenames already include a content hash, so the file mtime is a
-        // stable revalidation token.
+        // stable revalidation token. A downscaled copy is a function of the
+        // original, its width and how copies are made, so its tag adds those.
         var fileInfo = new FileInfo(path);
         if (!fileInfo.Exists)
         {
             return NotFound();
         }
         var lastWriteUtc = fileInfo.LastWriteTimeUtc;
-        var etag = $"\"{lastWriteUtc.Ticks:x}-{fileInfo.Length:x}\"";
+        var etag = w is null
+            ? $"\"{lastWriteUtc.Ticks:x}-{fileInfo.Length:x}\""
+            : $"\"{lastWriteUtc.Ticks:x}-{fileInfo.Length:x}-w{w}v{SeriesImageVariants.Version}\"";
+        var versioned = !string.IsNullOrEmpty(v)
+            && string.Equals(v, SeriesImageVariants.ContentVersionOf(image.LocalImageFile), StringComparison.Ordinal);
         // HTTP dates carry whole seconds, so validators compare at that precision.
         var lastModified = new DateTimeOffset(
             lastWriteUtc.Ticks - (lastWriteUtc.Ticks % TimeSpan.TicksPerSecond),
@@ -106,10 +148,21 @@ public class SeriesImagesController : ControllerBase
         // carry (RFC 9110 §15.4.5), so both responses share these headers.
         Response.Headers[HeaderNames.ETag] = etag;
         Response.Headers[HeaderNames.LastModified] = HeaderUtilities.FormatDate(lastModified);
-        Response.Headers[HeaderNames.CacheControl] = "private, max-age=300";
+        Response.Headers[HeaderNames.CacheControl] = versioned ? VersionedCacheControl : RevalidatedCacheControl;
         if (precondition == StatusCodes.Status304NotModified)
         {
             return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        var contentType = image.ImageContentType;
+        if (w is { } requestedWidth)
+        {
+            var resized = await _imageStore.GetResizedAsync(image.LocalImageFile, image.ImageContentType, requestedWidth, cancellationToken);
+            if (resized is not null)
+            {
+                path = resized.Path;
+                contentType = resized.ContentType;
+            }
         }
 
         FileStream stream;
@@ -138,7 +191,7 @@ public class SeriesImagesController : ControllerBase
         // without RFC 9110's precedence (it applies If-Unmodified-Since alongside
         // a passing If-Match, and lets a passing If-Match override a matching
         // If-Modified-Since).
-        return File(stream, record.ImageContentType, enableRangeProcessing: false);
+        return File(stream, contentType, enableRangeProcessing: false);
     }
 
     /// <summary>

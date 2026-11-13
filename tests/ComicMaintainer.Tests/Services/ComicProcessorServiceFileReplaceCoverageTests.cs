@@ -325,7 +325,8 @@ public class ComicProcessorServiceFileReplaceCoverageTests : IDisposable
                   Mock.Of<IBatchJobRegistry>(),
                   Mock.Of<IComicEmailService>(),
                   new FileOperationLock(),
-                  Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>())
+                  Mock.Of<ComicMaintainer.Core.Notifications.INotificationPublisher>(),
+                  Mock.Of<IFileCoverWarmupQueue>())
         {
             _beforeReplace = beforeReplace;
         }

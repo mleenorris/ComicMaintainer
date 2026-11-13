@@ -1269,9 +1269,23 @@
         // Why the server refused a page (422), by page number, for loadPage to show.
         const mangaPageRefusals = new Map();
 
-        async function fetchMangaPageUrl(pageNum) {
-            if (pageNum < 1 || pageNum > totalPages) return null;
-            if (mangaPageCache.has(pageNum)) return mangaPageCache.get(pageNum);
+        // Pages being fetched, by page number: a page asked for again while its
+        // preload is still in flight (a quick page turn) waits for that request
+        // instead of sending a second one.
+        const mangaPageLoads = new Map();
+
+        function fetchMangaPageUrl(pageNum) {
+            if (pageNum < 1 || pageNum > totalPages) return Promise.resolve(null);
+            if (mangaPageCache.has(pageNum)) return Promise.resolve(mangaPageCache.get(pageNum));
+            if (mangaPageLoads.has(pageNum)) return mangaPageLoads.get(pageNum);
+            const load = requestMangaPageUrl(pageNum).finally(() => {
+                if (mangaPageLoads.get(pageNum) === load) mangaPageLoads.delete(pageNum);
+            });
+            mangaPageLoads.set(pageNum, load);
+            return load;
+        }
+
+        async function requestMangaPageUrl(pageNum) {
             try {
                 const response = await readerApiFetch(`/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`, { json: false });
                 if (!response.ok) {
@@ -1295,6 +1309,18 @@
                 try { URL.revokeObjectURL(url); } catch (_e) { /* noop */ }
             }
             mangaPageCache.clear();
+            mangaPageLoads.clear();
+        }
+
+        // Decode a preloaded page ahead of time, so turning to it does not wait
+        // for a large image to be decoded (noticeable on phones).
+        function predecodeMangaPage(url) {
+            if (!url) return;
+            const image = new Image();
+            image.src = url;
+            if (typeof image.decode === 'function') {
+                image.decode().catch(() => { /* revoked or not an image: decoded when shown */ });
+            }
         }
 
         // Trim the cache so we only keep ~6 nearby pages around `centerPage`.
@@ -1314,9 +1340,9 @@
             for (let i = 1; i <= MANGA_PRELOAD_AHEAD; i++) targets.push(pageNum + i);
             for (let i = 1; i <= MANGA_PRELOAD_BEHIND; i++) targets.push(pageNum - i);
             for (const p of targets) {
-                if (p >= 1 && p <= totalPages && !mangaPageCache.has(p)) {
+                if (p >= 1 && p <= totalPages && !mangaPageCache.has(p) && !mangaPageLoads.has(p)) {
                     // Fire-and-forget; errors are logged inside fetchMangaPageUrl.
-                    fetchMangaPageUrl(p);
+                    fetchMangaPageUrl(p).then(predecodeMangaPage);
                 }
             }
         }

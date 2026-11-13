@@ -37,6 +37,84 @@ function sequence(...answers) {
     };
 }
 
+test('covers near the viewport load eight at a time, in the order they came near it', async () => {
+    const answers = [];
+    const page = await bootWithCovers(makeSeriesList(12), () => {
+        const answer = deferred();
+        answers.push(answer);
+        return answer.promise;
+    });
+    const images = covers(page);
+
+    imageObserver(page).trigger(true, images);
+    await page.settle();
+    assert.equal(coverCalls(page).length, 8);
+
+    answers[0].resolve(imageResponse());
+    await page.settle();
+    assert.equal(coverCalls(page).length, 9);
+    assert.equal(coverCalls(page)[8].query.filePath, 'Series 009/Series 009 #001.cbz');
+
+    for (let i = 1; i < 12; i++) {
+        await page.waitFor(() => answers.length > i);
+        answers[i].resolve(imageResponse());
+        await page.settle();
+    }
+    assert.equal(coverCalls(page).length, 12);
+    assert.ok(images.every(image => image.dataset.protectedImageLoaded === '1'));
+});
+
+test('a cover that scrolled away before its turn is skipped, and loads when it comes back', async () => {
+    const answers = [];
+    const page = await bootWithCovers(makeSeriesList(10), () => {
+        const answer = deferred();
+        answers.push(answer);
+        return answer.promise;
+    });
+    const images = covers(page);
+    const observer = imageObserver(page);
+
+    // Flung past: all ten came near the viewport, then the last two left it.
+    observer.trigger(true, images);
+    observer.trigger(false, images.slice(8));
+    await page.settle();
+    answers.slice(0, 8).forEach(answer => answer.resolve(imageResponse()));
+    await page.settle(3);
+
+    assert.equal(coverCalls(page).length, 8, 'the covers that scrolled away were not fetched');
+    assert.ok(observer.targets.has(images[9]), 'still watched');
+
+    observer.trigger(true, [images[9]]);
+    await page.settle();
+    assert.equal(coverCalls(page).at(-1).query.filePath, 'Series 010/Series 010 #001.cbz');
+    answers[8].resolve(imageResponse());
+    await page.settle();
+    assert.equal(images[9].dataset.protectedImageLoaded, '1');
+    assert.equal(observer.targets.has(images[9]), false);
+});
+
+test('a cover removed from the page, or already loaded, before its turn is dropped', async () => {
+    const answers = [];
+    const page = await bootWithCovers(makeSeriesList(10), () => {
+        const answer = deferred();
+        answers.push(answer);
+        return answer.promise;
+    });
+    const images = covers(page);
+    const observer = imageObserver(page);
+
+    observer.trigger(true, images);
+    await page.settle();
+    images[8].remove();
+    images[9].dataset.protectedImageLoaded = '1';
+    answers.slice(0, 8).forEach(answer => answer.resolve(imageResponse()));
+    await page.settle(3);
+
+    assert.equal(coverCalls(page).length, 8);
+    assert.equal(observer.targets.has(images[8]), false);
+    assert.equal(observer.targets.has(images[9]), false);
+});
+
 test('a cover is fetched with the session token once it nears the viewport and shown from a blob URL', async () => {
     const page = await bootWithCovers(makeSeriesList(2), imageResponse());
     const [first, second] = covers(page);
@@ -133,7 +211,7 @@ test('a missing cover without a fallback is left empty and not requested again',
 
 test('an external image identical to the fallback is not requested twice', async () => {
     const series = makeSeries(1, { has_external_image: true, external_image_url: '/api/series-images/same' });
-    series.cover_file_path = '/api/series-images/same';
+    series.cover_file_path = '/api/series-images/same?w=480';
     const page = await bootLibrary({ series: [series], routes: { 'GET /api/series-images/same': 404 } });
 
     imageObserver(page).trigger(true, covers(page));

@@ -80,6 +80,9 @@
         let scrollObserver = null;
         // Whether scrollObserver was made for the phone layout (page scrolls).
         let scrollObserverOnMobile = false;
+        // Where the library was scrolled to when a series was opened from it
+        // ({ listTop, pageTop }), so Back returns there; null otherwise.
+        let libraryScrollBeforeSeries = null;
         let currentSeriesDetailId = null;
         // Title-based identity for the open series detail. The series id is a
         // union-find representative key whose value can change when an external

@@ -200,13 +200,29 @@ const MAX_RUNTIME_CACHE_ENTRIES = 120;
 // grid does over the network, so serving them cache-first makes scrolling back
 // through an already-visited library effectively instant and works offline.
 //
-// This cache holds *authenticated* responses, so it is cleared on logout via
-// the CLEAR_IMAGE_CACHE message.
+// Reader pages have a cache of their own: a page is a hundred times the size
+// of a cover, and reading one comic would otherwise push the library's covers
+// out of a shared cache.
+//
+// These caches hold *authenticated* responses, so they are cleared on logout
+// via the CLEAR_IMAGE_CACHE message.
 const IMAGE_CACHE_NAME = `${CACHE_PREFIX}images-v1`;
 const MAX_IMAGE_CACHE_ENTRIES = 400;
+const PAGE_CACHE_NAME = `${CACHE_PREFIX}pages-v1`;
+const MAX_PAGE_CACHE_ENTRIES = 150;
 
-// Request paths whose GET responses are safe to cache as images.
-const IMAGE_API_PATHS = ['/api/comicreader/cover', '/api/comicreader/page'];
+// Request paths whose GET responses are safe to cache as images, and the
+// cache each goes to. Series art is under /api/series-images/<key>.
+const IMAGE_CACHES = [
+  { cacheName: IMAGE_CACHE_NAME, maxEntries: MAX_IMAGE_CACHE_ENTRIES, matches: (path) => path === '/api/comicreader/cover' || path.startsWith('/api/series-images/') },
+  { cacheName: PAGE_CACHE_NAME, maxEntries: MAX_PAGE_CACHE_ENTRIES, matches: (path) => path === '/api/comicreader/page' }
+];
+
+// A cached image this recent is served without asking the server again: the
+// server lets the browser reuse covers and pages for an hour anyway, and
+// revalidating rewrote the entry on every view (a library scrolled back and
+// forth rewrote every cover it passed).
+const IMAGE_REVALIDATE_AFTER_MS = 10 * 60 * 1000;
 
 // Comics the user explicitly downloaded for offline reading. These live in
 // their own cache so they are never evicted by the bounded image cache (a
@@ -630,10 +646,25 @@ function replyToMessage(event, payload) {
   }
 }
 
-function isCacheableImageRequest(request, url) {
+// The image cache an image request belongs in ({ cacheName, maxEntries }),
+// or null for anything else.
+function imageCacheFor(request, url) {
+  if (request.method !== 'GET') {
+    return null;
+  }
   const pathname = appPath(url).toLowerCase();
-  return request.method === 'GET' &&
-    IMAGE_API_PATHS.some((path) => pathname === path);
+  return IMAGE_CACHES.find((entry) => entry.matches(pathname)) || null;
+}
+
+function isCacheableImageRequest(request, url) {
+  return imageCacheFor(request, url) !== null;
+}
+
+// Whether a cached image was fetched recently enough to serve as it is. The
+// server's Date header says when; an entry without one is revalidated.
+function isRecentlyFetched(response) {
+  const fetchedAt = Date.parse(response.headers.get('Date') || '');
+  return Number.isFinite(fetchedAt) && Date.now() - fetchedAt < IMAGE_REVALIDATE_AFTER_MS;
 }
 
 // Scope an image cache entry to the requesting session: the cache is shared
@@ -653,25 +684,33 @@ function cacheKeyForRequest(request) {
   return new Request(keyUrl.toString(), { method: request.method });
 }
 
-// Cache-first, but always revalidated in the background: covers/pages are
-// served from cache immediately for speed, while a network fetch runs
-// alongside to refresh the entry if the underlying file changed, or evict it
-// if the session backing it is no longer authorized (401/403). This keeps
-// the fast path but stops it from serving indefinitely-stale or
-// no-longer-authorized content. That work outlasts the response, so it is
-// passed to the fetch `event`'s waitUntil(): the browser may stop the worker
-// once the response is delivered, cutting off anything not passed to it.
+// Cache-first, and revalidated in the background once the entry is older
+// than IMAGE_REVALIDATE_AFTER_MS: covers/pages are served from cache
+// immediately for speed, while a network fetch runs alongside to refresh the
+// entry if the underlying file changed, or evict it if the session backing it
+// is no longer authorized (401/403). This keeps the fast path but stops it
+// from serving indefinitely-stale or no-longer-authorized content. That work
+// outlasts the response, so it is passed to the fetch `event`'s waitUntil():
+// the browser may stop the worker once the response is delivered, cutting off
+// anything not passed to it.
 async function serveImageFromCache(request, event) {
-  const cache = await caches.open(IMAGE_CACHE_NAME);
+  const { cacheName, maxEntries } = imageCacheFor(request, new URL(request.url));
+  const cache = await caches.open(cacheName);
   const cacheKey = cacheKeyForRequest(request);
   const cached = await cache.match(cacheKey);
 
+  if (cached && isRecentlyFetched(cached)) {
+    return cached;
+  }
+
   const networkFetch = fetch(request).then((response) => {
     if (response && response.status === 200) {
-      // Only successful, non-opaque responses are worth storing.
+      // Only successful, non-opaque responses are worth storing. Replacing
+      // an entry does not change how many there are, so only a new one can
+      // take the cache over its limit.
+      const stored = cache.put(cacheKey, response.clone());
       event.waitUntil(
-        cache.put(cacheKey, response.clone())
-          .then(() => trimCache(IMAGE_CACHE_NAME, MAX_IMAGE_CACHE_ENTRIES))
+        (cached ? stored : stored.then(() => trimCache(cacheName, maxEntries)))
           .catch(() => { /* quota errors are non-fatal */ })
       );
     } else if (response && (response.status === 401 || response.status === 403)) {
@@ -822,15 +861,38 @@ self.addEventListener('activate', (event) => {
                 cacheName !== CACHE_NAME &&
                 cacheName !== STATE_CACHE_NAME &&
                 cacheName !== IMAGE_CACHE_NAME &&
+                cacheName !== PAGE_CACHE_NAME &&
                 cacheName !== OFFLINE_CACHE_NAME) {
               console.log('Service Worker: Deleting old cache:', cacheName);
               return caches.delete(cacheName);
             }
           })
         );
-      }).then(() => self.clients.claim())
+      })
+      .then(() => enableNavigationPreload())
+      .then(() => self.clients.claim())
   );
 });
+
+// With navigation preload the browser starts fetching a page while it is
+// still starting this worker, instead of only once the worker asks for it.
+async function enableNavigationPreload() {
+  try {
+    if (self.registration && self.registration.navigationPreload) {
+      await self.registration.navigationPreload.enable();
+    }
+  } catch (error) {
+    console.log('Service Worker: Navigation preload is unavailable', error);
+  }
+}
+
+// A page from the network: the navigation preload's answer when there is
+// one, otherwise a fetch. Either asks the server again (the pages are served
+// no-cache), so an unchanged page costs a 304 rather than the whole page.
+async function networkDocument(event) {
+  const preloaded = await Promise.resolve(event.preloadResponse).catch(() => undefined);
+  return preloaded || fetch(event.request, { cache: 'no-cache' });
+}
 
 // Fetch event - serve from cache when offline, with network-first strategy for API calls
 self.addEventListener('fetch', (event) => {
@@ -872,7 +934,7 @@ self.addEventListener('fetch', (event) => {
   if (isNavigationRequest || path.endsWith('.html')) {
     const isCacheableDocument = request.method === 'GET' && DOCUMENT_CACHE_PATHS.includes(path);
     event.respondWith(
-      fetch(request, { cache: 'no-store' })
+      networkDocument(event)
         .then((response) => {
           // Keep a copy of the app shell so pages downloaded for offline
           // reading can actually be opened without a network.
@@ -1056,7 +1118,7 @@ self.addEventListener('message', (event) => {
   // readable for whoever logs in next. Explicit offline downloads are
   // deliberately *not* cleared here — see OFFLINE_CACHE_NAME above.
   if (event.data.type === 'CLEAR_IMAGE_CACHE') {
-    event.waitUntil(caches.delete(IMAGE_CACHE_NAME));
+    event.waitUntil(Promise.all([caches.delete(IMAGE_CACHE_NAME), caches.delete(PAGE_CACHE_NAME)]));
     return;
   }
 

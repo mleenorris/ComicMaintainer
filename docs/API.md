@@ -233,7 +233,7 @@ Every `/api` and `/opds` response is sent `Cache-Control: no-store, private`, wi
 | `GET /api/files`, `/counts`, `/folders`, `/folders/files`, `/folders/{encodedPath}/files`, `/series`, `/series/facets`, `/series/{seriesId}/issues` | Weak `ETag`, `Cache-Control: private, no-cache` | `If-None-Match` gets `304`. The tag includes the caller's own read state |
 | `GET /api/comicreader/page`, `/api/comicreader/cover`, OPDS pages and covers | Strong `ETag`, `Last-Modified`, `Cache-Control: private, max-age=3600` | `If-None-Match` gets `304`. These must not be stored in shared caches |
 | OPDS file download | Strong `ETag`, `Last-Modified`, `Cache-Control: private, max-age=3600` | Range requests are supported |
-| `GET /api/series-images/{normalizedKey}` | Strong `ETag`, `Last-Modified`, `Cache-Control: private, max-age=300` | `If-None-Match` or `If-Modified-Since` gets `304` |
+| `GET /api/series-images/{normalizedKey}` | Strong `ETag` (one per `w`), `Last-Modified`, `Cache-Control: private, max-age=300`, or `private, max-age=31536000, immutable` when `v` is the stored image's hash | `If-None-Match` or `If-Modified-Since` gets `304` |
 | `GET /api/suwayomi/series/{seriesId}/thumbnail` | `Cache-Control: private, max-age=86400` | None |
 
 ## Request timeouts
@@ -469,7 +469,7 @@ Filter values for the listing routes:
     "latest_modified": 1760000000,
     "cover_file_path": "/watched_dir/Batman/Batman 001.cbz",
     "has_external_image": true,
-    "external_image_url": "/api/series-images/batman",
+    "external_image_url": "/api/series-images/batman?v=3f2a9c0d81b4e7a5",
     "lookup_status": "success",
     "last_lookup_utc": "2026-01-01T00:00:00Z",
     "synopsis": null,
@@ -728,6 +728,9 @@ with status `503`. The text is fixed wording built from the provider name and th
 | `POST` | `/api/series-images/apply-current/all` | Library write | Start a job that re-applies every cover |
 | `POST` | `/api/series-images/apply-current/selected` | Library write | The same for `{"series":[...]}` |
 
+- **`GET /api/series-images/{normalizedKey}`** sends the stored image, or `404` when there is none. Use the `external_image_url` the library returns, which carries `v`, the content hash of the stored image. Optional query parameters:
+  - `w`: one of `160`, `320`, `480` or `640`. The image is sent no wider than that, as `image/webp`, made once and kept; an image that is already no wider is sent as stored, never enlarged. Any other value is `400` with `{"error"}`. Each width has its own `ETag`.
+  - `v`: when it matches the stored image's hash the response may be cached for a year (`immutable`); a new image gets a new hash, so the library links to it with a new `v`. Without it, or with an old one, the current image is sent with `max-age=300`.
 - **`candidates`** takes `query` and `limit` and returns `{"query","candidates":[{"source","canonical_title","image_url","thumbnail_url"}]}`. A provider outage is `503` with the fixed reason as plain text.
 - **Upload** is `multipart/form-data` with one field named `file`, up to 20 MiB. It returns the metadata record.
 - **`from-provider`** takes `{"imageUrl","source"}`. The URL must be public; private addresses are refused with `400`. It answers `409` when a user-uploaded image is in place.

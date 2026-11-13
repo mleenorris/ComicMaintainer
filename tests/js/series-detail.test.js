@@ -14,6 +14,12 @@ const {
 
 const ISSUES = issuesPath('saga');
 
+// An issue card's menu is empty until it is first opened; this builds it the way opening does.
+function menuText(page, card) {
+    page.run(`fillSeriesIssueMenu(${JSON.stringify(card.dataset.filePath)})`);
+    return text(card.querySelector('.dropdown-menu'));
+}
+
 test('renders the series header, synopsis and one card per issue', async () => {
     const series = seriesCard({
         aliases: ['Saga Comic', 'Saga (2012)'],
@@ -52,18 +58,26 @@ test('renders the series header, synopsis and one card per issue', async () => {
     const [first, second, third] = cards;
     assert.ok(first.classList.contains('series-issue-card--read'));
     assert.equal(first.querySelector('.series-issue-read-corner').title, 'Read');
-    assert.match(text(first.querySelector('.dropdown-menu')), /Mark Unread/);
-    assert.doesNotMatch(text(first.querySelector('.dropdown-menu')), /Mark Read|Review Duplicate/);
+    assert.equal(first.querySelector('.dropdown-menu').childElementCount, 0, 'a menu is only built when it is opened');
+    assert.match(menuText(page, first), /Mark Unread/);
+    assert.equal(first.querySelector('.dropdown-menu').querySelectorAll('.dropdown-item').length, 10);
+    // Opening it again keeps what was built.
+    const built = first.querySelector('.dropdown-menu .dropdown-item');
+    assert.match(menuText(page, first), /Mark Unread/);
+    assert.equal(first.querySelector('.dropdown-menu .dropdown-item'), built);
+    // Nothing to build for a card that is not in the open series.
+    page.run("fillSeriesIssueMenu('/comics/Other/Other 001.cbz')");
+    assert.doesNotMatch(menuText(page, first), /Mark Read|Review Duplicate/);
     assert.ok(second.classList.contains('series-issue-card--unread'));
     assert.equal(second.querySelector('.series-issue-read-corner').title, 'Unread');
-    assert.match(text(second.querySelector('.dropdown-menu')), /Mark Read/);
+    assert.match(menuText(page, second), /Mark Read/);
     assert.equal(text(second.querySelector('.series-issue-badge')), '#2');
     assert.equal(text(second.querySelector('.series-issue-title')), 'Saga #2');
     assert.equal(text(second.querySelector('.series-issue-subtitle')), '2012');
     assert.equal(text(second.querySelector('.series-issue-body .series-detail-meta')), '1.0 MB');
     assert.ok(third.classList.contains('series-issue-card--duplicate'));
     assert.equal(text(third.querySelector('.series-issue-duplicate-badge')), '🔁 Duplicate');
-    assert.match(text(third.querySelector('.dropdown-menu')), /Review Duplicate/);
+    assert.match(menuText(page, third), /Review Duplicate/);
     assert.equal(text(third.querySelector('.series-issue-subtitle')), '2012 · Vol. 1');
 
     assert.equal(text(panel.querySelector('.series-detail-selection-meta')), '3 issues in this series');
@@ -108,7 +122,7 @@ test('shows the external series image with the first issue as fallback', async (
     });
 
     const cover = page.$('#seriesDetailPanel .series-detail-cover');
-    assert.equal(cover.dataset.protectedImage, '/api/series-images/saga');
+    assert.equal(cover.dataset.protectedImage, '/api/series-images/saga?w=480');
     assert.equal(cover.dataset.protectedImageFallback, '/comics/Saga/Saga 001.cbz');
     assert.equal(cover.alt, 'Saga cover');
     const meta = page.$$('#seriesDetailPanel .series-detail-summary .series-detail-meta').map(text);
@@ -375,6 +389,7 @@ test('read-only users get the page without its write controls', async () => {
     });
 
     assert.ok(page.document.body.classList.contains('user-read-only'));
+    issueCards(page).forEach(card => menuText(page, card));
     const writeOnly = page.$$('#seriesDetailPanel [data-requires-write]').map(text);
     assert.ok(writeOnly.includes('Email Selected'));
     assert.ok(writeOnly.includes('Email All Issues'));

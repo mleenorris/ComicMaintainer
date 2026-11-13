@@ -73,13 +73,9 @@ public class HtmlVersionInjectionMiddleware
 
         if (filePath != null && File.Exists(filePath))
         {
-            var content = InjectPlaceholders(await File.ReadAllTextAsync(filePath), _version, _basePath);
-
-            // HTML must never be cached; the cache-busting query strings inside
-            // depend on the HTML being re-fetched on every navigation.
-            context.Response.Headers["Cache-Control"] = "no-store, private";
-            context.Response.ContentType = "text/html; charset=utf-8";
-            await context.Response.WriteAsync(content);
+            // The cache-busting query strings inside depend on the HTML being asked for again on every navigation:
+            // it is sent no-cache, with an ETag so that an unchanged page is a 304.
+            await HtmlPageResponder.WriteAsync(context, filePath, _version, _basePath);
             return;
         }
 

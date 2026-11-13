@@ -86,6 +86,9 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
             ImageStatus = status
         };
 
+    private static SeriesImageRecord ImageOf(string? file = "batman-abc.png", string? contentType = "image/png", string? status = "downloaded") =>
+        new(file, contentType, status);
+
     private string WriteImage(string name = "batman-abc.png")
     {
         var path = Path.Join(_dir, name);
@@ -153,7 +156,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal("Series key is required", bad.Value);
-        _cache.Verify(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _cache.Verify(c => c.GetImageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -162,7 +165,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         var result = await CreateController().Get("batman", _cts.Token);
 
         Assert.IsType<NotFoundResult>(result);
-        _cache.Verify(c => c.GetAsync("batman", _cts.Token), Times.Once);
+        _cache.Verify(c => c.GetImageAsync("batman", _cts.Token), Times.Once);
         _imageStore.Verify(s => s.ResolveAbsolutePath(It.IsAny<string>()), Times.Never);
     }
 
@@ -175,8 +178,8 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     [InlineData("batman-abc.png", "image/png", null)]
     public async Task Get_RecordWithoutServableImage_ReturnsNotFound(string? file, string? contentType, string? status)
     {
-        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(ImageRecord(file, contentType, status));
+        _cache.Setup(c => c.GetImageAsync("batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ImageOf(file, contentType, status));
 
         var result = await CreateController().Get("batman", CancellationToken.None);
 
@@ -187,7 +190,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     [Fact]
     public async Task Get_ImageFileOutsideStore_ReturnsNotFound()
     {
-        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
+        _cache.Setup(c => c.GetImageAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageOf());
         _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(default(string?));
 
         var result = await CreateController().Get("batman", CancellationToken.None);
@@ -202,8 +205,8 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     public async Task Get_CachedImage_StreamsFileWithValidators(string status)
     {
         var path = WriteImage();
-        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(ImageRecord(status: status));
+        _cache.Setup(c => c.GetImageAsync("batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ImageOf(status: status));
         _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
         var controller = CreateController();
 
@@ -222,6 +225,124 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         Assert.Equal("private, max-age=300", controller.Response.Headers[HeaderNames.CacheControl].ToString());
     }
 
+    // ---- Get: card-sized copies and versioned URLs -----------------------------------------
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(100)]
+    [InlineData(321)]
+    [InlineData(2048)]
+    public async Task Get_WidthThatIsNotOffered_IsABadRequestWithoutALookup(int width)
+    {
+        var result = await CreateController().Get("batman", CancellationToken.None, w: width);
+
+        var bad = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("Width must be one of 160, 320, 480, 640", ErrorOf(bad.Value));
+        _cache.Verify(c => c.GetImageAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Get_Width_ServesTheDownscaledCopyUnderItsOwnTag()
+    {
+        var path = WriteImage();
+        var copy = WriteImage("batman-abc.w320v1.webp");
+        _cache.Setup(c => c.GetImageAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageOf());
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
+        _imageStore.Setup(s => s.GetResizedAsync("batman-abc.png", "image/png", 320, _cts.Token))
+            .ReturnsAsync(new SeriesImageFile(copy, "image/webp"));
+        var controller = CreateController();
+
+        var result = await controller.Get("batman", _cts.Token, w: 320);
+
+        var file = Assert.IsType<FileStreamResult>(result);
+        await using var stream = file.FileStream;
+        Assert.Equal(copy, ((FileStream)stream).Name);
+        Assert.Equal("image/webp", file.ContentType);
+        var etag = controller.Response.Headers[HeaderNames.ETag].ToString();
+        Assert.Equal(ExpectedEtag(path).TrimEnd('"') + "-w320v1\"", etag);
+        Assert.NotEqual(ExpectedEtag(path), etag);
+    }
+
+    [Fact]
+    public async Task Get_EachWidthHasItsOwnTag()
+    {
+        var path = WriteImage();
+        _cache.Setup(c => c.GetImageAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageOf());
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
+        _imageStore.Setup(s => s.GetResizedAsync("batman-abc.png", "image/png", It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageFile(path, "image/png"));
+
+        var tags = new List<string>();
+        foreach (var width in new int?[] { null, 160, 320, 480, 640 })
+        {
+            var controller = CreateController();
+            await using var stream = Assert.IsType<FileStreamResult>(await controller.Get("batman", CancellationToken.None, w: width)).FileStream;
+            tags.Add(controller.Response.Headers[HeaderNames.ETag].ToString());
+        }
+
+        Assert.Equal(tags.Count, tags.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task Get_WidthRevalidation_IsAnsweredWithoutMakingTheCopy()
+    {
+        var path = WriteImage();
+        _cache.Setup(c => c.GetImageAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageOf());
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
+        var controller = CreateController(ifNoneMatch: ExpectedEtag(path).TrimEnd('"') + "-w160v1\"");
+
+        var result = await controller.Get("batman", CancellationToken.None, w: 160);
+
+        Assert.Equal(StatusCodes.Status304NotModified, Assert.IsType<StatusCodeResult>(result).StatusCode);
+        _imageStore.Verify(s => s.GetResizedAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Get_CurrentContentVersion_MayBeCachedForAYear()
+    {
+        var path = WriteImage("batman-0123456789abcdef.png");
+        _cache.Setup(c => c.GetImageAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageOf("batman-0123456789abcdef.png"));
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-0123456789abcdef.png")).Returns(path);
+        var controller = CreateController();
+
+        var result = await controller.Get("batman", CancellationToken.None, v: "0123456789abcdef");
+
+        await using var stream = Assert.IsType<FileStreamResult>(result).FileStream;
+        Assert.Equal("private, max-age=31536000, immutable", controller.Response.Headers[HeaderNames.CacheControl].ToString());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("fedcba9876543210")]
+    public async Task Get_MissingOrOutdatedContentVersion_IsRevalidatedAfterFiveMinutes(string? version)
+    {
+        // A card rendered before the image was replaced asks with the old hash: it gets the new image, but only
+        // for as long as a URL without a version would.
+        var path = WriteImage("batman-0123456789abcdef.png");
+        _cache.Setup(c => c.GetImageAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageOf("batman-0123456789abcdef.png"));
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-0123456789abcdef.png")).Returns(path);
+        var controller = CreateController();
+
+        var result = await controller.Get("batman", CancellationToken.None, v: version);
+
+        await using var stream = Assert.IsType<FileStreamResult>(result).FileStream;
+        Assert.Equal("private, max-age=300", controller.Response.Headers[HeaderNames.CacheControl].ToString());
+    }
+
+    [Fact]
+    public async Task Get_VersionOfAStoredNameWithoutAHash_IsNeverCachedForLong()
+    {
+        var path = WriteImage();
+        _cache.Setup(c => c.GetImageAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageOf());
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
+        var controller = CreateController();
+
+        await using var stream = Assert.IsType<FileStreamResult>(await controller.Get("batman", CancellationToken.None, v: "abc")).FileStream;
+
+        Assert.Equal("private, max-age=300", controller.Response.Headers[HeaderNames.CacheControl].ToString());
+    }
+
     [Theory]
     [InlineData("{etag}")]
     [InlineData("W/{etag}")]
@@ -236,7 +357,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         // (RFC 9110 §13.1.2, §15.4.5).
         var path = WriteImage();
         var etag = ExpectedEtag(path);
-        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
+        _cache.Setup(c => c.GetImageAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageOf());
         _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
         var controller = CreateController(ifNoneMatch: ifNoneMatch.Replace("{etag}", etag, StringComparison.Ordinal));
 
@@ -255,7 +376,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     public async Task Get_StaleIfNoneMatch_ReturnsFreshFile(string ifNoneMatch)
     {
         var path = WriteImage();
-        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
+        _cache.Setup(c => c.GetImageAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageOf());
         _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(path);
         var controller = CreateController(ifNoneMatch: ifNoneMatch);
 
@@ -310,7 +431,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     {
         var imagePath = WriteImage();
         path = imagePath;
-        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
+        _cache.Setup(c => c.GetImageAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageOf());
         _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(imagePath);
         return CreateController(
             ifNoneMatch?.Invoke(imagePath),
@@ -468,7 +589,7 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
     [Fact]
     public async Task Get_ImageDeletedAfterResolving_ReturnsNotFound()
     {
-        _cache.Setup(c => c.GetAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageRecord());
+        _cache.Setup(c => c.GetImageAsync("batman", It.IsAny<CancellationToken>())).ReturnsAsync(ImageOf());
         _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.png")).Returns(Path.Join(_dir, "gone.png"));
         var controller = CreateController();
 

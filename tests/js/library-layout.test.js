@@ -195,10 +195,22 @@ test('series with an external image use it as the cover and fall back to the fir
         const images = page.$$('#fileList img[data-protected-image]');
 
         assert.deepEqual(images.map(image => [image.dataset.protectedImage, image.dataset.protectedImageFallback]), [
-            ['/api/series-images/abc', 'Series 001/Series 001 #001.cbz'],
+            [`/api/series-images/abc?w=${layout === 'list' ? 160 : 480}`, 'Series 001/Series 001 #001.cbz'],
             ['Series 002/Series 002 #001.cbz', '']
         ], layout);
         assert.equal(images[0].alt, 'Series 001 cover');
+        page.close();
+    }
+});
+
+// The art is asked for at the width the card shows it, not as the provider's original (up to 2048 pixels).
+test('series art is asked for at the width its card shows, after the version the server put in the link', async () => {
+    const versioned = makeSeries(1, { has_external_image: true, external_image_url: '/api/series-images/abc?v=0123456789abcdef' });
+
+    for (const [layout, width] of [['compact', 480], ['grid', 480], ['list', 160]]) {
+        const page = await bootLibrary({ series: [versioned], localStorage: { seriesLayout: layout } });
+        const [image] = page.$$('#fileList img[data-protected-image]');
+        assert.equal(image.dataset.protectedImage, `/api/series-images/abc?v=0123456789abcdef&w=${width}`, layout);
         page.close();
     }
 });

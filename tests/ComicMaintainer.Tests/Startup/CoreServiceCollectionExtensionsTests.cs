@@ -398,6 +398,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
         Assert.Contains(typeof(FileWatcherHostedService), hostedServiceTypes);
         Assert.Contains(typeof(DatabaseCleanupHostedService), hostedServiceTypes);
         Assert.Contains(typeof(ArchiveMetadataScanHostedService), hostedServiceTypes);
+        Assert.Contains(typeof(FileCoverWarmupHostedService), hostedServiceTypes);
         Assert.Contains(typeof(JobStateReconciliationHostedService), hostedServiceTypes);
         Assert.Contains(typeof(AutheliaHealthMonitor), hostedServiceTypes);
         // The sweep for interrupted archive writes starts before the file watcher.
@@ -405,7 +406,7 @@ public sealed class CoreServiceCollectionExtensionsTests : IDisposable
             hostedServiceTypes.IndexOf(typeof(ArchiveWriteRecoveryHostedService)) is >= 0 and var sweep &&
             sweep < hostedServiceTypes.IndexOf(typeof(FileWatcherHostedService)));
         // The scheduled-jobs runner is registered through a factory so it is a single instance.
-        Assert.Equal(10, hostedServiceTypes.Count);
+        Assert.Equal(11, hostedServiceTypes.Count);
     }
 
     private static IConfiguration BuildConfiguration(params (string Key, string? Value)[] settings)

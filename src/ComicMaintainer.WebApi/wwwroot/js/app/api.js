@@ -468,11 +468,39 @@
         }
         
         async function setPreferences(prefs) {
+            rememberLibraryQuery(prefs);
             try {
                 await apiFetch('/api/preferences', { method: 'PUT', body: prefs });
             } catch (error) {
                 console.error('Error setting preferences:', error);
             }
+        }
+
+        // The library's filter and sort preferences, kept on this device too so
+        // the next start can request the library with them straight away
+        // instead of waiting for /api/preferences (the server's copy still wins
+        // when it arrives).
+        const LIBRARY_QUERY_KEY = 'libraryQuery';
+        const LIBRARY_QUERY_FIELDS = ['filterMode', 'sortMode', 'sortDirection'];
+
+        function rememberedLibraryQuery() {
+            try {
+                const stored = JSON.parse(localStorage.getItem(LIBRARY_QUERY_KEY) || '{}');
+                return stored && typeof stored === 'object' ? stored : {};
+            } catch (_e) {
+                return {};
+            }
+        }
+
+        function rememberLibraryQuery(prefs) {
+            if (!prefs || !LIBRARY_QUERY_FIELDS.some(field => typeof prefs[field] === 'string')) return;
+            const query = rememberedLibraryQuery();
+            for (const field of LIBRARY_QUERY_FIELDS) {
+                if (typeof prefs[field] === 'string') query[field] = prefs[field];
+            }
+            try {
+                localStorage.setItem(LIBRARY_QUERY_KEY, JSON.stringify(query));
+            } catch (_e) { /* storage full or unavailable: the server's copy still applies */ }
         }
         
         function showMessage(message, type = 'info', options = {}) {

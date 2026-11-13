@@ -26,6 +26,13 @@ for it.
 - Library covers that are not cached yet are generated at most one per processor core at a time. JPEG pages
   are decoded at a reduced size for the thumbnail, which takes a fraction of the time and memory.
 - In a series, a run of more than 12 missing issues is shown as one card for the whole range.
+- When files change or a job finishes, the library refreshes the series already loaded in place: no
+  spinner, no jump back to the top, and the cards are only redrawn if something they show changed. While
+  another page is open, the library refreshes when you return to it.
+- Back from a series returns to the same place in the library.
+- Reader pages are cached on the device separately from library covers (150 pages), so reading a comic no
+  longer pushes covers out of the cache. Series art is cached on the device too. A cover or page cached in
+  the last 10 minutes is shown without asking the server again.
 
 ### Fixed
 

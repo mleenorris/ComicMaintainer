@@ -433,7 +433,7 @@
                 if (currentSeriesDetailId) {
                     loadSeriesIssues(currentSeriesDetailId, true);
                 } else {
-                    loadActiveLibraryView();
+                    refreshActiveLibraryView({ refresh: false });
                 }
             }, FILE_LIST_REFRESH_DEBOUNCE_DELAY);
 
@@ -497,7 +497,7 @@
                             await loadSeriesIssues(currentSeriesDetailId, true);
                             scheduleLibraryHealthRefresh();
                         } else {
-                            await loadActiveLibraryView({ refresh: true });
+                            await refreshActiveLibraryView();
                         }
                         // Close modal after refresh completes, unless another job
                         // was started meanwhile

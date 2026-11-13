@@ -84,6 +84,10 @@
                 seriesIssueRangeSelectArmed = false;
             }
             currentView = route.view;
+            if (route.view !== 'series' && route.view !== 'library') {
+                // Only a direct return from the series returns to the old place.
+                libraryScrollBeforeSeries = null;
+            }
             if (route.view !== 'settings') {
                 settingsReturnHash = window.location.hash || '#/home';
             }
@@ -203,9 +207,16 @@
 
         // Render the full library list (reuses the existing series grid/list).
         function renderLibraryView() {
+            // Back from a series opened from here: return to the same place.
+            const savedScroll = libraryScrollBeforeSeries;
+            libraryScrollBeforeSeries = null;
             if (seriesLibrary.length) {
                 renderSeriesLibrary();
+                if (savedScroll) restoreLibraryScroll(savedScroll);
+                // Something changed while the library was off screen.
+                if (libraryRefreshDeferred) refreshActiveLibraryView();
             } else if (!seriesLoading) {
+                libraryRefreshDeferred = false;
                 loadActiveLibraryView();
             }
             updateLibraryViewLayout();

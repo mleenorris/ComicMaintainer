@@ -10,6 +10,12 @@
             // Remember where we came from so Back returns to the right place,
             // then navigate to the series route (the router renders the detail).
             seriesDetailOrigin = (currentView === 'home') ? 'home' : 'library';
+            if (seriesDetailOrigin === 'library') {
+                // The series replaces the list; Back renders the list again
+                // and returns to this place in it.
+                const fileList = document.getElementById('fileList');
+                libraryScrollBeforeSeries = { listTop: fileList ? fileList.scrollTop : 0, pageTop: window.scrollY };
+            }
             navigate('#/series/' + encodeURIComponent(seriesId));
         }
 

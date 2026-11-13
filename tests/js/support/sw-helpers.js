@@ -31,6 +31,7 @@ const APP_VERSION = '2.0.351.0';
 const VERSIONED_CACHE = 'comic-maintainer-2-0-351-0';
 const DEFAULT_CACHE = 'comic-maintainer-v2';
 const IMAGE_CACHE = 'comic-maintainer-images-v1';
+const PAGE_CACHE = 'comic-maintainer-pages-v1';
 const OFFLINE_CACHE = 'comic-maintainer-offline-comics-v1';
 const REPLY = Symbol('reply');
 const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
@@ -571,6 +572,7 @@ module.exports = {
     VERSIONED_CACHE,
     DEFAULT_CACHE,
     IMAGE_CACHE,
+    PAGE_CACHE,
     OFFLINE_CACHE,
     PRECACHED_READER_PAGE,
     NAVIGATION_ACCEPT,

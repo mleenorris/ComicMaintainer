@@ -6,6 +6,9 @@
         // <script> tags there); this file must not run code at load time that
         // depends on a script loaded after it.
 
+        // Shared state declared in state.js and library.js and reassigned here.
+        /* global libraryScrollBeforeSeries: true, libraryRefreshDeferred: true */
+
         // Initialization function that runs after DOM is ready
         // ── Top-level SPA routing ─────────────────────────────────────────────
         // Hash-based routes keep the app a static SPA while giving each
@@ -296,7 +299,7 @@
         }
 
         function renderOverviewCard(series, resume) {
-            const cover = series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path;
+            const cover = seriesCoverImage(series, 480);
             const fallback = series.has_external_image && series.external_image_url ? series.cover_file_path : '';
             const resumeBtn = (resume && series.resume_file_path)
                 ? `<button type="button" class="overview-resume-btn" onclick="event.stopPropagation(); readComic('${escapeJs(series.resume_file_path)}')">${uiIcon('play')} Resume</button>`

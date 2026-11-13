@@ -660,6 +660,18 @@
         }
 
         /**
+         * The image a series card shows: the provider's series art, asked for
+         * at `width` (the server keeps copies 160, 320, 480 and 640 pixels
+         * wide; the stored original can be 2048), or else the first issue's
+         * cover. The art URL already carries `?v=<hash>`.
+         */
+        function seriesCoverImage(series, width) {
+            if (!series.has_external_image || !series.external_image_url) return series.cover_file_path;
+            const url = series.external_image_url;
+            return `${url}${url.includes('?') ? '&' : '?'}w=${width}`;
+        }
+
+        /**
          * Resolve a `data-protected-image` token to an API path. Tokens
          * that look like API paths (start with "/api/") are used as they are;
          * anything else is treated as a comic file path and routed through the
@@ -1093,7 +1105,7 @@
                             ${renderSeriesSelectBox(series)}
                             <button class="series-card-open" ${seriesOpenButtonAttributes(series)}>
                                 <div class="series-cover-wrapper">
-                                    <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                    <img class="series-cover" data-protected-image="${escapeHtml(seriesCoverImage(series, 480))}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                     <div class="series-cover-overlay"></div>
                                     <span class="series-count-badge">${series.issue_count}</span>
                                     ${renderLookupStatusBadge(series)}
@@ -1119,7 +1131,7 @@
                             ${renderSeriesSelectBox(series)}
                             <button class="series-card-open" ${seriesOpenButtonAttributes(series)}>
                                 <div class="series-cover-wrapper">
-                                    <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                    <img class="series-cover" data-protected-image="${escapeHtml(seriesCoverImage(series, 480))}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                     <span class="series-count-badge">${series.issue_count}</span>
                                     ${renderLookupStatusBadge(series)}
                                 </div>
@@ -1145,7 +1157,7 @@
                             ${renderSeriesSelectBox(series)}
                             <button class="series-list-row-open" ${seriesOpenButtonAttributes(series)}>
                                 <div class="series-list-thumb-wrapper">
-                                    <img class="series-list-thumb" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                    <img class="series-list-thumb" data-protected-image="${escapeHtml(seriesCoverImage(series, 160))}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                 </div>
                                 <div class="series-list-info">
                                     <h3 class="series-list-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>

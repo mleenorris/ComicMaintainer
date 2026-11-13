@@ -33,6 +33,8 @@ for it.
 - Reader pages are cached on the device separately from library covers (150 pages), so reading a comic no
   longer pushes covers out of the cache. Series art is cached on the device too. A cover or page cached in
   the last 10 minutes is shown without asking the server again.
+- Series cards ask for series art at the width they show it (160 pixels in the list, 480 in the grids, the
+  overview and the series page) instead of the provider's original, which can be 2048 pixels wide.
 - Reading a solid CBR no longer decompresses the archive from its start for every page. The reader keeps
   its place in the archive between page turns, and the pages it fetches ahead are read in one pass instead
   of one each. Going back a page starts again from the beginning, as before.

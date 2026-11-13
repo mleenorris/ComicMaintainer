@@ -108,7 +108,7 @@ test('shows the external series image with the first issue as fallback', async (
     });
 
     const cover = page.$('#seriesDetailPanel .series-detail-cover');
-    assert.equal(cover.dataset.protectedImage, '/api/series-images/saga');
+    assert.equal(cover.dataset.protectedImage, '/api/series-images/saga?w=480');
     assert.equal(cover.dataset.protectedImageFallback, '/comics/Saga/Saga 001.cbz');
     assert.equal(cover.alt, 'Saga cover');
     const meta = page.$$('#seriesDetailPanel .series-detail-summary .series-detail-meta').map(text);

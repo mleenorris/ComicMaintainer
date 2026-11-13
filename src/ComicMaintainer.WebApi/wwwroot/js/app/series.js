@@ -6,6 +6,9 @@
         // <script> tags there); this file must not run code at load time that
         // depends on a script loaded after it.
 
+        // Shared state declared in state.js and reassigned here.
+        /* global libraryScrollBeforeSeries: true */
+
         function openSeriesDetail(seriesId) {
             // Remember where we came from so Back returns to the right place,
             // then navigate to the series route (the router renders the detail).
@@ -1075,7 +1078,7 @@
                     <div class="series-detail-header">
                         <button type="button" class="btn btn-small series-detail-back" onclick="closeSeriesDetail()">${uiIcon('arrow-left')} Back to Series</button>
                         <div class="series-detail-summary">
-                            <img class="series-detail-cover" data-protected-image="${series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path}" data-protected-image-fallback="${series.has_external_image && series.external_image_url ? series.cover_file_path : ''}" alt="${series.title} cover" loading="lazy" decoding="async" fetchpriority="low">
+                            <img class="series-detail-cover" data-protected-image="${seriesCoverImage(series, 480)}" data-protected-image-fallback="${series.has_external_image && series.external_image_url ? series.cover_file_path : ''}" alt="${series.title} cover" loading="lazy" decoding="async" fetchpriority="low">
                             <div class="series-detail-summary-body">
                                 <h2>${series.title} ${rawHtml(renderLookupStatusBadge(series))}</h2>
                                 <div class="series-detail-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>

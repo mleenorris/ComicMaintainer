@@ -28,6 +28,17 @@ internal sealed class RentedBufferStream : MemoryStream
         }
     }
 
+    /// <summary>The bytes, without copying them; valid until the stream is disposed.</summary>
+    public ReadOnlySpan<byte> Bytes
+    {
+        get
+        {
+            var rented = _rented;
+            ObjectDisposedException.ThrowIf(rented is null, this);
+            return rented.AsSpan(0, (int)Length);
+        }
+    }
+
     /// <summary>The bytes as a new array of their exact length, for callers that keep them.</summary>
     public byte[] ToExactArray()
     {

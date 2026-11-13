@@ -20,7 +20,9 @@ namespace ComicMaintainer.Core.Services;
 /// against the file's length and last-write time. Counting pages costs only a
 /// <c>stat</c>; a page turn opens the archive only to read the one entry it
 /// shows, at the position the list recorded (for a CBR, enumeration stops at
-/// that entry), with no filtering or sorting. Concurrent requests for an
+/// that entry), with no filtering or sorting. For a CBZ the list also records
+/// where each page lies in the file, so a page turn reads that page's local
+/// header and data without reading the archive's directory again. Concurrent requests for an
 /// archive that is not cached yet (the reader asks for the page count and
 /// prefetches several pages at once) share one listing.
 /// </para>
@@ -75,6 +77,7 @@ public class ComicReaderService : IComicReaderService, IDisposable
 
     private int _listingCount;
     private int _pageReadCount;
+    private int _locatedPageReadCount;
 
     public ComicReaderService(ILogger<ComicReaderService> logger)
         : this(logger, DefaultPageIndexCacheBytes)
@@ -111,6 +114,11 @@ public class ComicReaderService : IComicReaderService, IDisposable
 
     /// <summary>Number of times a page entry has been opened (for tests).</summary>
     internal int PageReadCount => Volatile.Read(ref _pageReadCount);
+
+    /// <summary>
+    /// Number of CBZ pages opened from where the listing found them, without opening the archive (for tests).
+    /// </summary>
+    internal int LocatedPageReadCount => Volatile.Read(ref _locatedPageReadCount);
 
     // Refusals by the archive read limits pass through every public method
     // unlogged: they were logged where they were found (see LogRefused).
@@ -358,12 +366,15 @@ public class ComicReaderService : IComicReaderService, IDisposable
     {
         using var archive = ComicArchiveReader.Open(version.Path);
         var pages = archive.ListPagesForReading();
+        var locators = pages.Select(p => p.Locator).ToArray();
         return new PageIndex(
             version,
             pages.Select(p => p.Page.Name).ToArray(),
             pages.Select(p => p.Page.Position).ToArray(),
             pages.Select(p => p.NeedsSolidPass).ToArray(),
-            refusal: null);
+            refusal: null,
+            locators.Any(l => l is not null) ? locators : null,
+            singleVolume: !archive.IsMultiVolume);
     }
 
     /// <summary>
@@ -372,12 +383,26 @@ public class ComicReaderService : IComicReaderService, IDisposable
     /// the cached position is no longer the expected one (the file changed without its length or
     /// timestamp changing), so the caller can rebuild.
     /// </summary>
-    private static Stream? OpenPage(PageIndex index, int pageNumber, CancellationToken cancellationToken)
+    /// <remarks>
+    /// A CBZ page is first opened from where the listing found it in the file, which reads its
+    /// local header and its data and nothing else (see <see cref="ComicArchiveReader.TryOpenZipPage"/>).
+    /// Only when the file does not match what the listing recorded is the archive opened and its
+    /// directory read. A RAR that was a single file when it was listed is opened as one, without
+    /// looking for volumes that follow it.
+    /// </remarks>
+    private Stream? OpenPage(PageIndex index, int pageNumber, CancellationToken cancellationToken)
     {
         var expectedName = index.Names[pageNumber - 1];
         var position = index.EntryPositions[pageNumber - 1];
 
-        var archive = ComicArchiveReader.OpenForEntry(index.Version.Path, position);
+        if (index.ZipLocators?[pageNumber - 1] is { } locator
+            && ComicArchiveReader.TryOpenZipPage(index.Version.Path, index.Version.Length, expectedName, locator, ArchiveEntryReader.MaxPageBytes, cancellationToken) is { } located)
+        {
+            Interlocked.Increment(ref _locatedPageReadCount);
+            return located;
+        }
+
+        var archive = ComicArchiveReader.OpenForEntry(index.Version.Path, position, index.SingleVolume);
         var handedOver = false;
         try
         {
@@ -454,16 +479,26 @@ public class ComicReaderService : IComicReaderService, IDisposable
     /// </summary>
     private sealed class PageIndex
     {
-        public PageIndex(FileVersion version, string[] names, int[] entryPositions, bool[] needsSolidPass, string? refusal)
+        public PageIndex(
+            FileVersion version,
+            string[] names,
+            int[] entryPositions,
+            bool[] needsSolidPass,
+            string? refusal,
+            ZipPageLocator?[]? zipLocators = null,
+            bool singleVolume = true)
             : this(
                 version,
                 names,
                 entryPositions,
                 needsSolidPass,
                 refusal,
+                zipLocators,
+                singleVolume,
                 ImmutableDictionary<int, string>.Empty,
-                // Rough managed footprint: the object and arrays, plus each string.
-                96 + 2L * (refusal?.Length ?? 0) + names.Sum(n => 40L + 2L * n.Length) + 4L * entryPositions.Length + needsSolidPass.Length)
+                // Rough managed footprint: the object and arrays, plus each string and locator.
+                96 + 2L * (refusal?.Length ?? 0) + names.Sum(n => 40L + 2L * n.Length) + 4L * entryPositions.Length + needsSolidPass.Length
+                    + (zipLocators is null ? 0 : 24 + 40L * zipLocators.Length))
         {
         }
 
@@ -473,6 +508,8 @@ public class ComicReaderService : IComicReaderService, IDisposable
             int[] entryPositions,
             bool[] needsSolidPass,
             string? refusal,
+            ZipPageLocator?[]? zipLocators,
+            bool singleVolume,
             ImmutableDictionary<int, string> pageRefusals,
             long estimatedBytes)
         {
@@ -481,6 +518,8 @@ public class ComicReaderService : IComicReaderService, IDisposable
             EntryPositions = entryPositions;
             NeedsSolidPass = needsSolidPass;
             Refusal = refusal;
+            ZipLocators = zipLocators;
+            SingleVolume = singleVolume;
             PageRefusals = pageRefusals;
             EstimatedBytes = estimatedBytes;
         }
@@ -494,6 +533,12 @@ public class ComicReaderService : IComicReaderService, IDisposable
 
         /// <summary>For each page, whether it can only be read by a pass over a solid RAR.</summary>
         public bool[] NeedsSolidPass { get; }
+
+        /// <summary>For each page of a CBZ, where it lies in the file, when that was known; null for a RAR.</summary>
+        public ZipPageLocator?[]? ZipLocators { get; }
+
+        /// <summary>False for a RAR that was listed as a set of volumes.</summary>
+        public bool SingleVolume { get; }
 
         public string? Refusal { get; }
 
@@ -511,7 +556,7 @@ public class ComicReaderService : IComicReaderService, IDisposable
                 estimatedBytes -= RefusalBytes(previous);
             }
 
-            return new PageIndex(Version, Names, EntryPositions, NeedsSolidPass, Refusal, PageRefusals.SetItem(pageNumber, reason), estimatedBytes);
+            return new PageIndex(Version, Names, EntryPositions, NeedsSolidPass, Refusal, ZipLocators, SingleVolume, PageRefusals.SetItem(pageNumber, reason), estimatedBytes);
         }
 
         // Rough managed footprint of one recorded refusal: a dictionary node and the message.

@@ -27,6 +27,14 @@ public enum ComicArchiveFormat
 /// <param name="Position">The entry's position in <see cref="ComicArchiveReader.EnumerateEntries"/>.</param>
 public readonly record struct ComicArchivePage(string Name, int Position);
 
+/// <summary>
+/// Where a CBZ page lies in its archive file, as the central directory says, so the page can be
+/// opened again without reading the whole directory: the offset of the entry's local header, its
+/// packed and unpacked sizes and its CRC32. Only valid for the version of the file it was read from;
+/// <see cref="ComicArchiveReader.TryOpenZipPage"/> checks the local header against it before using it.
+/// </summary>
+internal readonly record struct ZipPageLocator(long LocalHeaderOffset, long CompressedLength, long Length, uint Crc32);
+
 /// <summary>One entry of an open comic archive. Only valid while its reader is open.</summary>
 public abstract class ComicArchiveEntry
 {
@@ -117,22 +125,32 @@ public sealed class ComicArchiveReader : IDisposable
     private const uint ZipLocalHeaderSignature = 0x04034b50;
     private const int ZipLocalHeaderLength = 30;
 
+    // The data descriptor that follows an entry whose local header leaves its CRC and sizes to it
+    // (general purpose flag bit 3), with its optional signature (APPNOTE.TXT 4.3.9).
+    private const uint ZipDataDescriptorSignature = 0x08074b50;
+    private const ushort ZipFlagEncrypted = 1;
+    private const ushort ZipFlagDataDescriptor = 1 << 3;
+    private const ushort ZipMethodStored = 0;
+    private const ushort ZipMethodDeflated = 8;
+
     private readonly string _filePath;
     private readonly string _archiveName;
     private readonly long _archiveBytes;
     private readonly int _rarFileHeadersToCheck;
+    private readonly bool _isMultiVolume;
     private readonly SystemZipArchive? _zip;
     private readonly FileStream? _zipFile;
     private readonly IArchive? _rar;
     private SolidRarCursor? _solidCursor;
     private bool _disposed;
 
-    private ComicArchiveReader(string filePath, long archiveBytes, int rarFileHeadersToCheck, SystemZipArchive? zip, FileStream? zipFile, IArchive? rar)
+    private ComicArchiveReader(string filePath, long archiveBytes, int rarFileHeadersToCheck, SystemZipArchive? zip, FileStream? zipFile, IArchive? rar, bool isMultiVolume = false)
     {
         _filePath = filePath;
         _archiveName = Path.GetFileName(filePath);
         _archiveBytes = archiveBytes;
         _rarFileHeadersToCheck = rarFileHeadersToCheck;
+        _isMultiVolume = isMultiVolume;
         _zip = zip;
         _zipFile = zipFile;
         _rar = rar;
@@ -143,6 +161,9 @@ public sealed class ComicArchiveReader : IDisposable
 
     /// <summary>How big the archive is on disk, every volume of a set included.</summary>
     internal long ArchiveBytes => _archiveBytes;
+
+    /// <summary>True for a RAR opened as a set of volumes, its first file followed by others.</summary>
+    internal bool IsMultiVolume => _isMultiVolume;
 
     /// <summary>Opens an archive, sniffing its format, and checks its read limits.</summary>
     /// <exception cref="ArchiveLimitExceededException">The archive is over a read limit.</exception>
@@ -156,13 +177,23 @@ public sealed class ComicArchiveReader : IDisposable
     /// </summary>
     /// <exception cref="ArchiveLimitExceededException">The archive is over a read limit.</exception>
     /// <exception cref="ComicArchiveFormatException">The file is not a readable ZIP or RAR archive.</exception>
-    public static ComicArchiveReader OpenForEntry(string filePath, int position)
+    public static ComicArchiveReader OpenForEntry(string filePath, int position) => OpenForEntry(filePath, position, singleVolume: false);
+
+    /// <summary>
+    /// <see cref="OpenForEntry(string, int)"/>, told whether the archive was a single file when it was
+    /// last listed. A single file is opened as one without looking for volumes that follow it (an
+    /// extra open of the file by SharpCompress): that can only leave out a volume that appeared
+    /// since, never read a file whose headers were not checked. A ZIP ignores it.
+    /// </summary>
+    /// <exception cref="ArchiveLimitExceededException">The archive is over a read limit.</exception>
+    /// <exception cref="ComicArchiveFormatException">The file is not a readable ZIP or RAR archive.</exception>
+    internal static ComicArchiveReader OpenForEntry(string filePath, int position, bool singleVolume)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(position);
-        return OpenCore(filePath, position + 1);
+        return OpenCore(filePath, position + 1, probeVolumes: !singleVolume);
     }
 
-    private static ComicArchiveReader OpenCore(string filePath, int rarFileHeadersToCheck, FileShare share = FileShare.Read)
+    private static ComicArchiveReader OpenCore(string filePath, int rarFileHeadersToCheck, FileShare share = FileShare.Read, bool probeVolumes = true)
     {
         ArgumentException.ThrowIfNullOrEmpty(filePath);
         var archiveName = Path.GetFileName(filePath);
@@ -180,8 +211,8 @@ public sealed class ComicArchiveReader : IDisposable
                     ArchiveEntryReader.EnsureRarHeadersWithinLimits(stream, archiveName, rarFileHeadersToCheck);
                 }
 
-                var (rar, totalBytes) = OpenRarArchive(filePath, stream);
-                return new ComicArchiveReader(filePath, totalBytes, rarFileHeadersToCheck, zip: null, zipFile: null, rar);
+                var (rar, totalBytes, isMultiVolume) = OpenRarArchive(filePath, stream, probeVolumes);
+                return new ComicArchiveReader(filePath, totalBytes, rarFileHeadersToCheck, zip: null, zipFile: null, rar, isMultiVolume);
             }
 
             stream.Position = 0;
@@ -210,13 +241,15 @@ public sealed class ComicArchiveReader : IDisposable
     /// checked here. When it does not, SharpCompress reads all the parts as one continuous file,
     /// headers included, past the end of the file that was checked. Real volumes always have the
     /// signature, so that case gets only the file that was asked for: it is opened from its
-    /// already checked stream, which SharpCompress cannot follow to another file.
+    /// already checked stream, which SharpCompress cannot follow to another file. Without
+    /// <paramref name="probeVolumes"/> it is opened that way straight away.
     /// </remarks>
-    private static (IArchive Archive, long TotalBytes) OpenRarArchive(string filePath, FileStream firstFile)
+    private static (IArchive Archive, long TotalBytes, bool IsMultiVolume) OpenRarArchive(string filePath, FileStream firstFile, bool probeVolumes)
     {
         var totalBytes = firstFile.Length;
-        using (var set = new OwnedUntilReleased<IArchive>(RarArchive.OpenArchive(filePath, RarReaderOptions)))
+        if (probeVolumes)
         {
+            using var set = new OwnedUntilReleased<IArchive>(RarArchive.OpenArchive(filePath, RarReaderOptions));
             var volumes = set.Value.Volumes.ToList();
             if (volumes.Count > 1)
             {
@@ -227,12 +260,12 @@ public sealed class ComicArchiveReader : IDisposable
 
                 // Only a multi-volume set is handed to the caller; a refusal or a single file closes it.
                 firstFile.Dispose();
-                return (set.Release(), totalBytes);
+                return (set.Release(), totalBytes, true);
             }
         }
 
         firstFile.Position = 0;
-        return (RarArchive.OpenArchive(firstFile, RarReaderOptions), totalBytes);
+        return (RarArchive.OpenArchive(firstFile, RarReaderOptions), totalBytes, false);
     }
 
     /// <summary>
@@ -335,13 +368,17 @@ public sealed class ComicArchiveReader : IDisposable
     /// <summary>
     /// <see cref="ListPages"/>, also telling for each page whether its entry can only be
     /// decompressed by a pass over the entries before it (an entry of a solid RAR that
-    /// depends on them).
+    /// depends on them), and for a CBZ page where it lies in the file (see
+    /// <see cref="TryOpenZipPage"/>), when that can be had.
     /// </summary>
-    internal IReadOnlyList<(ComicArchivePage Page, bool NeedsSolidPass)> ListPagesForReading()
+    internal IReadOnlyList<(ComicArchivePage Page, bool NeedsSolidPass, ZipPageLocator? Locator)> ListPagesForReading()
     {
         var pages = EnumerateEntries()
             .Where(entry => !entry.IsDirectory && IsPageImageName(entry.Name))
-            .Select(entry => (Page: new ComicArchivePage(entry.Name, entry.Position), entry.NeedsSolidPass))
+            .Select(entry => (
+                Page: new ComicArchivePage(entry.Name, entry.Position),
+                entry.NeedsSolidPass,
+                Locator: entry is ZipEntry zipEntry ? zipEntry.Locator : null))
             .ToList();
 
         // OrderBy is stable, so entries with equal names keep their archive order.
@@ -642,6 +679,164 @@ public sealed class ComicArchiveReader : IDisposable
         return new ArchiveRangeStream(this, handle, dataStart, length);
     }
 
+    /// <summary>
+    /// Opens a CBZ page from where <paramref name="locator"/> says it lies, without opening the
+    /// archive or reading its central directory: a page stored without compression as a stream over
+    /// its bytes in the file (as <see cref="TryOpenStoredRange"/>), a deflated page decompressed into
+    /// a pooled buffer and checked against its CRC32. Returns <c>null</c> whenever the file is not
+    /// exactly as the locator describes it (another length, another local header, another name at
+    /// that offset, another method, data that does not inflate to the declared size and CRC), and
+    /// then the caller reads the page the ordinary way, which decides what happens to it.
+    /// </summary>
+    /// <remarks>
+    /// The locator comes from a listing of this version of the file (its length and last-write
+    /// time), which counted its entries under <see cref="ArchiveEntryReader.MaxEntries"/>. The
+    /// declared sizes are checked against the page limits first, the same check on the same sizes
+    /// as the ordinary read; a stored page cannot expand, a deflated one is read under
+    /// <paramref name="maxBytes"/> and its declared size, and the range is checked to lie inside the
+    /// file.
+    /// </remarks>
+    /// <exception cref="ArchiveLimitExceededException">The page's declared size is over a limit.</exception>
+    /// <exception cref="OperationCanceledException">The read was cancelled.</exception>
+    internal static Stream? TryOpenZipPage(string filePath, long expectedFileLength, string name, ZipPageLocator locator, long maxBytes, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(filePath);
+        ArgumentNullException.ThrowIfNull(name);
+        ArchiveEntryReader.EnsureWithinLimits(name, locator.Length, locator.CompressedLength, maxBytes);
+
+        SafeFileHandle handle;
+        try
+        {
+            handle = File.OpenHandle(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+
+        var handedOver = false;
+        try
+        {
+            var fileLength = RandomAccess.GetLength(handle);
+            if (fileLength != expectedFileLength || LocateZipPageData(handle, fileLength, name, locator) is not { } data)
+            {
+                return null;
+            }
+
+            if (data.Method == ZipMethodStored)
+            {
+                handedOver = true;
+                return new ArchiveRangeStream(handle, handle, data.Start, locator.Length);
+            }
+
+            RentedBufferStream page;
+            using (var compressed = new ArchiveRangeStream(owner: null, handle, data.Start, locator.CompressedLength))
+            using (var inflater = new System.IO.Compression.DeflateStream(compressed, System.IO.Compression.CompressionMode.Decompress))
+            {
+                try
+                {
+                    page = ArchiveEntryReader.ReadBoundedPooled(inflater, name, locator.Length, maxBytes, cancellationToken);
+                }
+                catch (Exception ex) when (ex is InvalidDataException or ArchiveLimitExceededException)
+                {
+                    // Data that does not inflate to what the directory declares: the ordinary read decides.
+                    return null;
+                }
+            }
+
+            if (page.Length != locator.Length
+                || Crc32Stream.Compute(Crc32Stream.DEFAULT_POLYNOMIAL, Crc32Stream.DEFAULT_SEED, page.Bytes) != locator.Crc32)
+            {
+                page.Dispose();
+                return null;
+            }
+
+            return page;
+        }
+        finally
+        {
+            if (!handedOver)
+            {
+                handle.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads the local header at the locator's offset and returns where the entry's data starts and
+    /// how it is stored, or <c>null</c> unless the header is that of an unencrypted stored or
+    /// deflated entry called <paramref name="name"/> whose CRC and sizes (in the header, or in the
+    /// data descriptor after the data) are those of the locator, with its data inside the file.
+    /// </summary>
+    private static (long Start, ushort Method)? LocateZipPageData(SafeFileHandle handle, long fileLength, string name, ZipPageLocator locator)
+    {
+        var nameBytes = System.Text.Encoding.UTF8.GetBytes(name);
+        var offset = locator.LocalHeaderOffset;
+        if (offset < 0 || locator.CompressedLength < 0 || offset > fileLength - ZipLocalHeaderLength - nameBytes.Length)
+        {
+            return null;
+        }
+
+        var header = new byte[ZipLocalHeaderLength + nameBytes.Length];
+        if (RandomAccess.Read(handle, header, offset) != header.Length)
+        {
+            return null;
+        }
+
+        ReadOnlySpan<byte> fields = header;
+        var flags = BinaryPrimitives.ReadUInt16LittleEndian(fields[6..]);
+        var method = BinaryPrimitives.ReadUInt16LittleEndian(fields[8..]);
+        if (BinaryPrimitives.ReadUInt32LittleEndian(fields) != ZipLocalHeaderSignature
+            || (flags & ZipFlagEncrypted) != 0
+            || (method == ZipMethodStored ? locator.CompressedLength != locator.Length : method != ZipMethodDeflated)
+            || BinaryPrimitives.ReadUInt16LittleEndian(fields[26..]) != nameBytes.Length
+            || !fields[ZipLocalHeaderLength..].SequenceEqual(nameBytes))
+        {
+            return null;
+        }
+
+        var dataStart = offset + ZipLocalHeaderLength + nameBytes.Length + BinaryPrimitives.ReadUInt16LittleEndian(fields[28..]);
+        if (dataStart > fileLength - locator.CompressedLength)
+        {
+            return null;
+        }
+
+        var described = (flags & ZipFlagDataDescriptor) == 0
+            ? SizesMatch(fields[14..26], locator)
+            : DataDescriptorMatches(handle, fileLength, dataStart + locator.CompressedLength, locator);
+        return described ? (dataStart, method) : null;
+    }
+
+    /// <summary>
+    /// True when a CRC32, packed size and unpacked size, as a local header or a data descriptor
+    /// stores them, are the locator's. A ZIP64 entry's sizes are elsewhere; its CRC is still compared.
+    /// </summary>
+    private static bool SizesMatch(ReadOnlySpan<byte> crcAndSizes, ZipPageLocator locator)
+    {
+        var crc = BinaryPrimitives.ReadUInt32LittleEndian(crcAndSizes);
+        var compressed = BinaryPrimitives.ReadUInt32LittleEndian(crcAndSizes[4..]);
+        var length = BinaryPrimitives.ReadUInt32LittleEndian(crcAndSizes[8..]);
+        return crc == locator.Crc32
+            && ((compressed == uint.MaxValue && length == uint.MaxValue)
+                || (compressed == locator.CompressedLength && length == locator.Length));
+    }
+
+    /// <summary>The data descriptor after an entry's data, with or without its signature, matches the locator.</summary>
+    private static bool DataDescriptorMatches(SafeFileHandle handle, long fileLength, long position, ZipPageLocator locator)
+    {
+        Span<byte> descriptor = stackalloc byte[16];
+        var available = (int)Math.Min(descriptor.Length, fileLength - position);
+        if (available < 12 || RandomAccess.Read(handle, descriptor[..available], position) != available)
+        {
+            return false;
+        }
+
+        return SizesMatch(descriptor[..12], locator)
+            || (available == 16
+                && BinaryPrimitives.ReadUInt32LittleEndian(descriptor) == ZipDataDescriptorSignature
+                && SizesMatch(descriptor[4..16], locator));
+    }
+
     /// <summary>True when <paramref name="name"/> is an image the reader shows as a page.</summary>
     public static bool IsPageImageName(string name) =>
         PageImageExtensions.Contains(Path.GetExtension(name).ToLowerInvariant());
@@ -701,6 +896,15 @@ public sealed class ComicArchiveReader : IDisposable
         public uint? ExpectedCrc => null;
 
         public bool IsEncrypted => _entry.IsEncrypted;
+
+        /// <summary>
+        /// Where the entry lies in the file, for <see cref="TryOpenZipPage"/>; <c>null</c> for an
+        /// encrypted entry or when the offset cannot be had, which are then always read the ordinary way.
+        /// </summary>
+        public ZipPageLocator? Locator =>
+            !IsEncrypted && LocalHeaderOffset is { } offset && offset >= 0
+                ? new ZipPageLocator(offset, _entry.CompressedLength, _entry.Length, _entry.Crc32)
+                : null;
 
         /// <summary>
         /// Where the entry's local header starts in the file, which <see cref="SystemZipArchiveEntry"/>
@@ -949,19 +1153,19 @@ public sealed class ComicArchiveReader : IDisposable
     }
 
     /// <summary>
-    /// Reads a range of the archive file, the bytes of one stored entry, through positional reads
-    /// on the reader's handle, and disposes the reader with it.
+    /// Reads a range of the archive file, the bytes of one entry, through positional reads on a
+    /// handle, and disposes what holds the handle open (the reader, or the handle itself) with it.
     /// </summary>
     internal sealed class ArchiveRangeStream : Stream
     {
-        private readonly ComicArchiveReader _owner;
+        private readonly IDisposable? _owner;
         private readonly SafeFileHandle _handle;
         private readonly long _start;
         private readonly long _length;
         private long _position;
         private bool _disposed;
 
-        public ArchiveRangeStream(ComicArchiveReader owner, SafeFileHandle handle, long start, long length)
+        public ArchiveRangeStream(IDisposable? owner, SafeFileHandle handle, long start, long length)
         {
             _owner = owner;
             _handle = handle;
@@ -1057,7 +1261,7 @@ public sealed class ComicArchiveReader : IDisposable
             if (disposing && !_disposed)
             {
                 _disposed = true;
-                _owner.Dispose();
+                _owner?.Dispose();
             }
 
             base.Dispose(disposing);

@@ -103,6 +103,8 @@ Pages are sent with `Cache-Control: private, max-age=3600`, a strong `ETag` and 
 
 A page stored uncompressed in a CBZ, which is how most JPEG pages are stored, is sent straight from the archive file as it goes out, without first being copied into memory. Any other page is decompressed into a reusable buffer and then sent. When the browser drops a request, as the reader does with prefetches it no longer needs, the server stops reading that page.
 
+For a CBZ, the cached page list also records where each page lies in the file. A page turn reads that page's own header and data and nothing else; the archive's directory is not read again. If the page's header no longer matches what was recorded (another name, method, size or CRC), the archive is opened and read as before. A deflated page read this way is checked against its CRC. A CBR that was a single file when it was listed is opened as one, without looking for volumes that follow it; its headers are still checked up to the page on every read.
+
 ### Solid RAR Archives
 
 The pages of a solid RAR can only be decompressed in order, after every entry before them. The reader keeps a pass over each solid CBR open between page turns, so reading forward decompresses each entry once. Requests for the same archive take turns, nearest page first, so the pages the reader prefetches around the current one are read in one pass instead of each from the start.

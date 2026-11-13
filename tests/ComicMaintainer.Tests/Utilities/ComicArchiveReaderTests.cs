@@ -884,6 +884,49 @@ public sealed class ComicArchiveReaderTests : IDisposable
     }
 
     [Fact]
+    public void IsMultiVolume_TellsAVolumeSetFromASingleFile()
+    {
+        File.WriteAllBytes(Path.Join(_dir, "both.part2.rar"), Rar5(8));
+        var set = Path.Join(_dir, "both.part1.rar");
+        File.WriteAllBytes(set, Rar5(8));
+        var single = Path.Join(_dir, "alone.cbr");
+        File.WriteAllBytes(single, Rar5(8));
+        var zip = Zip("alone.cbz", ("p1.jpg", new byte[8]));
+
+        using (var archive = ComicArchiveReader.Open(set))
+        {
+            Assert.True(archive.IsMultiVolume);
+        }
+
+        using (var archive = ComicArchiveReader.Open(single))
+        {
+            Assert.False(archive.IsMultiVolume);
+        }
+
+        using (var archive = ComicArchiveReader.Open(zip))
+        {
+            Assert.False(archive.IsMultiVolume);
+        }
+    }
+
+    [Fact]
+    public void OpenForEntry_OfAFileListedAsSingle_DoesNotLookForFollowingVolumes()
+    {
+        // A following volume the check refuses: opened as a single file, it is never reached.
+        File.WriteAllBytes(Path.Join(_dir, "late.part2.rar"), Rar5(13));
+        var first = Path.Join(_dir, "late.part1.rar");
+        File.WriteAllBytes(first, Rar5(8));
+
+        using (var archive = ComicArchiveReader.OpenForEntry(first, 0, singleVolume: true))
+        {
+            Assert.False(archive.IsMultiVolume);
+            Assert.Equal(new FileInfo(first).Length, archive.ArchiveBytes);
+        }
+
+        Assert.Throws<ArchiveLimitExceededException>(() => ComicArchiveReader.OpenForEntry(first, 0, singleVolume: false));
+    }
+
+    [Fact]
     public void ArchiveBytes_OfASingleFile_IsItsLength()
     {
         var rar = Path.Join(_dir, "single.cbr");

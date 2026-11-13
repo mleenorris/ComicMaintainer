@@ -61,6 +61,9 @@ for it.
 - The reader no longer requests a page twice when you turn to it while it is still being preloaded, and
   decodes preloaded pages ahead of time.
 - SQLite connection settings are applied once per pooled connection instead of before every query.
+- Turning a page of a CBZ reads that page from where it lies in the file, instead of reading the archive's
+  whole directory again. Turning a page of a CBR that is a single file no longer opens the file a second
+  time to look for further volumes.
 
 ### Fixed
 

@@ -144,8 +144,35 @@ public class CoverThumbnailEncoderCoverageTests
 
         var defines = Assert.IsType<ImageMagick.Formats.JpegReadDefines>(CoverThumbnailEncoder.ReadSettingsFor(info, 480).Defines);
 
-        Assert.Equal(480u, defines.Size!.Width);
-        Assert.Equal(480u, defines.Size.Height);
+        // A quarter of its size, the smallest power of two that keeps both sides at least 480.
+        Assert.Equal(500u, defines.Size!.Width);
+        Assert.Equal(750u, defines.Size.Height);
+    }
+
+    [Fact]
+    public void ReadSettingsFor_AJpegTooSmallToHalve_ReadsItAsItIs()
+    {
+        var info = new MagickImageInfo(Encode(900, 1400, MagickFormat.Jpeg));
+
+        Assert.Null(CoverThumbnailEncoder.ReadSettingsFor(info, 480).Defines);
+    }
+
+    // Regression: the hint was the thumbnail's width itself, which ImageMagick turned into a scale the decoder then
+    // rounded past what was asked for: these pages came back narrower than the thumbnail.
+    [Theory]
+    [InlineData(1200u, 1800u, 320)]
+    [InlineData(1700u, 2600u, 480)]
+    [InlineData(1988u, 3056u, 480)]
+    [InlineData(1300u, 2000u, 160)]
+    [InlineData(2400u, 3600u, 640)]
+    [InlineData(3000u, 4500u, 320)]
+    [InlineData(1500u, 2250u, 480)]
+    public void TryCreateThumbnail_AJpegOfAnySize_IsExactlyTheMaxWidth(uint width, uint height, int maxWidth)
+    {
+        var thumb = CoverThumbnailEncoder.TryCreateThumbnail(Encode(width, height, MagickFormat.Jpeg), maxWidth, "webp", 80);
+
+        using var image = new MagickImage(thumb!.Value.Data);
+        Assert.Equal((uint)maxWidth, image.Width);
     }
 
     [Theory]

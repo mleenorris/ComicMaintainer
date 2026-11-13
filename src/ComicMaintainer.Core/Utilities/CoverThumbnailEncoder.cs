@@ -104,12 +104,28 @@ public static class CoverThumbnailEncoder
     /// ways: much faster, and a fraction of the memory, of decoding every pixel only to throw most away. Both sides
     /// stay at least <paramref name="maxWidth"/>, so an EXIF rotation still leaves the width to scale down from.
     /// </summary>
+    /// <remarks>
+    /// The size hint is not passed as <paramref name="maxWidth"/> itself: ImageMagick turns the hint into a scale
+    /// denominator by truncating the ratio of the sizes, and the decoder rounds a denominator other than 1, 2, 4 or 8
+    /// to one it supports, which can land under <paramref name="maxWidth"/> (a 1200-pixel page hinted at 320 came
+    /// back 300 wide). The hint is the image's size divided by the power of two wanted, so the ratio is exactly it.
+    /// </remarks>
     internal static MagickReadSettings ReadSettingsFor(IMagickImageInfo info, int maxWidth)
     {
         var settings = new MagickReadSettings();
-        if (info.Format is MagickFormat.Jpeg or MagickFormat.Jpg)
+        if (info.Format is (MagickFormat.Jpeg or MagickFormat.Jpg) && maxWidth > 0)
         {
-            settings.Defines = new JpegReadDefines { Size = new MagickGeometry((uint)maxWidth, (uint)maxWidth) };
+            var shortSide = Math.Min(info.Width, info.Height);
+            var scale = 8u;
+            while (scale > 1 && shortSide / scale < (uint)maxWidth)
+            {
+                scale /= 2;
+            }
+
+            if (scale > 1)
+            {
+                settings.Defines = new JpegReadDefines { Size = new MagickGeometry(info.Width / scale, info.Height / scale) };
+            }
         }
 
         return settings;

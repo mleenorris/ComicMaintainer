@@ -48,6 +48,19 @@ for it.
   WebP copy made once and kept next to the original. The library's image links now carry the image's
   content hash (`?v=`), and an image asked for with the current hash may be cached by the browser for a
   year. Serving an image no longer loads the series' whole metadata record.
+- The app's pages are sent with an ETag, so a page the browser already has costs a short "not modified"
+  answer instead of the whole page (index.html is over 200 KB), and the server builds each page once
+  instead of on every request. The service worker uses navigation preload where the browser has it.
+- Opening the app on the overview no longer loads the library until you open it. The library's filter
+  and sort are remembered on the device too, so its first request already uses them.
+- With Authelia, the app checks the session once at start instead of twice.
+- "Select all series" fetches the series' issue lists six at a time instead of all at once, and updates
+  the page once.
+- Library covers load eight at a time, in the order they come into view; covers scrolled past before their
+  turn are skipped.
+- The reader no longer requests a page twice when you turn to it while it is still being preloaded, and
+  decodes preloaded pages ahead of time.
+- SQLite connection settings are applied once per pooled connection instead of before every query.
 
 ### Fixed
 

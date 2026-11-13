@@ -211,6 +211,63 @@ public sealed class SqlitePragmaInterceptorTests : IDisposable
         Assert.Equal(5000L, ExecuteScalar(connection, "PRAGMA busy_timeout;"));
     }
 
+    // EF Core opens a connection for every query; the pool hands back the same native connection, which keeps its
+    // PRAGMAs, so they are not sent again.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReopeningAPooledConnection_DoesNotApplyThePragmasAgain(bool openAsync)
+    {
+        var connectionString = $"Data Source={CreateRollbackJournalDatabase()};Pooling=True";
+        try
+        {
+            await using (var db = CreateContext(connectionString, new SqlitePragmaInterceptor()))
+            {
+                await OpenAsync(db, openAsync);
+                var connection = db.Database.GetDbConnection();
+                AssertConnectionPragmasApplied(connection);
+                // Changed behind the interceptor's back: still the value next time if nothing is sent again.
+                ExecuteScalar(connection, "PRAGMA cache_size=-2000;");
+                db.Database.CloseConnection();
+            }
+
+            await using (var db = CreateContext(connectionString, new SqlitePragmaInterceptor()))
+            {
+                await OpenAsync(db, openAsync);
+                var connection = db.Database.GetDbConnection();
+                Assert.Equal(-2000L, ExecuteScalar(connection, "PRAGMA cache_size;"));
+                Assert.Equal("wal", ExecuteScalar(connection, "PRAGMA journal_mode;"));
+            }
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+        }
+    }
+
+    [Fact]
+    public async Task ReopeningAPooledConnectionThatCouldNotSwitchToWal_TriesAgain()
+    {
+        var logger = new CapturingLogger();
+        var connectionString = $"Data Source={CreateRollbackJournalDatabase()};Mode=ReadOnly;Pooling=True";
+        try
+        {
+            for (var open = 0; open < 2; open++)
+            {
+                await using var db = CreateContext(connectionString, new SqlitePragmaInterceptor(logger));
+                await db.Database.OpenConnectionAsync();
+                AssertConnectionPragmasApplied(db.Database.GetDbConnection());
+                db.Database.CloseConnection();
+            }
+
+            Assert.Equal(2, logger.Entries.Count(entry => entry.Message == "Failed to switch SQLite journal mode to WAL"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+        }
+    }
+
     // Every PRAGMA but journal_mode, which a connection gets whether or not the
     // switch to WAL works.
     private static void AssertConnectionPragmasApplied(System.Data.Common.DbConnection connection)

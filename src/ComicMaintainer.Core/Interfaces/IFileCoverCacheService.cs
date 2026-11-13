@@ -70,6 +70,15 @@ public readonly record struct FileCoverStream(Stream Content, string ContentType
 public interface IFileCoverCacheService
 {
     /// <summary>
+    /// Generates and stores the configured cover of <paramref name="filePath"/> ahead of the first
+    /// request for it, when the cache is enabled and does not hold the cover of this version of the
+    /// file yet. For background warm-up: it does nothing for a cover that is already cached, and
+    /// waits while covers someone asked for are being generated.
+    /// </summary>
+    /// <exception cref="OperationCanceledException">Cancelled.</exception>
+    Task WarmUpAsync(string filePath, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns the validator for the cover of <paramref name="filePath"/>, built
     /// from the file's metadata and the current thumbnail settings. Neither the
     /// archive nor the cache directory is read. Returns <c>null</c> when the

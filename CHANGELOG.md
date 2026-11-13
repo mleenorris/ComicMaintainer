@@ -64,6 +64,13 @@ for it.
 - Turning a page of a CBZ reads that page from where it lies in the file, instead of reading the archive's
   whole directory again. Turning a page of a CBR that is a single file no longer opens the file a second
   time to look for further volumes.
+- Covers of new files, of files changed outside the app and of files that processing rewrote or renamed
+  are generated in the background, one at a time and only while no one is waiting for a cover, so the
+  library does not have to generate them all when it first shows them.
+- Serving a cached cover opens just the cover: what its `.meta` file says is remembered for the latest
+  20,000 covers. The cover cache is pruned in the background instead of during a cover request, and once
+  it has been counted the cache directory is only scanned again when it goes over its size limit. A prune
+  now brings the cache down to 90% of `FileCoverCacheMaxMegabytes`.
 
 ### Fixed
 

@@ -384,6 +384,13 @@ public partial class ComicProcessorService
                     cancellationToken);
             }
 
+            // A rewritten or renamed file's cached cover no longer applies (it is keyed by the
+            // path and stamped with the file's size and time); make the new one in the background.
+            if (fileChanged)
+            {
+                _coverWarmup?.Enqueue(filePath);
+            }
+
             // Series marked for automatic ereader delivery get the freshly
             // processed issue queued for email. Queueing is cheap (a database
             // row plus a channel write); the send itself happens on the email

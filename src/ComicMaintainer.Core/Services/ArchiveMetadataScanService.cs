@@ -16,7 +16,8 @@ namespace ComicMaintainer.Core.Services;
 /// when their stored size or modification time changes, and for libraries that existed before
 /// the cache did. Archives are read one at a time. An archive that cannot be read is
 /// remembered with its size and modification time and skipped until either changes, so a
-/// damaged file is not reopened on every pass.
+/// damaged file is not reopened on every pass. Each file whose metadata is recorded is also
+/// queued for its cover to be generated in the background (<see cref="IFileCoverWarmupQueue"/>).
 /// </remarks>
 public sealed class ArchiveMetadataScanService
 {
@@ -26,18 +27,28 @@ public sealed class ArchiveMetadataScanService
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly ILogger<ArchiveMetadataScanService> _logger;
+    private readonly IFileCoverWarmupQueue? _coverWarmup;
 
     /// <summary>Archives that could not be read, with the stored stats they had at the time.</summary>
     private readonly ConcurrentDictionary<string, (long Size, DateTime Modified)> _unreadable = new(StringComparer.Ordinal);
 
+    /// <param name="fileStore">The library's files.</param>
+    /// <param name="processor">Reads an archive's metadata.</param>
+    /// <param name="logger">Logger.</param>
+    /// <param name="coverWarmup">
+    /// Where the files whose metadata is recorded (new to the library, or changed) are queued so
+    /// their covers are generated before the library first shows them; none without it.
+    /// </param>
     public ArchiveMetadataScanService(
         IFileStoreService fileStore,
         IComicProcessorService processor,
-        ILogger<ArchiveMetadataScanService> logger)
+        ILogger<ArchiveMetadataScanService> logger,
+        IFileCoverWarmupQueue? coverWarmup = null)
     {
         _fileStore = fileStore;
         _processor = processor;
         _logger = logger;
+        _coverWarmup = coverWarmup;
     }
 
     /// <summary>
@@ -80,6 +91,7 @@ public sealed class ArchiveMetadataScanService
                     {
                         recorded++;
                         recordedInBatch++;
+                        _coverWarmup?.Enqueue(candidate.FilePath);
                     }
                     else
                     {

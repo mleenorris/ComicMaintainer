@@ -20,6 +20,14 @@ public interface ISeriesMetadataCacheService
     Task<SeriesMetadataCacheRecord?> GetAsync(string normalizedKey, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// The stored image of the record with this normalized key (file, content type and status
+    /// only), or null when there is no such record. Answered from memory after the first lookup,
+    /// until the cache changes (an image set, replaced or cleared among them), so serving a
+    /// series image, or answering its revalidation, does not load the whole record.
+    /// </summary>
+    Task<SeriesImageRecord?> GetImageAsync(string normalizedKey, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Loads a single cache record by any of its known titles (canonical
     /// title, user-selected name, provider/user aliases, or localized
     /// titles). Falls back to a scan when the exact normalized-key lookup

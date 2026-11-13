@@ -282,6 +282,57 @@ public class SeriesMetadataCacheServiceTests
         _imageStore.Verify(s => s.Delete("batman-abc.jpg"), Times.Once);
     }
 
+    private async Task SetUserImageAsync(string title, string fileName)
+    {
+        _imageStore.Setup(s => s.SaveUserImageAsync(
+                It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult(fileName, "image/png", 3));
+        await using var content = new MemoryStream(new byte[] { 1, 2, 3 });
+        await _service.SetUserImageAsync(title, content, "image/png");
+    }
+
+    [Fact]
+    public async Task GetImageAsync_IsTheImageOnlyAndIsAnsweredFromMemoryWhileNothingChanges()
+    {
+        await SetUserImageAsync("Batman", "batman-0123456789abcdef.png");
+
+        var first = await _service.GetImageAsync("batman");
+        var again = await _service.GetImageAsync("batman");
+
+        Assert.Equal(new SeriesImageRecord("batman-0123456789abcdef.png", "image/png", "user"), first);
+        Assert.True(first!.HasImage);
+        Assert.Equal(first, again);
+        Assert.Equal(1, _service.ImageLookupQueryCount);
+    }
+
+    [Fact]
+    public async Task GetImageAsync_SeesAnImageReplacedOrCleared()
+    {
+        await SetUserImageAsync("Batman", "batman-0000000000000001.png");
+        Assert.Equal("batman-0000000000000001.png", (await _service.GetImageAsync("batman"))!.LocalImageFile);
+
+        await SetUserImageAsync("Batman", "batman-0000000000000002.png");
+        Assert.Equal("batman-0000000000000002.png", (await _service.GetImageAsync("batman"))!.LocalImageFile);
+
+        await _service.ClearImageAsync("batman");
+        var cleared = await _service.GetImageAsync("batman");
+        Assert.False(cleared!.HasImage);
+        Assert.Null(cleared.LocalImageFile);
+    }
+
+    [Fact]
+    public async Task GetImageAsync_UnknownSeries_IsNullAndRememberedUntilOneIsAdded()
+    {
+        Assert.Null(await _service.GetImageAsync("batman"));
+        Assert.Null(await _service.GetImageAsync("batman"));
+        Assert.Equal(1, _service.ImageLookupQueryCount);
+        Assert.Null(await _service.GetImageAsync("  "));
+
+        await SetUserImageAsync("Batman", "batman-0123456789abcdef.png");
+
+        Assert.NotNull(await _service.GetImageAsync("batman"));
+    }
+
     [Fact]
     public async Task ApplyExternalImageAsync_CreatesRecordAndDownloads_WhenMissing()
     {

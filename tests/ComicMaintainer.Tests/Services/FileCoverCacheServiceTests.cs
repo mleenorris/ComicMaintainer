@@ -527,4 +527,142 @@ public class FileCoverCacheServiceTests : IDisposable
         Assert.True(File.GetLastAccessTimeUtc(blob) >= before.AddSeconds(-2),
             $"expected a refreshed access time, got {File.GetLastAccessTimeUtc(blob):O}");
     }
+
+    // ---- JPEG covers for OPDS, and covers opened as streams ----------------------------
+
+    private static byte[] Png(uint width = 600, uint height = 900)
+    {
+        using var image = new MagickImage(MagickColors.SteelBlue, width, height) { Format = MagickFormat.Png };
+        return image.ToByteArray();
+    }
+
+    private static byte[] ReadAll(FileCoverStream cover)
+    {
+        using var content = cover.Content;
+        using var copy = new MemoryStream();
+        content.CopyTo(copy);
+        return copy.ToArray();
+    }
+
+    [Fact]
+    public async Task OpenAsync_JpegForOpds_IsEncodedOnceAndKeptBesideTheThumbnail()
+    {
+        var file = CreateFile("a.cbz");
+        SetupPage(Png());
+
+        var first = await _service.OpenAsync(file, FileCoverFormat.Jpeg);
+        var again = await _service.OpenAsync(file, FileCoverFormat.Jpeg);
+        var thumbnail = await _service.OpenAsync(file, FileCoverFormat.Configured);
+
+        Assert.Equal("image/jpeg", first!.Value.ContentType);
+        var jpeg = ReadAll(first.Value);
+        Assert.Equal(MagickFormat.Jpeg, new MagickImageInfo(jpeg).Format);
+        Assert.Equal(480u, new MagickImageInfo(jpeg).Width);
+        Assert.Equal(jpeg, ReadAll(again!.Value));
+        Assert.Equal("image/webp", thumbnail!.Value.ContentType);
+        ReadAll(thumbnail.Value);
+        // Each encoding was made once; the second JPEG came from the cache.
+        _reader.Verify(r => r.GetPageAsync(It.IsAny<string>(), 1), Times.Exactly(2));
+        Assert.Single(Directory.EnumerateFiles(_cacheDir, "*.jpeg.img"));
+        Assert.Equal(2, Directory.EnumerateFiles(_cacheDir, "*.img").Count());
+    }
+
+    [Fact]
+    public async Task OpenAsync_CachedCover_IsStreamedFromItsFile()
+    {
+        var file = CreateFile("a.cbz");
+        SetupPage(Png());
+        var generated = await _service.OpenAsync(file, FileCoverFormat.Configured);
+        var bytes = ReadAll(generated!.Value);
+
+        var cached = await _service.OpenAsync(file, FileCoverFormat.Configured);
+
+        Assert.IsType<FileStream>(cached!.Value.Content);
+        Assert.Equal(bytes, ReadAll(cached.Value));
+        Assert.Equal(_service.GetValidator(file), cached.Value.Validator);
+    }
+
+    [Fact]
+    public async Task OpenAsync_CachedCoverPrunedWhileItIsSent_IsStillSentWhole()
+    {
+        var file = CreateFile("a.cbz");
+        SetupPage(Png());
+        var bytes = ReadAll((await _service.OpenAsync(file, FileCoverFormat.Configured))!.Value);
+
+        var cached = await _service.OpenAsync(file, FileCoverFormat.Configured);
+        await _service.InvalidateAsync(file);
+
+        Assert.Equal(bytes, ReadAll(cached!.Value));
+    }
+
+    [Fact]
+    public void GetValidator_TheTwoFormatsHaveDifferentTags()
+    {
+        var file = CreateFile("a.cbz");
+
+        var webp = _service.GetValidator(file, FileCoverFormat.Configured)!.Value;
+        var jpeg = _service.GetValidator(file, FileCoverFormat.Jpeg)!.Value;
+
+        Assert.Equal(_service.GetValidator(file), webp);
+        Assert.Equal("webp-w480-q80", webp.Variant);
+        Assert.Equal("jpeg-w480-q80", jpeg.Variant);
+        Assert.NotEqual(ComicReaderController.BuildCoverETag(webp), ComicReaderController.BuildCoverETag(jpeg));
+    }
+
+    [Fact]
+    public async Task OpenAsync_WhenTheThumbnailIsAlreadyJpeg_OpdsSharesIt()
+    {
+        _settings.FileCoverThumbnailFormat = "jpeg";
+        var file = CreateFile("a.cbz");
+        SetupPage(Png());
+
+        var thumbnail = await _service.OpenAsync(file, FileCoverFormat.Configured);
+        var opds = await _service.OpenAsync(file, FileCoverFormat.Jpeg);
+
+        Assert.Equal(ReadAll(thumbnail!.Value), ReadAll(opds!.Value));
+        Assert.Equal(_service.GetValidator(file, FileCoverFormat.Configured), _service.GetValidator(file, FileCoverFormat.Jpeg));
+        _reader.Verify(r => r.GetPageAsync(It.IsAny<string>(), 1), Times.Once);
+        Assert.Empty(Directory.EnumerateFiles(_cacheDir, "*.jpeg.img"));
+    }
+
+    [Fact]
+    public async Task OpenAsync_JpegWithThumbnailsOff_IsThePageConvertedToJpeg()
+    {
+        _settings.FileCoverThumbnailMaxWidth = 0;
+        var file = CreateFile("a.cbz");
+        SetupPage(Png(), "image/png");
+
+        var cover = await _service.OpenAsync(file, FileCoverFormat.Jpeg);
+
+        Assert.Equal("image/jpeg", cover!.Value.ContentType);
+        var jpeg = ReadAll(cover.Value);
+        Assert.Equal(600u, new MagickImageInfo(jpeg).Width);
+        Assert.Equal("orig-jpeg", cover.Value.Validator.Variant);
+    }
+
+    [Fact]
+    public async Task OpenAsync_JpegWithThumbnailsOff_PassesAJpegPageThroughUnchanged()
+    {
+        _settings.FileCoverThumbnailMaxWidth = 0;
+        var file = CreateFile("a.cbz");
+        byte[] page = [0xFF, 0xD8, 0xFF, 1, 2, 3];
+        SetupPage(page, "image/jpeg");
+
+        var cover = await _service.OpenAsync(file, FileCoverFormat.Jpeg);
+
+        Assert.Equal(page, ReadAll(cover!.Value));
+    }
+
+    [Fact]
+    public async Task InvalidateAsync_RemovesBothFormats()
+    {
+        var file = CreateFile("a.cbz");
+        SetupPage(Png());
+        ReadAll((await _service.OpenAsync(file, FileCoverFormat.Configured))!.Value);
+        ReadAll((await _service.OpenAsync(file, FileCoverFormat.Jpeg))!.Value);
+
+        await _service.InvalidateAsync(file);
+
+        Assert.Empty(Directory.EnumerateFiles(_cacheDir));
+    }
 }

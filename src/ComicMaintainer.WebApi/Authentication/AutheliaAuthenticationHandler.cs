@@ -9,6 +9,7 @@ using ComicMaintainer.Core.Services.Auth;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Authentication;
@@ -42,7 +43,13 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
     private readonly RoleManager<ApplicationRole> _roleManager;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IAuthSessionValidator _sessions;
+    private readonly IMemoryCache _cache;
     private readonly ILogger<AutheliaAuthenticationHandler> _logger;
+
+    private const string AccountCacheKeyPrefix = "authelia:account:";
+
+    // The last AUTHELIA_TRUSTED_PROXIES value parsed, and its allowlist (null when it is not valid).
+    private static volatile ParsedTrustedProxies? s_trustedProxies;
 
     // Untrusted peers already reported at Warning level (later requests log at Debug); bounded so that
     // a scan from many addresses cannot grow it without limit.
@@ -57,10 +64,12 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         UserManager<ApplicationUser> userManager,
         RoleManager<ApplicationRole> roleManager,
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
-        IAuthSessionValidator sessions)
+        IAuthSessionValidator sessions,
+        IMemoryCache cache)
         : base(options, logger, encoder)
     {
         _sessions = sessions;
+        _cache = cache;
         _autheliaSettings = autheliaSettings.Value;
         _userManager = userManager;
         _roleManager = roleManager;
@@ -96,8 +105,6 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
             return AuthenticateResult.Fail($"Empty {_autheliaSettings.UserHeader} header");
         }
 
-        _logger.LogInformation("Authenticating user via Authelia: {Username}", username);
-
         // Get optional headers. A missing header reads as "" rather than null, so blank
         // values are treated as absent to let the email/name fallbacks below apply.
         Request.Headers.TryGetValue(_autheliaSettings.EmailHeader, out var emailValues);
@@ -108,13 +115,29 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         var displayName = NullIfBlank(nameValues.ToString());
         var groups = groupsValues.ToString();
 
+        // Every request carries the headers, a page of covers included, so the account found or provisioned for them
+        // is remembered briefly instead of being looked up again each time. Different headers (a new email, name or
+        // group) are a different key, and any change to the account made in the app moves its version on.
+        var cacheKey = AccountCacheKeyPrefix + string.Join('\0', username, email, displayName, groups);
+        if (_cache.TryGetValue(cacheKey, out CachedAccount? cached)
+            && cached is not null
+            && cached.AccountVersion == _sessions.GetAccountVersion(cached.UserId))
+        {
+            _logger.LogDebug("Authenticated user via Authelia (remembered): {Username}", username);
+            return Authenticated(username, cached.UserId, cached.Email ?? email ?? FallbackEmail(username), cached.Roles, groups);
+        }
+
+        _logger.LogDebug("Authenticating user via Authelia: {Username}", username);
+
         // Ensure user exists in the database
-        var user = await EnsureUserExistsAsync(username, email, displayName, groups);
-        if (user == null)
+        var account = await EnsureUserExistsAsync(username, email, displayName, groups);
+        if (account is not { } found)
         {
             _logger.LogError("Failed to create or retrieve user: {Username}", username);
             return AuthenticateResult.Fail("Failed to create or retrieve user");
         }
+
+        var (user, roles) = found;
 
         // An administrator can disable an account on the Users page; Authelia still vouches for the person, but they
         // may not use ComicMaintainer, as with a password sign-in or an API key.
@@ -126,17 +149,28 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
             return AuthenticateResult.Fail("The account is disabled");
         }
 
-        // Create claims
+        _cache.Set(
+            cacheKey,
+            new CachedAccount(user.Id, user.Email, roles.ToArray(), _sessions.GetAccountVersion(user.Id)),
+            AuthSessionValidator.CacheDuration);
+
+        _logger.LogDebug("Authenticated user via Authelia: {Username} with roles: {Roles}",
+            username, string.Join(", ", roles));
+
+        return Authenticated(username, user.Id, user.Email ?? email ?? FallbackEmail(username), roles, groups);
+    }
+
+    private AuthenticateResult Authenticated(string username, string userId, string email, IEnumerable<string> roles, string groups)
+    {
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, user.Id),
+            new(ClaimTypes.NameIdentifier, userId),
             new(ClaimTypes.Name, username),  // Always use the username from Authelia header
-            new(ClaimTypes.Email, user.Email ?? email ?? FallbackEmail(username)),
+            new(ClaimTypes.Email, email),
             new("auth_method", AuthMethod)
         };
 
         // Add role claims
-        var roles = await _userManager.GetRolesAsync(user);
         claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
 
         // Add groups as claims if provided
@@ -150,12 +184,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
 
         var identity = new ClaimsIdentity(claims, Scheme.Name);
         var principal = new ClaimsPrincipal(identity);
-        var ticket = new AuthenticationTicket(principal, Scheme.Name);
-
-        _logger.LogInformation("Successfully authenticated user via Authelia: {Username} with roles: {Roles}", 
-            username, string.Join(", ", roles));
-
-        return AuthenticateResult.Success(ticket);
+        return AuthenticateResult.Success(new AuthenticationTicket(principal, Scheme.Name));
     }
 
     /// <summary>
@@ -165,7 +194,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
     private bool IsFromTrustedProxy()
     {
         var remoteIp = Context.Connection.RemoteIpAddress;
-        if (TrustedProxyAllowlist.TryParse(_autheliaSettings.TrustedProxies, out var trustedProxies, out _)
+        if (ParseTrustedProxies(_autheliaSettings.TrustedProxies) is { } trustedProxies
             && trustedProxies.Contains(remoteIp))
         {
             return true;
@@ -187,7 +216,24 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         return false;
     }
 
-    private async Task<ApplicationUser?> EnsureUserExistsAsync(string username, string? email, string? displayName, string? groups)
+    /// <summary>
+    /// The allowlist in <paramref name="value"/>, or <see langword="null"/> when it is not valid. The setting does not
+    /// change while the app runs, so the last parse is reused rather than repeated on every request.
+    /// </summary>
+    private static TrustedProxyAllowlist? ParseTrustedProxies(string? value)
+    {
+        var parsed = s_trustedProxies;
+        if (parsed is null || !string.Equals(parsed.Value, value, StringComparison.Ordinal))
+        {
+            parsed = new ParsedTrustedProxies(value, TrustedProxyAllowlist.TryParse(value, out var allowlist, out _) ? allowlist : null);
+            s_trustedProxies = parsed;
+        }
+
+        return parsed.Allowlist;
+    }
+
+    private async Task<(ApplicationUser User, IList<string> Roles)?> EnsureUserExistsAsync(
+        string username, string? email, string? displayName, string? groups)
     {
         try
         {
@@ -218,9 +264,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
                 }
                 
                 // Ensure user has appropriate role based on groups
-                await EnsureUserRoleAsync(user, groups);
-                
-                return user;
+                return (user, await EnsureUserRoleAsync(user, groups));
             }
 
             // Create new user
@@ -247,9 +291,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
             _logger.LogInformation("Created new user from Authelia: {Username}", username);
 
             // Assign role based on groups or default role
-            await EnsureUserRoleAsync(user, groups);
-
-            return user;
+            return (user, await EnsureUserRoleAsync(user, groups));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -258,7 +300,8 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         }
     }
 
-    private async Task EnsureUserRoleAsync(ApplicationUser user, string? groups)
+    /// <summary>Gives <paramref name="user"/> the role its groups call for, and returns the roles it now has.</summary>
+    private async Task<IList<string>> EnsureUserRoleAsync(ApplicationUser user, string? groups)
     {
         // Determine appropriate role based on groups
         var targetRole = _autheliaSettings.DefaultRole;
@@ -292,7 +335,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         var currentRoles = await _userManager.GetRolesAsync(user);
         if (currentRoles.Contains(targetRole))
         {
-            return;
+            return currentRoles;
         }
 
         // Remove all current roles and add the target role
@@ -308,9 +351,15 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         await _userManager.UpdateSecurityStampAsync(user);
         _sessions.Invalidate(user.Id);
         _logger.LogInformation("Assigned role {Role} to Authelia user: {Username}", targetRole, user.UserName);
+        return [targetRole];
     }
 
     private static string? NullIfBlank(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <summary>An active account found or provisioned for a set of Authelia headers.</summary>
+    private sealed record CachedAccount(string UserId, string? Email, string[] Roles, long AccountVersion);
+
+    private sealed record ParsedTrustedProxies(string? Value, TrustedProxyAllowlist? Allowlist);
 
     /// <summary>
     /// The email of a user the proxy sends no email for. Identity only creates an account whose email it

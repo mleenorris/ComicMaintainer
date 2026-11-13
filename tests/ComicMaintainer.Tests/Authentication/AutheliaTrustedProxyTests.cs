@@ -263,7 +263,8 @@ public sealed class AutheliaTrustedProxyTests
             _userManager.Object,
             _roleManager.Object,
             Mock.Of<IDbContextFactory<ComicMaintainerDbContext>>(),
-            Mock.Of<ComicMaintainer.Core.Services.Auth.IAuthSessionValidator>());
+            Mock.Of<ComicMaintainer.Core.Services.Auth.IAuthSessionValidator>(),
+            new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()));
         await handler.InitializeAsync(new AuthenticationScheme("Authelia", displayName: null, typeof(AutheliaAuthenticationHandler)), context);
         return await handler.AuthenticateAsync();
     }

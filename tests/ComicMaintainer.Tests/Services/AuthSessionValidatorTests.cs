@@ -227,4 +227,19 @@ public sealed class AuthSessionValidatorTests : IAsyncLifetime
         Assert.False(Validator.TryConsumeSingleUseToken("stream-1", expires));
         Assert.True(Validator.TryConsumeSingleUseToken("stream-2", expires));
     }
+
+    [Fact]
+    public void AnAccountsVersionMovesOnEachTimeItIsInvalidated()
+    {
+        Assert.Equal(0, Validator.GetAccountVersion(_user.Id));
+
+        Validator.Invalidate(_user.Id);
+        var once = Validator.GetAccountVersion(_user.Id);
+        Validator.Invalidate(_user.Id);
+        var twice = Validator.GetAccountVersion(_user.Id);
+
+        Assert.NotEqual(0, once);
+        Assert.NotEqual(once, twice);
+        Assert.Equal(0, Validator.GetAccountVersion("another-account"));
+    }
 }

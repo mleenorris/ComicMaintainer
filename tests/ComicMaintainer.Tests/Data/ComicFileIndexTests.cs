@@ -90,6 +90,37 @@ public sealed class ComicFileIndexTests : IAsyncLifetime
         Assert.Contains(_plans.All(), plan => plan.Contains("IX_ComicFiles_IsDuplicate", StringComparison.Ordinal));
     }
 
+    // Renaming a file moves every user's reading progress with it, found by the path alone.
+    [Fact]
+    public async Task UpdateFilePathAsync_FindsTheReadingProgressOfThePathThroughAnIndex()
+    {
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            foreach (var user in new[] { "alice", "bob" })
+            {
+                db.ReadingProgresses.Add(new ReadingProgressEntity { UserId = user, ContentId = "/library/Saga/Saga 001.cbz", CurrentPage = 3, TotalPages = 20 });
+                db.ReadingProgresses.Add(new ReadingProgressEntity { UserId = user, ContentId = "/library/Saga/Saga 002.cbz", CurrentPage = 1, TotalPages = 20 });
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        var service = CreateService();
+        _plans.Clear();
+
+        await service.UpdateFilePathAsync("/library/Saga/Saga 001.cbz", "/library/Saga/Saga 001 (renamed).cbz");
+        var progressPlans = _plans.AllFor("FROM \"ReadingProgresses\"").ToList();
+
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            Assert.Equal(2, await db.ReadingProgresses.CountAsync(p => p.ContentId == "/library/Saga/Saga 001 (renamed).cbz"));
+        }
+
+        Assert.NotEmpty(progressPlans);
+        // Regression: the only index led with UserId, so each lookup read the whole table ("SCAN").
+        Assert.All(progressPlans, plan => Assert.Contains("INDEX IX_ReadingProgresses_ContentId", plan));
+    }
+
     [Fact]
     public async Task Model_HasNoIndexesThatNoQueryUses()
     {
@@ -154,6 +185,9 @@ public sealed class ComicFileIndexTests : IAsyncLifetime
 
         public IEnumerable<string> All() => _plans.Select(p => p.Plan);
 
+        public IEnumerable<string> AllFor(string sqlFragment) =>
+            _plans.Where(p => p.Sql.Contains(sqlFragment, StringComparison.Ordinal)).Select(p => p.Plan);
+
         public string PlanFor(string sqlFragment) =>
             _plans.Last(p => p.Sql.Contains(sqlFragment, StringComparison.Ordinal)).Plan;
 
@@ -163,7 +197,8 @@ public sealed class ComicFileIndexTests : IAsyncLifetime
             InterceptionResult<DbDataReader> result,
             CancellationToken cancellationToken = default)
         {
-            if (command.CommandText.Contains("ComicFiles", StringComparison.Ordinal))
+            if (command.CommandText.Contains("ComicFiles", StringComparison.Ordinal)
+                || command.CommandText.Contains("ReadingProgresses", StringComparison.Ordinal))
             {
                 await using var explain = command.Connection!.CreateCommand();
                 explain.CommandText = "EXPLAIN QUERY PLAN " + command.CommandText;

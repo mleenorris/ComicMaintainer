@@ -611,6 +611,8 @@ namespace ComicMaintainer.Core.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ContentId");
+
                     b.HasIndex("UserId", "ContentId")
                         .IsUnique();
 

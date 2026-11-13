@@ -136,6 +136,100 @@ public class CoverThumbnailEncoderCoverageTests
         image.Format = MagickFormat.Png;
         return image.ToByteArray();
     }
+
+    [Fact]
+    public void ReadSettingsFor_AJpeg_DecodesItScaledDownToNoLessThanTheThumbnailEitherWay()
+    {
+        var info = new MagickImageInfo(Encode(2000, 3000, MagickFormat.Jpeg));
+
+        var defines = Assert.IsType<ImageMagick.Formats.JpegReadDefines>(CoverThumbnailEncoder.ReadSettingsFor(info, 480).Defines);
+
+        // A quarter of its size, the smallest power of two that keeps both sides at least 480.
+        Assert.Equal(500u, defines.Size!.Width);
+        Assert.Equal(750u, defines.Size.Height);
+    }
+
+    [Fact]
+    public void ReadSettingsFor_AJpegTooSmallToHalve_ReadsItAsItIs()
+    {
+        var info = new MagickImageInfo(Encode(900, 1400, MagickFormat.Jpeg));
+
+        Assert.Null(CoverThumbnailEncoder.ReadSettingsFor(info, 480).Defines);
+    }
+
+    // Regression: the hint was the thumbnail's width itself, which ImageMagick turned into a scale the decoder then
+    // rounded past what was asked for: these pages came back narrower than the thumbnail.
+    [Theory]
+    [InlineData(1200u, 1800u, 320)]
+    [InlineData(1700u, 2600u, 480)]
+    [InlineData(1988u, 3056u, 480)]
+    [InlineData(1300u, 2000u, 160)]
+    [InlineData(2400u, 3600u, 640)]
+    [InlineData(3000u, 4500u, 320)]
+    [InlineData(1500u, 2250u, 480)]
+    public void TryCreateThumbnail_AJpegOfAnySize_IsExactlyTheMaxWidth(uint width, uint height, int maxWidth)
+    {
+        var thumb = CoverThumbnailEncoder.TryCreateThumbnail(Encode(width, height, MagickFormat.Jpeg), maxWidth, "webp", 80);
+
+        using var image = new MagickImage(thumb!.Value.Data);
+        Assert.Equal((uint)maxWidth, image.Width);
+    }
+
+    [Theory]
+    [InlineData(MagickFormat.Png)]
+    [InlineData(MagickFormat.WebP)]
+    public void ReadSettingsFor_OtherFormats_ReadsThemAsTheyAre(MagickFormat format)
+    {
+        var info = new MagickImageInfo(Encode(200, 300, format));
+
+        Assert.Null(CoverThumbnailEncoder.ReadSettingsFor(info, 100).Defines);
+    }
+
+    [Fact]
+    public void TryCreateThumbnail_ALargeJpeg_IsExactlyTheMaxWidthWithItsAspectRatio()
+    {
+        var thumb = CoverThumbnailEncoder.TryCreateThumbnail(Encode(2000, 3000, MagickFormat.Jpeg), 480, "jpeg", 80);
+
+        using var image = new MagickImage(thumb!.Value.Data);
+        Assert.Equal(480u, image.Width);
+        Assert.Equal(720u, image.Height);
+    }
+
+    // A page stored sideways with an EXIF rotation: the decode hint keeps both sides large enough that, once
+    // turned upright, the width is still scaled down to the thumbnail's, not up.
+    [Fact]
+    public void TryCreateThumbnail_ARotatedJpeg_IsTurnedUprightAtTheMaxWidth()
+    {
+        byte[] sideways;
+        using (var image = new MagickImage(MagickColors.SteelBlue, 3000, 2000))
+        {
+            // The orientation is only written to a JPEG through its EXIF profile, which ImageMagick fills in from
+            // the image's orientation when it writes the file.
+            var exif = new ExifProfile();
+            exif.SetValue(ExifTag.Orientation, (ushort)Orientation.RightTop);
+            image.SetProfile(exif);
+            image.Orientation = Orientation.RightTop;
+            image.Format = MagickFormat.Jpeg;
+            sideways = image.ToByteArray();
+        }
+        using (var stored = new MagickImage(sideways))
+        {
+            Assert.Equal(Orientation.RightTop, stored.Orientation);
+        }
+
+        var thumb = CoverThumbnailEncoder.TryCreateThumbnail(sideways, 480, "jpeg", 80);
+
+        using var upright = new MagickImage(thumb!.Value.Data);
+        Assert.Equal(480u, upright.Width);
+        Assert.Equal(720u, upright.Height);
+    }
+
+    private static byte[] Encode(uint width, uint height, MagickFormat format)
+    {
+        using var image = new MagickImage(MagickColors.SteelBlue, width, height);
+        image.Format = format;
+        return image.ToByteArray();
+    }
 }
 
 file static class PngFixture

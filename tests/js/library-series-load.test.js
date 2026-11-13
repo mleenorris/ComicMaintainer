@@ -179,6 +179,47 @@ test('scrolling to the end appends the next page at the current offset until eve
     assert.deepEqual(page.errors, []);
 });
 
+test('on a phone the next page loads when the end of the list nears the viewport, not the list', async t => {
+    const MOBILE = '(max-width: 768px)';
+    const media = { [MOBILE]: true };
+    const page = await bootLibrary({ series: makeSeriesList(130), media });
+    const fileList = page.$('#fileList');
+    const sentinel = page.$('#libraryScrollSentinel');
+    const viewportObserver = () => [...page.intersectionObservers].reverse()
+        .find(observer => observer.options && observer.options.rootMargin === '400px' && observer.options.root === null);
+
+    // The list grows to its content on a phone, so it would always contain
+    // the sentinel: the page's scrolling is what counts.
+    const observer = viewportObserver();
+    assert.ok(observer.targets.has(sentinel));
+    assert.equal(scrollObserver(page), undefined);
+    assert.equal(seriesCalls(page).length, 1);
+
+    observer.trigger(true);
+    await page.settle();
+    assert.deepEqual(seriesCalls(page).at(-1).query, { offset: '60', limit: '60' });
+    assert.ok(viewportObserver().targets.has(sentinel), 'the new page is observed against the viewport too');
+
+    // Widening past the breakpoint makes the list scroll itself again.
+    // (Resizes are debounced: mock the timer so the test can run it.)
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const resize = () => {
+        page.window.dispatchEvent(new page.window.Event('resize'));
+        t.mock.timers.tick(150);
+    };
+    media[MOBILE] = false;
+    resize();
+    assert.ok(scrollObserver(page).targets.has(sentinel));
+    assert.equal(viewportObserver().targets.size, 0, 'the viewport observer was disconnected');
+    const desktopObserver = scrollObserver(page);
+
+    // A resize that stays on the same side of the breakpoint keeps the observer.
+    resize();
+    assert.equal(scrollObserver(page), desktopObserver);
+    assert.equal(page.$('#fileList'), fileList);
+    assert.deepEqual(page.errors, []);
+});
+
 test('an appended page renders in the list layout too', async () => {
     const page = await bootLibrary({ series: makeSeriesList(70), localStorage: { seriesLayout: 'list' } });
     assert.equal(page.$$('#fileList .series-list > .series-list-row').length, 60);

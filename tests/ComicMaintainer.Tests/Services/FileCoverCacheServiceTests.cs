@@ -175,6 +175,89 @@ public class FileCoverCacheServiceTests : IDisposable
         Assert.Equal(1, callCount);
     }
 
+    // A library page asks for dozens of uncached covers at once; only a few are generated at a time.
+    [Fact]
+    public async Task GetOrCreateAsync_ManyUncachedCovers_AreGeneratedAFewAtATime()
+    {
+        var limit = FileCoverCacheService.MaxConcurrentGenerations;
+        var files = Enumerable.Range(0, limit + 3).Select(i => CreateFile($"book-{i}.cbz")).ToList();
+        var gate = new TaskCompletionSource();
+        var running = 0;
+        var mostRunning = 0;
+        var allSlotsTaken = new TaskCompletionSource();
+        _reader
+            .Setup(r => r.GetPageAsync(It.IsAny<string>(), 1))
+            .Returns(async () =>
+            {
+                var now = Interlocked.Increment(ref running);
+                InterlockedMax(ref mostRunning, now);
+                if (now == limit)
+                {
+                    allSlotsTaken.TrySetResult();
+                }
+                await gate.Task;
+                Interlocked.Decrement(ref running);
+                return (new byte[] { 7 }, "image/jpeg");
+            });
+
+        var requests = files.Select(file => _service.GetOrCreateAsync(file)).ToList();
+        await allSlotsTaken.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(50);
+        Assert.Equal(limit, Volatile.Read(ref running));
+
+        gate.SetResult();
+        var entries = await Task.WhenAll(requests);
+
+        Assert.All(entries, entry => Assert.NotNull(entry));
+        Assert.Equal(limit, mostRunning);
+        _reader.Verify(r => r.GetPageAsync(It.IsAny<string>(), 1), Times.Exactly(files.Count));
+    }
+
+    [Fact]
+    public async Task GetOrCreateAsync_CancelledWhileWaitingForAGenerationSlot_GivesUpWithoutReadingTheArchive()
+    {
+        var limit = FileCoverCacheService.MaxConcurrentGenerations;
+        var busy = Enumerable.Range(0, limit).Select(i => CreateFile($"busy-{i}.cbz")).ToList();
+        var waiting = CreateFile("waiting.cbz");
+        var gate = new TaskCompletionSource();
+        var started = 0;
+        var allSlotsTaken = new TaskCompletionSource();
+        _reader
+            .Setup(r => r.GetPageAsync(It.IsAny<string>(), 1))
+            .Returns(async () =>
+            {
+                if (Interlocked.Increment(ref started) == limit)
+                {
+                    allSlotsTaken.TrySetResult();
+                }
+                await gate.Task;
+                return (new byte[] { 7 }, "image/jpeg");
+            });
+
+        var running = busy.Select(file => _service.GetOrCreateAsync(file)).ToList();
+        await allSlotsTaken.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        using var cancellation = new CancellationTokenSource();
+        var request = _service.GetOrCreateAsync(waiting, cancellation.Token);
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
+        gate.SetResult();
+        await Task.WhenAll(running);
+        _reader.Verify(r => r.GetPageAsync(waiting, 1), Times.Never);
+    }
+
+    private static void InterlockedMax(ref int target, int value)
+    {
+        int current;
+        while (value > (current = Volatile.Read(ref target)))
+        {
+            if (Interlocked.CompareExchange(ref target, value, current) == current)
+            {
+                return;
+            }
+        }
+    }
+
     private static byte[] MakeImage(uint width, uint height, MagickFormat format = MagickFormat.Png)
     {
         using var image = new MagickImage(MagickColors.SteelBlue, width, height);

@@ -78,6 +78,8 @@
         let seriesReloadKeepCount = 0;
         let seriesLoadingCount = 0;
         let scrollObserver = null;
+        // Whether scrollObserver was made for the phone layout (page scrolls).
+        let scrollObserverOnMobile = false;
         let currentSeriesDetailId = null;
         // Title-based identity for the open series detail. The series id is a
         // union-find representative key whose value can change when an external

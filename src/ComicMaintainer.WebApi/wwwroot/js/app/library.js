@@ -7,7 +7,7 @@
         // depends on a script loaded after it.
 
         // Shared state declared in state.js and reassigned here.
-        /* global seriesTotal: true */
+        /* global seriesTotal: true, scrollObserverOnMobile: true */
 
         async function loadActiveLibraryView({ refresh = false, keepLoaded = false } = {}) {
             return loadSeriesLibrary({ refresh, keepLoaded });
@@ -343,6 +343,12 @@
             } else if (sentinel !== fileList.lastElementChild) {
                 fileList.appendChild(sentinel);
             }
+            // On phones (main.css, max-width 768px) the list grows to fit its
+            // content and the page scrolls instead. Observed against the list
+            // there, the sentinel would always be inside it, so every page of
+            // the library would load one after another; observe against the
+            // viewport instead.
+            scrollObserverOnMobile = isMobileLibraryViewport();
             scrollObserver = new IntersectionObserver((entries) => {
                 for (const e of entries) {
                     if (!e.isIntersecting) continue;
@@ -350,9 +356,16 @@
                         loadSeriesLibrary({ append: true });
                     }
                 }
-            }, { root: fileList, rootMargin: '400px' });
+            }, { root: scrollObserverOnMobile ? null : fileList, rootMargin: '400px' });
             scrollObserver.observe(sentinel);
         }
+
+        // Crossing the phone breakpoint changes what scrolls, so observe again.
+        onViewportResize(() => {
+            if (scrollObserver && scrollObserverOnMobile !== isMobileLibraryViewport()) {
+                ensureScrollObserver();
+            }
+        });
 
         function updateButtonVisibility() {
             // The "… Unmarked" actions have nothing to act on without unmarked

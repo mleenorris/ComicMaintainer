@@ -258,6 +258,10 @@ public sealed class OpdsController : ControllerBase
     /// A comic's cover, used for both the image and the thumbnail links. It never counts as reading: only the page
     /// stream records progress.
     /// </summary>
+    /// <remarks>
+    /// OPDS clients are sent JPEG, which the cover cache keeps beside the thumbnail the web UI shows, so a feed's
+    /// covers are encoded once rather than on every request.
+    /// </remarks>
     [HttpGet("issues/{id:int}/cover")]
     [FailureMessage("Error reading cover")]
     public async Task<IActionResult> Cover(int id, CancellationToken cancellationToken)
@@ -267,7 +271,7 @@ public sealed class OpdsController : ControllerBase
             return IssueNotFound();
         }
 
-        var validator = _covers.GetValidator(issue.ResolvedPath);
+        var validator = _covers.GetValidator(issue.ResolvedPath, FileCoverFormat.Jpeg);
         if (validator is null)
         {
             return IssueNotFound();
@@ -280,26 +284,25 @@ public sealed class OpdsController : ControllerBase
             return StatusCode(StatusCodes.Status304NotModified);
         }
 
-        FileCoverCacheEntry? entry;
+        FileCoverStream? cover;
         try
         {
-            entry = await _covers.GetOrCreateAsync(issue.ResolvedPath, cancellationToken);
+            cover = await _covers.OpenAsync(issue.ResolvedPath, FileCoverFormat.Jpeg, cancellationToken);
         }
         catch (ArchiveLimitExceededException ex)
         {
             return ArchiveRefused(ex);
         }
 
-        if (entry is null)
+        if (cover is null)
         {
             return Refuse(StatusCodes.Status404NotFound, "Cover not available");
         }
 
-        var served = entry.Value.Validator;
-        var (data, contentType) = await _images.ConvertAsync(entry.Value.Data, entry.Value.ContentType, OpdsMediaTypes.Jpeg, cancellationToken);
+        var served = cover.Value.Validator;
         SetPrivateCaching(ComicReaderController.BuildCoverETag(served));
         Response.Headers.LastModified = served.SourceLastModified.ToString("R");
-        return File(data, contentType);
+        return File(cover.Value.Content, cover.Value.ContentType);
     }
 
     /// <summary>
@@ -343,18 +346,43 @@ public sealed class OpdsController : ControllerBase
                 return StatusCode(StatusCodes.Status304NotModified);
             }
 
-            var page = await _reader.GetPageAsync(issue.ResolvedPath, readerPage);
+            var target = OpdsMediaTypes.ForPageStream(pageNames);
+            var convertedKey = string.Concat(issue.ResolvedPath, "\n", etag);
+            if (_images.TryGetConvertedPage(convertedKey, out var converted))
+            {
+                await RecordProgressAsync(issue.FilePath, readerPage, pageNames.Count, cancellationToken);
+                return PageFile(etag, info, new MemoryStream(converted.Data, writable: false), converted.ContentType);
+            }
+
+            var page = await _reader.OpenPageAsync(issue.ResolvedPath, readerPage, cancellationToken);
             if (page is null)
             {
                 return Refuse(StatusCodes.Status404NotFound, "Page not found");
             }
 
-            await RecordProgressAsync(issue.FilePath, readerPage, pageNames.Count, cancellationToken);
+            Stream? content = page.Value.Content;
+            var contentType = page.Value.ContentType;
+            try
+            {
+                await RecordProgressAsync(issue.FilePath, readerPage, pageNames.Count, cancellationToken);
+                if (string.Equals(contentType, target, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Sent as it is, straight from the archive when it is stored there uncompressed;
+                    // the result disposes it.
+                    var unchanged = content;
+                    content = null;
+                    return PageFile(etag, info, unchanged, contentType);
+                }
 
-            var (data, contentType) = await _images.ConvertAsync(page.Value.Data, page.Value.ContentType, OpdsMediaTypes.ForPageStream(pageNames), cancellationToken);
-            SetPrivateCaching(etag);
-            Response.Headers.LastModified = new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero).ToString("R");
-            return File(data, contentType);
+                var data = new byte[content.Length];
+                await content.ReadExactlyAsync(data, cancellationToken);
+                (data, contentType) = await _images.ConvertPageAsync(convertedKey, data, contentType, target, cancellationToken);
+                return PageFile(etag, info, new MemoryStream(data, writable: false), contentType);
+            }
+            finally
+            {
+                content?.Dispose();
+            }
         }
         catch (ArchiveLimitExceededException ex)
         {
@@ -563,6 +591,13 @@ public sealed class OpdsController : ControllerBase
         {
             _logger.LogWarning(ex, "Could not record reading progress for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
         }
+    }
+
+    private FileStreamResult PageFile(string etag, FileInfo info, Stream content, string contentType)
+    {
+        SetPrivateCaching(etag);
+        Response.Headers.LastModified = new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero).ToString("R");
+        return File(content, contentType);
     }
 
     private void SetPrivateCaching(string etag)

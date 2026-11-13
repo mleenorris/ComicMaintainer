@@ -6,6 +6,9 @@
         // <script> tags there); this file must not run code at load time that
         // depends on a script loaded after it.
 
+        // Shared state declared in state.js and library.js and reassigned here.
+        /* global libraryScrollBeforeSeries: true, libraryRefreshDeferred: true */
+
         // Initialization function that runs after DOM is ready
         // ── Top-level SPA routing ─────────────────────────────────────────────
         // Hash-based routes keep the app a static SPA while giving each
@@ -84,6 +87,10 @@
                 seriesIssueRangeSelectArmed = false;
             }
             currentView = route.view;
+            if (route.view !== 'series' && route.view !== 'library') {
+                // Only a direct return from the series returns to the old place.
+                libraryScrollBeforeSeries = null;
+            }
             if (route.view !== 'settings') {
                 settingsReturnHash = window.location.hash || '#/home';
             }
@@ -203,9 +210,16 @@
 
         // Render the full library list (reuses the existing series grid/list).
         function renderLibraryView() {
+            // Back from a series opened from here: return to the same place.
+            const savedScroll = libraryScrollBeforeSeries;
+            libraryScrollBeforeSeries = null;
             if (seriesLibrary.length) {
                 renderSeriesLibrary();
+                if (savedScroll) restoreLibraryScroll(savedScroll);
+                // Something changed while the library was off screen.
+                if (libraryRefreshDeferred) refreshActiveLibraryView();
             } else if (!seriesLoading) {
+                libraryRefreshDeferred = false;
                 loadActiveLibraryView();
             }
             updateLibraryViewLayout();
@@ -285,7 +299,7 @@
         }
 
         function renderOverviewCard(series, resume) {
-            const cover = series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path;
+            const cover = seriesCoverImage(series, 480);
             const fallback = series.has_external_image && series.external_image_url ? series.cover_file_path : '';
             const resumeBtn = (resume && series.resume_file_path)
                 ? `<button type="button" class="overview-resume-btn" onclick="event.stopPropagation(); readComic('${escapeJs(series.resume_file_path)}')">${uiIcon('play')} Resume</button>`

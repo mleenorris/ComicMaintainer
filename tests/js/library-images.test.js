@@ -133,7 +133,7 @@ test('a missing cover without a fallback is left empty and not requested again',
 
 test('an external image identical to the fallback is not requested twice', async () => {
     const series = makeSeries(1, { has_external_image: true, external_image_url: '/api/series-images/same' });
-    series.cover_file_path = '/api/series-images/same';
+    series.cover_file_path = '/api/series-images/same?w=480';
     const page = await bootLibrary({ series: [series], routes: { 'GET /api/series-images/same': 404 } });
 
     imageObserver(page).trigger(true, covers(page));

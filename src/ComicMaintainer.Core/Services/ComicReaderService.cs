@@ -25,6 +25,14 @@ namespace ComicMaintainer.Core.Services;
 /// prefetches several pages at once) share one listing.
 /// </para>
 /// <para>
+/// A page sent to a client is opened with <see cref="OpenPageAsync"/>: a page stored
+/// uncompressed in a ZIP is streamed from its place in the archive file, any other is
+/// decompressed into a pooled buffer, and the read stops when the request is cancelled. The
+/// pages of a solid RAR, which can only be decompressed after every entry before them, are
+/// read through a pass kept open per archive (<see cref="SolidRarCursorPool"/>), so turning
+/// pages walks the archive forward once instead of from its start for every page.
+/// </para>
+/// <para>
 /// Entries are read through <see cref="ArchiveEntryReader"/>, which refuses
 /// archives with too many entries and entries that would expand past
 /// <see cref="ArchiveEntryReader.MaxPageBytes"/> with an
@@ -60,6 +68,7 @@ public class ComicReaderService : IComicReaderService, IDisposable
 
     private readonly ILogger<ComicReaderService> _logger;
     private readonly MemoryCache _pageIndexes;
+    private readonly SolidRarCursorPool _solidPasses;
 
     // Listings in progress, per file version, so concurrent cold requests share one.
     private readonly ConcurrentDictionary<FileVersion, Lazy<Task<PageIndex>>> _listings = new();
@@ -74,9 +83,9 @@ public class ComicReaderService : IComicReaderService, IDisposable
 
     /// <summary>
     /// Creates the service with a custom page-list cache budget (in estimated
-    /// bytes). Exposed for tests that exercise eviction.
+    /// bytes), and optionally its own pool of solid RAR passes. Exposed for tests.
     /// </summary>
-    internal ComicReaderService(ILogger<ComicReaderService> logger, long pageIndexCacheBytes)
+    internal ComicReaderService(ILogger<ComicReaderService> logger, long pageIndexCacheBytes, SolidRarCursorPool? solidPasses = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pageIndexCacheBytes);
         _logger = logger;
@@ -85,7 +94,11 @@ public class ComicReaderService : IComicReaderService, IDisposable
             SizeLimit = pageIndexCacheBytes,
             TrackStatistics = true,
         });
+        _solidPasses = solidPasses ?? new SolidRarCursorPool();
     }
+
+    /// <summary>The passes over solid RAR archives kept open between page reads (for tests).</summary>
+    internal SolidRarCursorPool SolidPasses => _solidPasses;
 
     /// <summary>Estimated bytes currently held by cached page lists (for tests).</summary>
     internal long CachedPageIndexBytes => _pageIndexes.GetCurrentStatistics()?.CurrentEstimatedSize ?? 0;
@@ -118,6 +131,21 @@ public class ComicReaderService : IComicReaderService, IDisposable
 
     public async Task<(byte[] Data, string ContentType)?> GetPageAsync(string filePath, int pageNumber)
     {
+        var page = await ReadPageAsync(filePath, pageNumber, CancellationToken.None);
+        if (page is null)
+        {
+            return null;
+        }
+
+        using var content = page.Value.Content;
+        return (ToArray(content), page.Value.ContentType);
+    }
+
+    public Task<ComicPageStream?> OpenPageAsync(string filePath, int pageNumber, CancellationToken cancellationToken) =>
+        ReadPageAsync(filePath, pageNumber, cancellationToken);
+
+    private async Task<ComicPageStream?> ReadPageAsync(string filePath, int pageNumber, CancellationToken cancellationToken)
+    {
         try
         {
             // Two attempts: the cached page list is validated against the file's
@@ -144,11 +172,13 @@ public class ComicReaderService : IComicReaderService, IDisposable
                     throw new ArchiveLimitExceededException(refusal);
                 }
 
-                byte[]? data;
+                Stream? content;
                 try
                 {
                     Interlocked.Increment(ref _pageReadCount);
-                    data = await Task.Run(() => ReadPage(index, pageNumber));
+                    content = index.NeedsSolidPass[pageNumber - 1]
+                        ? await ReadSolidPageAsync(index, pageNumber, cancellationToken)
+                        : await Task.Run(() => OpenPage(index, pageNumber, cancellationToken), cancellationToken);
                 }
                 catch (ArchiveLimitExceededException ex)
                 {
@@ -157,9 +187,9 @@ public class ComicReaderService : IComicReaderService, IDisposable
                     throw;
                 }
 
-                if (data is not null)
+                if (content is not null)
                 {
-                    return (data, GetContentType(index.Names[pageNumber - 1]));
+                    return new ComicPageStream(content, GetContentType(index.Names[pageNumber - 1]));
                 }
 
                 _pageIndexes.Remove(filePath);
@@ -169,11 +199,28 @@ public class ComicReaderService : IComicReaderService, IDisposable
                 pageNumber, LoggingHelper.SanitizePathForLog(filePath));
             return null;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Nobody wants the page any more (the reader moved on); not a failure.
+            throw;
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException and not ArchiveLimitExceededException)
         {
             _logger.LogError(ex, "Error getting page {PageNumber} from {FilePath}", pageNumber, LoggingHelper.SanitizePathForLog(filePath));
             return null;
         }
+    }
+
+    private static byte[] ToArray(Stream content)
+    {
+        if (content is RentedBufferStream rented)
+        {
+            return rented.ToExactArray();
+        }
+
+        var data = new byte[content.Length];
+        content.ReadExactly(data);
+        return data;
     }
 
     public async Task<List<string>> GetPageNamesAsync(string filePath)
@@ -194,6 +241,7 @@ public class ComicReaderService : IComicReaderService, IDisposable
     public void Dispose()
     {
         _pageIndexes.Dispose();
+        _solidPasses.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -309,33 +357,67 @@ public class ComicReaderService : IComicReaderService, IDisposable
     private static PageIndex BuildIndex(FileVersion version)
     {
         using var archive = ComicArchiveReader.Open(version.Path);
-        var pages = archive.ListPages();
+        var pages = archive.ListPagesForReading();
         return new PageIndex(
             version,
-            pages.Select(p => p.Name).ToArray(),
-            pages.Select(p => p.Position).ToArray(),
+            pages.Select(p => p.Page.Name).ToArray(),
+            pages.Select(p => p.Page.Position).ToArray(),
+            pages.Select(p => p.NeedsSolidPass).ToArray(),
             refusal: null);
     }
 
     /// <summary>
-    /// Reads one page through the cached index. Returns <c>null</c> when the entry
-    /// at the cached position is no longer the expected one (the file changed
-    /// without its length or timestamp changing), so the caller can rebuild.
+    /// Opens one page through the cached index: a stream over a stored ZIP entry's bytes in the
+    /// file, or the page decompressed into a pooled buffer. Returns <c>null</c> when the entry at
+    /// the cached position is no longer the expected one (the file changed without its length or
+    /// timestamp changing), so the caller can rebuild.
     /// </summary>
-    private static byte[]? ReadPage(PageIndex index, int pageNumber)
+    private static Stream? OpenPage(PageIndex index, int pageNumber, CancellationToken cancellationToken)
     {
         var expectedName = index.Names[pageNumber - 1];
         var position = index.EntryPositions[pageNumber - 1];
 
-        using var archive = ComicArchiveReader.OpenForEntry(index.Version.Path, position);
-        var entry = archive.GetEntryAt(position);
-        if (entry is null || !string.Equals(entry.Name, expectedName, StringComparison.Ordinal))
+        var archive = ComicArchiveReader.OpenForEntry(index.Version.Path, position);
+        var handedOver = false;
+        try
         {
-            return null;
-        }
+            var entry = archive.GetEntryAt(position);
+            if (entry is null || !string.Equals(entry.Name, expectedName, StringComparison.Ordinal))
+            {
+                return null;
+            }
 
-        return entry.ReadAllBytes(ArchiveEntryReader.MaxPageBytes);
+            if (archive.TryOpenStoredRange(entry, ArchiveEntryReader.MaxPageBytes) is { } range)
+            {
+                // The range reads from the archive's file as it is sent, so it keeps the archive open.
+                handedOver = true;
+                return range;
+            }
+
+            return entry.ReadPooled(ArchiveEntryReader.MaxPageBytes, cancellationToken);
+        }
+        finally
+        {
+            if (!handedOver)
+            {
+                archive.Dispose();
+            }
+        }
     }
+
+    /// <summary>
+    /// Reads a page of a solid RAR through the pass kept open for the archive (see
+    /// <see cref="SolidRarCursorPool"/>), so turning pages walks the archive forward once.
+    /// </summary>
+    private async Task<Stream?> ReadSolidPageAsync(PageIndex index, int pageNumber, CancellationToken cancellationToken) =>
+        await _solidPasses.ReadPageAsync(
+            index.Version.Path,
+            index.Version.Length,
+            index.Version.LastWriteUtcTicks,
+            index.EntryPositions[pageNumber - 1],
+            index.Names[pageNumber - 1],
+            ArchiveEntryReader.MaxPageBytes,
+            cancellationToken);
 
     /// <summary>Logs a refusal by the read limits where it is found: once per file version (and page).</summary>
     private void LogRefused(string filePath, string reason) =>
@@ -372,15 +454,16 @@ public class ComicReaderService : IComicReaderService, IDisposable
     /// </summary>
     private sealed class PageIndex
     {
-        public PageIndex(FileVersion version, string[] names, int[] entryPositions, string? refusal)
+        public PageIndex(FileVersion version, string[] names, int[] entryPositions, bool[] needsSolidPass, string? refusal)
             : this(
                 version,
                 names,
                 entryPositions,
+                needsSolidPass,
                 refusal,
                 ImmutableDictionary<int, string>.Empty,
                 // Rough managed footprint: the object and arrays, plus each string.
-                96 + 2L * (refusal?.Length ?? 0) + names.Sum(n => 40L + 2L * n.Length) + 4L * entryPositions.Length)
+                96 + 2L * (refusal?.Length ?? 0) + names.Sum(n => 40L + 2L * n.Length) + 4L * entryPositions.Length + needsSolidPass.Length)
         {
         }
 
@@ -388,6 +471,7 @@ public class ComicReaderService : IComicReaderService, IDisposable
             FileVersion version,
             string[] names,
             int[] entryPositions,
+            bool[] needsSolidPass,
             string? refusal,
             ImmutableDictionary<int, string> pageRefusals,
             long estimatedBytes)
@@ -395,17 +479,22 @@ public class ComicReaderService : IComicReaderService, IDisposable
             Version = version;
             Names = names;
             EntryPositions = entryPositions;
+            NeedsSolidPass = needsSolidPass;
             Refusal = refusal;
             PageRefusals = pageRefusals;
             EstimatedBytes = estimatedBytes;
         }
 
         public static PageIndex Refused(FileVersion version, string reason) =>
-            new(version, Array.Empty<string>(), Array.Empty<int>(), reason);
+            new(version, Array.Empty<string>(), Array.Empty<int>(), Array.Empty<bool>(), reason);
 
         public FileVersion Version { get; }
         public string[] Names { get; }
         public int[] EntryPositions { get; }
+
+        /// <summary>For each page, whether it can only be read by a pass over a solid RAR.</summary>
+        public bool[] NeedsSolidPass { get; }
+
         public string? Refusal { get; }
 
         /// <summary>Pages (1-based) the read limits refused, with the reason.</summary>
@@ -422,7 +511,7 @@ public class ComicReaderService : IComicReaderService, IDisposable
                 estimatedBytes -= RefusalBytes(previous);
             }
 
-            return new PageIndex(Version, Names, EntryPositions, Refusal, PageRefusals.SetItem(pageNumber, reason), estimatedBytes);
+            return new PageIndex(Version, Names, EntryPositions, NeedsSolidPass, Refusal, PageRefusals.SetItem(pageNumber, reason), estimatedBytes);
         }
 
         // Rough managed footprint of one recorded refusal: a dictionary node and the message.

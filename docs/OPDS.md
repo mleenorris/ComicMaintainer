@@ -91,7 +91,7 @@ Each issue offers:
 - **A download** of the original file, which can be resumed where the app supports it.
 - **Page streaming** (OPDS-PSE), so the app can show pages without downloading the whole comic. Page numbers in these addresses start at 0. An issue whose pages cannot be listed is offered for download only.
 
-Pages are sent in their own format when every page in the comic is the same JPEG, PNG or GIF type. Any other comic, including those with WebP pages, is sent as JPEG, because that is what the OPDS page-streaming format allows.
+Pages are sent in their own format when every page in the comic is the same JPEG, PNG or GIF type. Any other comic, including those with WebP pages, is sent as JPEG, because that is what the OPDS page-streaming format allows. Covers are always JPEG, kept in the cover cache beside the web interface's thumbnails, so they are converted once.
 
 ### Reading Progress
 

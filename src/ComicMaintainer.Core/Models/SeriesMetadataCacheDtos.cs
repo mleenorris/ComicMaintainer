@@ -137,6 +137,19 @@ public class SeriesMetadataCacheRecord
 }
 
 /// <summary>
+/// The stored image of a series, and nothing else of its cache record: what serving the image
+/// needs (see <see cref="Interfaces.ISeriesMetadataCacheService.GetImageAsync"/>).
+/// </summary>
+public sealed record SeriesImageRecord(string? LocalImageFile, string? ImageContentType, string? ImageStatus)
+{
+    /// <summary>True when an image (downloaded or user-uploaded) is available locally, as <see cref="SeriesMetadataCacheRecord.HasImage"/>.</summary>
+    public bool HasImage =>
+        !string.IsNullOrEmpty(LocalImageFile)
+        && (string.Equals(ImageStatus, "downloaded", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(ImageStatus, "user", StringComparison.OrdinalIgnoreCase));
+}
+
+/// <summary>
 /// Result of a manual metadata refresh job request.
 /// </summary>
 public class SeriesMetadataRefreshResult

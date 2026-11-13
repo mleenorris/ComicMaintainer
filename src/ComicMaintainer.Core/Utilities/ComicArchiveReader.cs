@@ -1,4 +1,7 @@
+using System.Buffers.Binary;
 using System.Globalization;
+using System.Runtime.CompilerServices;
+using Microsoft.Win32.SafeHandles;
 using SharpCompress.Archives;
 using SharpCompress.Archives.Rar;
 using SharpCompress.Crypto;
@@ -51,6 +54,20 @@ public abstract class ComicArchiveEntry
     /// <summary>Reads a text entry such as ComicInfo.xml under <see cref="ArchiveEntryReader.MaxComicInfoBytes"/>.</summary>
     /// <exception cref="ArchiveLimitExceededException">The entry exceeds a limit.</exception>
     public abstract string ReadText();
+
+    /// <summary>
+    /// True for an entry of a solid RAR that depends on the entries before it, which can only be
+    /// decompressed by a pass over them (see <see cref="ComicArchiveReader"/>).
+    /// </summary>
+    internal virtual bool NeedsSolidPass => false;
+
+    /// <summary>
+    /// <see cref="ReadAllBytes"/> into a pooled buffer, for a page that is sent and dropped,
+    /// checking <paramref name="cancellationToken"/> while it decompresses.
+    /// </summary>
+    /// <exception cref="ArchiveLimitExceededException">The entry exceeds a limit.</exception>
+    /// <exception cref="OperationCanceledException">The read was cancelled.</exception>
+    internal abstract RentedBufferStream ReadPooled(long maxBytes, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -96,22 +113,28 @@ public sealed class ComicArchiveReader : IDisposable
     // SharpCompress's default leaves the file open after the archive is disposed.
     private static readonly ReaderOptions RarReaderOptions = new() { LeaveStreamOpen = false };
 
+    // A ZIP local file header: signature, and the offsets of its fields (APPNOTE.TXT 4.3.7).
+    private const uint ZipLocalHeaderSignature = 0x04034b50;
+    private const int ZipLocalHeaderLength = 30;
+
     private readonly string _filePath;
     private readonly string _archiveName;
     private readonly long _archiveBytes;
     private readonly int _rarFileHeadersToCheck;
     private readonly SystemZipArchive? _zip;
+    private readonly FileStream? _zipFile;
     private readonly IArchive? _rar;
     private SolidRarCursor? _solidCursor;
     private bool _disposed;
 
-    private ComicArchiveReader(string filePath, long archiveBytes, int rarFileHeadersToCheck, SystemZipArchive? zip, IArchive? rar)
+    private ComicArchiveReader(string filePath, long archiveBytes, int rarFileHeadersToCheck, SystemZipArchive? zip, FileStream? zipFile, IArchive? rar)
     {
         _filePath = filePath;
         _archiveName = Path.GetFileName(filePath);
         _archiveBytes = archiveBytes;
         _rarFileHeadersToCheck = rarFileHeadersToCheck;
         _zip = zip;
+        _zipFile = zipFile;
         _rar = rar;
     }
 
@@ -139,11 +162,11 @@ public sealed class ComicArchiveReader : IDisposable
         return OpenCore(filePath, position + 1);
     }
 
-    private static ComicArchiveReader OpenCore(string filePath, int rarFileHeadersToCheck)
+    private static ComicArchiveReader OpenCore(string filePath, int rarFileHeadersToCheck, FileShare share = FileShare.Read)
     {
         ArgumentException.ThrowIfNullOrEmpty(filePath);
         var archiveName = Path.GetFileName(filePath);
-        var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096);
+        var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, share, bufferSize: 4096);
         try
         {
             Span<byte> signature = stackalloc byte[SignatureLength];
@@ -158,11 +181,11 @@ public sealed class ComicArchiveReader : IDisposable
                 }
 
                 var (rar, totalBytes) = OpenRarArchive(filePath, stream);
-                return new ComicArchiveReader(filePath, totalBytes, rarFileHeadersToCheck, zip: null, rar);
+                return new ComicArchiveReader(filePath, totalBytes, rarFileHeadersToCheck, zip: null, zipFile: null, rar);
             }
 
             stream.Position = 0;
-            return new ComicArchiveReader(filePath, stream.Length, rarFileHeadersToCheck, ArchiveEntryReader.OpenZip(stream, archiveName), rar: null);
+            return new ComicArchiveReader(filePath, stream.Length, rarFileHeadersToCheck, ArchiveEntryReader.OpenZip(stream, archiveName), stream, rar: null);
         }
         catch (InvalidDataException ex)
         {
@@ -306,15 +329,23 @@ public sealed class ComicArchiveReader : IDisposable
     /// Reading progress stores page numbers, and <see cref="ComicMaintainer.Core.Services.ComicReaderService.PageListVersion"/>
     /// has to change whenever these rules do.
     /// </remarks>
-    public IReadOnlyList<ComicArchivePage> ListPages()
+    public IReadOnlyList<ComicArchivePage> ListPages() =>
+        ListPagesForReading().Select(p => p.Page).ToList();
+
+    /// <summary>
+    /// <see cref="ListPages"/>, also telling for each page whether its entry can only be
+    /// decompressed by a pass over the entries before it (an entry of a solid RAR that
+    /// depends on them).
+    /// </summary>
+    internal IReadOnlyList<(ComicArchivePage Page, bool NeedsSolidPass)> ListPagesForReading()
     {
         var pages = EnumerateEntries()
             .Where(entry => !entry.IsDirectory && IsPageImageName(entry.Name))
-            .Select(entry => new ComicArchivePage(entry.Name, entry.Position))
+            .Select(entry => (Page: new ComicArchivePage(entry.Name, entry.Position), entry.NeedsSolidPass))
             .ToList();
 
         // OrderBy is stable, so entries with equal names keep their archive order.
-        return pages.OrderBy(p => p.Name, new NaturalStringComparer()).ToList();
+        return pages.OrderBy(p => p.Page.Name, new NaturalStringComparer()).ToList();
     }
 
     /// <summary>
@@ -446,11 +477,17 @@ public sealed class ComicArchiveReader : IDisposable
     /// Decompresses a solid archive's entry that is left out of the copy, which the entries after
     /// it depend on, under the same limits as one that is copied.
     /// </summary>
-    private static void DiscardEntry(string name, long declaredSize, ICopyableEntry entry, DecompressionBudget budget, long maxEntryBytes)
+    private static void DiscardEntry(
+        string name,
+        long declaredSize,
+        ICopyableEntry entry,
+        DecompressionBudget budget,
+        long maxEntryBytes,
+        CancellationToken cancellationToken = default)
     {
         using var source = entry.OpenStream();
         using var bounded = new LimitedRewriteStream(source, name, declaredSize, maxEntryBytes, budget, entry.ExpectedCrc);
-        bounded.CopyTo(Stream.Null);
+        ArchiveEntryReader.Discard(bounded, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -500,6 +537,109 @@ public sealed class ComicArchiveReader : IDisposable
             _solidCursor = null;
             throw;
         }
+    }
+
+    /// <summary>
+    /// <see cref="ReadSolidEntry"/> into a pooled buffer, with cancellation. The cursor is not kept:
+    /// a reader that turns pages of a solid archive keeps one through <see cref="OpenSolidCursor"/>.
+    /// </summary>
+    private RentedBufferStream ReadSolidEntryPooled(int position, string name, long maxBytes, CancellationToken cancellationToken)
+    {
+        using var cursor = new SolidRarCursor(
+            OpenCore(_filePath, _rarFileHeadersToCheck),
+            new DecompressionBudget(_archiveName, ArchiveEntryReader.RewriteBudgetFor(_archiveBytes)));
+        return cursor.ReadPage(position, name, maxBytes, cancellationToken)
+            ?? throw new ComicArchiveFormatException(
+                $"'{_archiveName}' does not list '{name}' where its headers put it.", innerException: null);
+    }
+
+    /// <summary>
+    /// Opens a forward pass over the solid RAR at <paramref name="filePath"/> for reading its pages
+    /// in order, which a caller can keep open between reads (see <see cref="SolidRarCursorPool"/>).
+    /// Every header is checked and listed up front, as <see cref="Open"/> does, and the pass gets
+    /// the decompression budget of one rewrite of the archive.
+    /// </summary>
+    /// <remarks>
+    /// The file is opened so that the app can still rewrite, replace, rename or delete it while
+    /// the pass is open, as for an OPDS download: a pass may stay open between page turns. Its
+    /// owner closes a pass that outlives its file version instead of reading it again, and data
+    /// changed under an open pass fails the entries' CRC check, where they carry one, like any
+    /// other damage.
+    /// </remarks>
+    /// <exception cref="ArchiveLimitExceededException">The archive is over a read limit.</exception>
+    /// <exception cref="ComicArchiveFormatException">The file is not a readable ZIP or RAR archive.</exception>
+    internal static SolidRarCursor OpenSolidCursor(string filePath)
+    {
+        var reader = OpenCore(filePath, int.MaxValue, FileShare.ReadWrite | FileShare.Delete);
+        try
+        {
+            if (reader._rar is null)
+            {
+                throw new ComicArchiveFormatException($"'{reader._archiveName}' is not a RAR archive.", innerException: null);
+            }
+
+            return new SolidRarCursor(reader, new DecompressionBudget(reader._archiveName, ArchiveEntryReader.RewriteBudgetFor(reader._archiveBytes)));
+        }
+        catch
+        {
+            reader.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// When <paramref name="entry"/> is a ZIP entry stored without compression or encryption, a
+    /// stream over its bytes where they lie in the archive file, so a page can be sent straight
+    /// from the file instead of being copied into memory first. The stream takes this reader
+    /// over and disposes it when it is disposed. Returns <c>null</c> for any other entry, which
+    /// is then read the ordinary way.
+    /// </summary>
+    /// <remarks>
+    /// The entry's sizes come from the central directory that <see cref="System.IO.Compression"/>
+    /// read; only its local header, which says where the data starts and how it is stored, is
+    /// read here. A stored entry is the same length packed and unpacked, so nothing can expand,
+    /// and the range is checked to lie inside the file. The same per-entry cap applies as to any
+    /// other page.
+    /// </remarks>
+    /// <exception cref="ArchiveLimitExceededException">The entry is over <paramref name="maxBytes"/>.</exception>
+    internal Stream? TryOpenStoredRange(ComicArchiveEntry entry, long maxBytes)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (entry is not ZipEntry zipEntry || _zipFile is null || zipEntry.IsEncrypted)
+        {
+            return null;
+        }
+
+        var (length, compressed) = zipEntry.DeclaredSizes;
+        if (length != compressed || zipEntry.LocalHeaderOffset is not { } headerOffset || headerOffset < 0)
+        {
+            return null;
+        }
+
+        ArchiveEntryReader.EnsureWithinLimits(entry.Name, length, compressed, maxBytes);
+
+        var handle = _zipFile.SafeFileHandle;
+        var fileLength = RandomAccess.GetLength(handle);
+        Span<byte> header = stackalloc byte[ZipLocalHeaderLength];
+        if (headerOffset > fileLength - ZipLocalHeaderLength
+            || RandomAccess.Read(handle, header, headerOffset) != ZipLocalHeaderLength
+            || BinaryPrimitives.ReadUInt32LittleEndian(header) != ZipLocalHeaderSignature
+            || (BinaryPrimitives.ReadUInt16LittleEndian(header[6..]) & 1) != 0 // encrypted
+            || BinaryPrimitives.ReadUInt16LittleEndian(header[8..]) != 0) // not stored
+        {
+            return null;
+        }
+
+        var dataStart = headerOffset + ZipLocalHeaderLength
+            + BinaryPrimitives.ReadUInt16LittleEndian(header[26..])
+            + BinaryPrimitives.ReadUInt16LittleEndian(header[28..]);
+        if (dataStart > fileLength - length)
+        {
+            return null;
+        }
+
+        return new ArchiveRangeStream(this, handle, dataStart, length);
     }
 
     /// <summary>True when <paramref name="name"/> is an image the reader shows as a page.</summary>
@@ -560,10 +700,47 @@ public sealed class ComicArchiveReader : IDisposable
 
         public uint? ExpectedCrc => null;
 
+        public bool IsEncrypted => _entry.IsEncrypted;
+
+        /// <summary>
+        /// Where the entry's local header starts in the file, which <see cref="SystemZipArchiveEntry"/>
+        /// read from the central directory but does not make public; <c>null</c> when it cannot
+        /// be had, and the entry is then read the ordinary way.
+        /// </summary>
+        public long? LocalHeaderOffset
+        {
+            get
+            {
+                if (!s_localHeaderOffsetAvailable)
+                {
+                    return null;
+                }
+
+                try
+                {
+                    return ZipEntryInternals.OffsetOfLocalHeader(_entry);
+                }
+                catch (MissingFieldException)
+                {
+                    // A runtime that renamed the field: pages are read into memory instead.
+                    s_localHeaderOffsetAvailable = false;
+                    return null;
+                }
+            }
+        }
+
         public override byte[] ReadAllBytes(long maxBytes)
         {
             EnsureNotEncrypted();
             return ArchiveEntryReader.ReadAllBytes(_entry, maxBytes);
+        }
+
+        internal override RentedBufferStream ReadPooled(long maxBytes, CancellationToken cancellationToken)
+        {
+            EnsureNotEncrypted();
+            ArchiveEntryReader.EnsureWithinLimits(Name, _entry.Length, _entry.CompressedLength, maxBytes);
+            using var stream = _entry.Open();
+            return ArchiveEntryReader.ReadBoundedPooled(stream, Name, _entry.Length, maxBytes, cancellationToken);
         }
 
         public override string ReadText()
@@ -616,10 +793,31 @@ public sealed class ComicArchiveReader : IDisposable
 
         public uint? ExpectedCrc => _owner.IsSolidlyCompressed(_entry) ? ArchiveEntryReader.RarEntryCrc32(_entry) : null;
 
+        internal override bool NeedsSolidPass => _owner.IsSolidlyCompressed(_entry);
+
         public override byte[] ReadAllBytes(long maxBytes) =>
             _owner.IsSolidlyCompressed(_entry)
                 ? _owner.ReadSolidEntry(Position, Name, _entry.Size, maxBytes)
                 : ArchiveEntryReader.ReadAllBytes(_entry, maxBytes);
+
+        internal override RentedBufferStream ReadPooled(long maxBytes, CancellationToken cancellationToken)
+        {
+            if (_owner.IsSolidlyCompressed(_entry))
+            {
+                return _owner.ReadSolidEntryPooled(Position, Name, maxBytes, cancellationToken);
+            }
+
+            var compressed = _entry.IsSolid ? -1 : _entry.CompressedSize;
+            ArchiveEntryReader.EnsureWithinLimits(Name, _entry.Size, compressed, maxBytes);
+            using var stream = _entry.OpenEntryStream();
+            return ArchiveEntryReader.ReadBoundedPooled(stream, Name, _entry.Size, maxBytes, cancellationToken);
+        }
+
+        /// <summary>
+        /// How much memory decompressing this entry needs for its window, as its header asks for
+        /// it: none for a folder or a stored entry.
+        /// </summary>
+        public long WindowBytes => _entry.IsDirectory ? 0 : ArchiveEntryReader.RarWindowBytes(_entry);
 
         public override string ReadText() => ArchiveEntryReader.DecodeText(ReadAllBytes(ArchiveEntryReader.MaxComicInfoBytes));
 
@@ -637,8 +835,11 @@ public sealed class ComicArchiveReader : IDisposable
     /// could smuggle headers that the check in <see cref="ArchiveEntryReader.EnsureRarHeadersWithinLimits"/>
     /// never saw; every header read here comes from the archive listing that check covers.
     /// </remarks>
-    private sealed class SolidRarCursor : IDisposable
+    internal sealed class SolidRarCursor : IDisposable
     {
+        // What a pass is assumed to hold besides its window: the listing, buffers, the file.
+        private const long BaseEstimatedBytes = 1024L * 1024;
+
         private readonly ComicArchiveReader _source;
         private readonly List<ComicArchiveEntry> _entries;
         private readonly DecompressionBudget _budget;
@@ -648,36 +849,233 @@ public sealed class ComicArchiveReader : IDisposable
             _source = source;
             _entries = source.EnumerateRarEntries().Take(source._rarFileHeadersToCheck).ToList();
             _budget = budget;
+            EstimatedBytes = BaseEstimatedBytes
+                + _entries.Select(e => ((RarEntry)e).WindowBytes).DefaultIfEmpty(0).Max()
+                + 256L * _entries.Count;
         }
 
-        /// <summary>The entry the pass has reached, or -1 before the first.</summary>
+        /// <summary>
+        /// The entry the pass has reached, or -1 before the first. An entry before or at this
+        /// position can only be read by a new pass.
+        /// </summary>
         public int Position { get; private set; } = -1;
+
+        /// <summary>
+        /// Roughly how much memory the open pass holds: the decompression window its headers ask
+        /// for, which the decoder keeps from entry to entry, plus the listing.
+        /// </summary>
+        public long EstimatedBytes { get; }
+
+        /// <summary>How many entries this pass has decompressed, read or passed over (for tests).</summary>
+        public int EntriesDecompressed { get; private set; }
 
         public byte[] Read(int position, string name, long declaredSize, long maxBytes)
         {
+            var entry = AdvanceTo(position, CancellationToken.None);
+            if (entry is null || !string.Equals(entry.Name, name, StringComparison.Ordinal))
+            {
+                throw new ComicArchiveFormatException(
+                    $"'{_source._archiveName}' does not list '{name}' where its headers put it.", innerException: null);
+            }
+
+            var copyable = (ICopyableEntry)entry;
+            using var stream = copyable.OpenStream();
+            using var bounded = new LimitedRewriteStream(stream, name, declaredSize, maxBytes, _budget, copyable.ExpectedCrc);
+            return ArchiveEntryReader.ReadBounded(bounded, name, declaredSize, maxBytes);
+        }
+
+        /// <summary>
+        /// Moves the pass on to the page at <paramref name="position"/> and reads it into a pooled
+        /// buffer, under <paramref name="maxBytes"/> and the pass's budget. Returns <c>null</c>
+        /// when the archive does not hold <paramref name="name"/> there (the file changed since
+        /// its pages were listed); the pass cannot be used after that, nor after an exception.
+        /// </summary>
+        /// <exception cref="ArchiveLimitExceededException">The page or an entry before it exceeds a limit.</exception>
+        /// <exception cref="OperationCanceledException">The read was cancelled.</exception>
+        public RentedBufferStream? ReadPage(int position, string name, long maxBytes, CancellationToken cancellationToken)
+        {
+            var entry = AdvanceTo(position, cancellationToken);
+            if (entry is null || entry.IsDirectory || !string.Equals(entry.Name, name, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var copyable = (ICopyableEntry)entry;
+            var declaredSize = copyable.DeclaredSizes.Uncompressed;
+            ArchiveEntryReader.EnsureWithinLimits(name, declaredSize, -1, maxBytes);
+            using var stream = copyable.OpenStream();
+            using var bounded = new LimitedRewriteStream(stream, name, declaredSize, maxBytes, _budget, copyable.ExpectedCrc);
+            return ArchiveEntryReader.ReadBoundedPooled(bounded, name, declaredSize, maxBytes, cancellationToken);
+        }
+
+        /// <summary>
+        /// Decompresses and drops every entry between the current position and
+        /// <paramref name="position"/>, and returns the entry there, not yet read; <c>null</c>
+        /// when the archive ends first.
+        /// </summary>
+        private ComicArchiveEntry? AdvanceTo(int position, CancellationToken cancellationToken)
+        {
+            if (position <= Position)
+            {
+                throw new InvalidOperationException("A solid archive pass only moves forward.");
+            }
+
             while (Position + 1 < _entries.Count)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var entry = _entries[++Position];
-                var copyable = (ICopyableEntry)entry;
-                if (Position == position && string.Equals(entry.Name, name, StringComparison.Ordinal))
+                if (Position == position)
                 {
-                    using var stream = copyable.OpenStream();
-                    using var bounded = new LimitedRewriteStream(stream, name, declaredSize, maxBytes, _budget, copyable.ExpectedCrc);
-                    return ArchiveEntryReader.ReadBounded(bounded, name, declaredSize, maxBytes);
+                    if (!entry.IsDirectory)
+                    {
+                        EntriesDecompressed++;
+                    }
+
+                    return entry;
                 }
 
                 if (!entry.IsDirectory)
                 {
-                    DiscardEntry(entry.Name, copyable.DeclaredSizes.Uncompressed, copyable, _budget, ArchiveEntryReader.MaxRewriteEntryBytes);
+                    var copyable = (ICopyableEntry)entry;
+                    EntriesDecompressed++;
+                    DiscardEntry(entry.Name, copyable.DeclaredSizes.Uncompressed, copyable, _budget, ArchiveEntryReader.MaxRewriteEntryBytes, cancellationToken);
                 }
             }
 
-            throw new ComicArchiveFormatException(
-                $"'{_source._archiveName}' does not list '{name}' where its headers put it.", innerException: null);
+            return null;
         }
 
         public void Dispose() => _source.Dispose();
     }
+
+    /// <summary>
+    /// Reads a range of the archive file, the bytes of one stored entry, through positional reads
+    /// on the reader's handle, and disposes the reader with it.
+    /// </summary>
+    internal sealed class ArchiveRangeStream : Stream
+    {
+        private readonly ComicArchiveReader _owner;
+        private readonly SafeFileHandle _handle;
+        private readonly long _start;
+        private readonly long _length;
+        private long _position;
+        private bool _disposed;
+
+        public ArchiveRangeStream(ComicArchiveReader owner, SafeFileHandle handle, long start, long length)
+        {
+            _owner = owner;
+            _handle = handle;
+            _start = start;
+            _length = length;
+        }
+
+        public override bool CanRead => !_disposed;
+
+        public override bool CanSeek => !_disposed;
+
+        public override bool CanWrite => false;
+
+        public override long Length => _length;
+
+        public override long Position
+        {
+            get => _position;
+            set
+            {
+                ArgumentOutOfRangeException.ThrowIfNegative(value);
+                _position = value;
+            }
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+
+        public override int Read(Span<byte> buffer)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var remaining = _length - _position;
+            if (remaining <= 0 || buffer.IsEmpty)
+            {
+                return 0;
+            }
+
+            if (buffer.Length > remaining)
+            {
+                buffer = buffer[..(int)remaining];
+            }
+
+            var read = RandomAccess.Read(_handle, buffer, _start + _position);
+            _position += read;
+            return read;
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var remaining = _length - _position;
+            if (remaining <= 0 || buffer.IsEmpty)
+            {
+                return 0;
+            }
+
+            if (buffer.Length > remaining)
+            {
+                buffer = buffer[..(int)remaining];
+            }
+
+            var read = await RandomAccess.ReadAsync(_handle, buffer, _start + _position, cancellationToken).ConfigureAwait(false);
+            _position += read;
+            return read;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            var target = origin switch
+            {
+                SeekOrigin.Begin => offset,
+                SeekOrigin.Current => _position + offset,
+                SeekOrigin.End => _length + offset,
+                _ => throw new ArgumentOutOfRangeException(nameof(origin)),
+            };
+            ArgumentOutOfRangeException.ThrowIfNegative(target, nameof(offset));
+            _position = target;
+            return target;
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && !_disposed)
+            {
+                _disposed = true;
+                _owner.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>
+    /// The field of <see cref="SystemZipArchiveEntry"/> that holds where its local header starts.
+    /// Should a runtime rename it, reading it fails with <see cref="MissingFieldException"/>,
+    /// pages are read into memory instead, and the tests say so.
+    /// </summary>
+    private static class ZipEntryInternals
+    {
+        [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_offsetOfLocalHeader")]
+        public static extern ref long OffsetOfLocalHeader(SystemZipArchiveEntry entry);
+    }
+
+    private static volatile bool s_localHeaderOffsetAvailable = true;
 
     /// <summary>What one pass over an archive may still decompress, across all of its entries.</summary>
     internal sealed class DecompressionBudget

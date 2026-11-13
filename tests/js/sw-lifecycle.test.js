@@ -14,6 +14,7 @@ const {
     VERSIONED_CACHE,
     DEFAULT_CACHE,
     IMAGE_CACHE,
+    PAGE_CACHE,
     OFFLINE_CACHE,
     OFFLINE_PAGE,
     PRECACHED_READER_PAGE,
@@ -248,13 +249,14 @@ test('activate deletes caches of older versions but keeps image, offline-downloa
     await sw.caches.seed('comic-maintainer-2-0-350-0', { '/offline.html': html('old offline page') });
     await sw.caches.seed(DEFAULT_CACHE, { '/js/main.js': script('// old') });
     await sw.caches.seed(IMAGE_CACHE, { '/api/comicreader/cover?filePath=a.cbz': image('cover') });
+    await sw.caches.seed(PAGE_CACHE, { '/api/comicreader/page?filePath=a.cbz&page=1': image('page') });
     await sw.caches.seed(OFFLINE_CACHE, { [offlineKey('a.cbz', 'page/1')]: image('page') });
     await sw.caches.seed('another-app-v1', { '/index.html': html('not ours') });
 
     await sw.install();
     await sw.activate();
 
-    assert.deepEqual(sw.caches.names(), [IMAGE_CACHE, OFFLINE_CACHE, 'another-app-v1', VERSIONED_CACHE, STATE_CACHE]);
+    assert.deepEqual(sw.caches.names(), [IMAGE_CACHE, PAGE_CACHE, OFFLINE_CACHE, 'another-app-v1', VERSIONED_CACHE, STATE_CACHE]);
     assert.deepEqual(sw.logged('Deleting old cache').map(entry => entry.args[1]), ['comic-maintainer-2-0-350-0', DEFAULT_CACHE]);
     assert.deepEqual(sw.caches.urls(OFFLINE_CACHE), [offlineKey('a.cbz', 'page/1')]);
     assert.equal(sw.claims, 1);
@@ -414,6 +416,7 @@ test('SKIP_WAITING lets an updated worker take over when the page accepts the up
 test('CLEAR_IMAGE_CACHE (sign-out) drops cached covers and pages but keeps offline downloads', async () => {
     const sw = await installedWorker();
     await sw.caches.seed(IMAGE_CACHE, { '/api/comicreader/cover?filePath=a.cbz': image('cover') });
+    await sw.caches.seed(PAGE_CACHE, { '/api/comicreader/page?filePath=a.cbz&page=1': image('page') });
     await sw.caches.seed(OFFLINE_CACHE, { [offlineKey('a.cbz', 'page/1')]: image('page') });
 
     await sw.message({ type: 'CLEAR_IMAGE_CACHE' });

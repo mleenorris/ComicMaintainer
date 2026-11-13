@@ -266,6 +266,10 @@ test('reconnecting catches up on the job, the watcher status and the library mis
     assert.ok(consoleLines(page, 'log').includes('SSE: Catching up on events missed while disconnected'));
     assert.equal(watcherChecks(), watcherBefore + 1);
     assert.match(page.$('#watcherStatus').textContent, /Watcher Stopped/);
+    // The overview is on screen: the library catches up when it is shown.
+    assert.equal(libraryLoads(), libraryBefore, 'nothing is fetched for a library that is not on screen');
+    page.run("navigate('#/library')");
+    await page.settle(3);
     assert.equal(libraryLoads(), libraryBefore + 1, 'the library view is refreshed once');
 });
 

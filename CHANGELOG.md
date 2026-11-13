@@ -26,6 +26,28 @@ for it.
 - Library covers that are not cached yet are generated at most one per processor core at a time. JPEG pages
   are decoded at a reduced size for the thumbnail, which takes a fraction of the time and memory.
 - In a series, a run of more than 12 missing issues is shown as one card for the whole range.
+- When files change or a job finishes, the library refreshes the series already loaded in place: no
+  spinner, no jump back to the top, and the cards are only redrawn if something they show changed. While
+  another page is open, the library refreshes when you return to it.
+- Back from a series returns to the same place in the library.
+- Reader pages are cached on the device separately from library covers (150 pages), so reading a comic no
+  longer pushes covers out of the cache. Series art is cached on the device too. A cover or page cached in
+  the last 10 minutes is shown without asking the server again.
+- Series cards ask for series art at the width they show it (160 pixels in the list, 480 in the grids, the
+  overview and the series page) instead of the provider's original, which can be 2048 pixels wide.
+- Reading a solid CBR no longer decompresses the archive from its start for every page. The reader keeps
+  its place in the archive between page turns, and the pages it fetches ahead are read in one pass instead
+  of one each. Going back a page starts again from the beginning, as before.
+- A page stored uncompressed in a CBZ, as most JPEG pages are, is sent straight from the file. Other pages
+  are decompressed into a reused buffer. A page the browser stops waiting for, such as a prefetch the reader
+  no longer needs, stops being read.
+- OPDS covers are converted to JPEG once and kept in the cover cache, instead of on every request. OPDS
+  pages that have to be converted are kept in memory for a while, so asking for one again does not convert
+  it again.
+- Series images can be asked for at the width a card shows them (`w=160`, `320`, `480` or `640`), as a
+  WebP copy made once and kept next to the original. The library's image links now carry the image's
+  content hash (`?v=`), and an image asked for with the current hash may be cached by the browser for a
+  year. Serving an image no longer loads the series' whole metadata record.
 
 ### Fixed
 

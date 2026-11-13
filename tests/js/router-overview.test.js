@@ -93,7 +93,7 @@ test('cards show the cover, issue count, size and provider match of each series'
         },
         {
             label: 'Open series Monstress', title: 'Monstress', count: '12', size: '512.0 KB',
-            cover: 'https://covers.example/monstress.jpg', fallback: 'Monstress/Monstress 001.cbz', alt: 'Monstress cover',
+            cover: 'https://covers.example/monstress.jpg?w=480', fallback: 'Monstress/Monstress 001.cbz', alt: 'Monstress cover',
             lookup: ['series-lookup-badge series-lookup-badge--success', 'Provider matched']
         },
         {

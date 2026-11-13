@@ -731,16 +731,53 @@
         // so each image is only fetched when it (or its container) is close
         // to entering the viewport. The original eager-batch behaviour is
         // kept as a fallback for environments without IntersectionObserver.
+        //
+        // Covers near the viewport load a few at a time, in the order they came
+        // near it. Flinging through a long list would otherwise start a request
+        // for every cover passed, and the covers the user stops at would wait
+        // behind all of them; a cover that scrolled away again before its turn
+        // is skipped, and stays watched so it loads if it comes back.
+        const PROTECTED_IMAGE_CONCURRENCY = 8;
+        const protectedImagesNearViewport = new WeakSet();
+        const protectedImagesQueued = new WeakSet();
+        const protectedImageQueue = [];
+        let protectedImageLoadsRunning = 0;
+
         const PROTECTED_IMAGE_OBSERVER = (typeof IntersectionObserver !== 'undefined')
             ? new IntersectionObserver(entries => {
                 for (const entry of entries) {
-                    if (!entry.isIntersecting) continue;
                     const el = entry.target;
-                    PROTECTED_IMAGE_OBSERVER.unobserve(el);
-                    hydrateOneProtectedImage(el);
+                    if (!entry.isIntersecting) {
+                        protectedImagesNearViewport.delete(el);
+                        continue;
+                    }
+                    protectedImagesNearViewport.add(el);
+                    if (!protectedImagesQueued.has(el)) {
+                        protectedImagesQueued.add(el);
+                        protectedImageQueue.push(el);
+                    }
                 }
+                loadQueuedProtectedImages();
             }, { rootMargin: '400px 0px' })
             : null;
+
+        function loadQueuedProtectedImages() {
+            while (protectedImageLoadsRunning < PROTECTED_IMAGE_CONCURRENCY && protectedImageQueue.length) {
+                const image = protectedImageQueue.shift();
+                protectedImagesQueued.delete(image);
+                if (!image.isConnected || image.dataset.protectedImageLoaded === '1') {
+                    PROTECTED_IMAGE_OBSERVER.unobserve(image);
+                    continue;
+                }
+                if (!protectedImagesNearViewport.has(image)) continue;
+                PROTECTED_IMAGE_OBSERVER.unobserve(image);
+                protectedImageLoadsRunning++;
+                hydrateOneProtectedImage(image).finally(() => {
+                    protectedImageLoadsRunning--;
+                    loadQueuedProtectedImages();
+                });
+            }
+        }
 
         // A cover that failed to load is watched again after a pause that
         // doubles with each failure, so it is fetched once more when it is
@@ -1031,18 +1068,46 @@
             }
         }
 
+        // At most this many series' issue lists are fetched at once: "Select all
+        // series" with a thousand series loaded would otherwise send a thousand
+        // requests together. The rest wait their turn, in order.
+        const SERIES_PATH_LOAD_CONCURRENCY = 6;
+        let seriesPathLoadsRunning = 0;
+        const seriesPathLoadQueue = [];
+
+        function queueSeriesFilePaths(seriesId) {
+            return new Promise(resolve => {
+                const run = () => {
+                    seriesPathLoadsRunning++;
+                    fetchSeriesFilePaths(seriesId).then(paths => {
+                        seriesPathLoadsRunning--;
+                        const next = seriesPathLoadQueue.shift();
+                        if (next) next();
+                        resolve(paths);
+                    });
+                };
+                if (seriesPathLoadsRunning < SERIES_PATH_LOAD_CONCURRENCY) {
+                    run();
+                } else {
+                    seriesPathLoadQueue.push(run);
+                }
+            });
+        }
+
         // Toggle selection of a single series in the series list view. Selecting
         // a series adds all of its file paths to `selectedFiles` so the bulk
         // process / rename / normalize actions act on those files.
-        async function toggleSeriesSelection(seriesId, checked) {
+        // `updateUi` false leaves the page to the caller, which selects many
+        // series and updates the page once for all of them.
+        async function toggleSeriesSelection(seriesId, checked, updateUi = true) {
             if (!seriesId) return;
             if (checked) {
                 if (selectedSeries.has(seriesId)) return;
                 selectedSeries.add(seriesId);
                 // Reflect the pending state immediately, then resolve files.
-                const pathLoad = fetchSeriesFilePaths(seriesId);
+                const pathLoad = queueSeriesFilePaths(seriesId);
                 selectedSeriesPathLoads.set(seriesId, pathLoad);
-                updateSeriesSelectionUI();
+                if (updateUi) updateSeriesSelectionUI();
                 const paths = await pathLoad;
                 // A newer selection of this series replaces its pending load, and a
                 // deselect removes it: only the load still registered may apply.
@@ -1059,13 +1124,21 @@
                 paths.forEach(p => selectedFiles.delete(p));
                 selectedSeriesFilePaths.delete(seriesId);
             }
-            updateSeriesSelectionUI();
-            updateSelectInfo();
+            if (updateUi) {
+                updateSeriesSelectionUI();
+                updateSelectInfo();
+            }
         }
 
         async function toggleSelectAllSeries(checked) {
             if (checked) {
-                await Promise.all(seriesLibrary.map(s => toggleSeriesSelection(s.id, true)));
+                // Every series shows as selected at once; the page is updated
+                // again when all their files are known, not once per series.
+                const selections = seriesLibrary.map(s => toggleSeriesSelection(s.id, true, false));
+                updateSeriesSelectionUI();
+                await Promise.all(selections);
+                updateSeriesSelectionUI();
+                updateSelectInfo();
             } else {
                 clearSeriesSelection();
             }

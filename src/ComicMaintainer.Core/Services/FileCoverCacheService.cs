@@ -397,7 +397,16 @@ public class FileCoverCacheService : IFileCoverCacheService
                     Share = FileShare.Read | FileShare.Delete,
                     Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
                 });
-                RefreshAccessTime(blobPath, DateTime.UtcNow);
+                try
+                {
+                    RefreshAccessTime(blobPath, DateTime.UtcNow);
+                }
+                catch
+                {
+                    content.Dispose();
+                    throw;
+                }
+
                 return new Cover(null, content, meta.ContentType, validator);
             }
 

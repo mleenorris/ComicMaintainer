@@ -1309,10 +1309,10 @@ public sealed class ComicArchiveReaderTests : IDisposable
     public void SolidCursor_DisposingReleasesTheFile()
     {
         var path = SolidBook();
-        var cursor = ComicArchiveReader.OpenSolidCursor(path);
-        RentedBytes(cursor.ReadPage(1, "p2.jpg", 1024, default));
-
-        cursor.Dispose();
+        using (var cursor = ComicArchiveReader.OpenSolidCursor(path))
+        {
+            RentedBytes(cursor.ReadPage(1, "p2.jpg", 1024, default));
+        }
 
         File.Delete(path);
         Assert.False(File.Exists(path));

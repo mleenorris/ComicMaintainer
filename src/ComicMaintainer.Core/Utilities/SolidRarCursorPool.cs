@@ -325,14 +325,13 @@ internal sealed class SolidRarCursorPool : IDisposable
         var toClose = new List<ComicArchiveReader.SolidRarCursor>();
         lock (_lock)
         {
-            foreach (var slot in _slots.Values.ToList())
+            foreach (var slot in _slots.Values
+                .Where(s => !s.Busy && s.Cursor is not null && _time.GetElapsedTime(s.LastUsedTicks) >= _idleTimeout)
+                .ToList())
             {
-                if (!slot.Busy && slot.Cursor is not null && _time.GetElapsedTime(slot.LastUsedTicks) >= _idleTimeout)
-                {
-                    toClose.Add(slot.Cursor);
-                    slot.Cursor = null;
-                    RemoveIfUnused(slot);
-                }
+                toClose.Add(slot.Cursor!);
+                slot.Cursor = null;
+                RemoveIfUnused(slot);
             }
         }
 

@@ -178,7 +178,8 @@ public sealed class ArchiveEntryReaderTests : IDisposable
     {
         var data = Enumerable.Range(0, 300_000).Select(i => (byte)(i * 7)).ToArray();
 
-        using var pooled = ArchiveEntryReader.ReadBoundedPooled(new MemoryStream(data), "p1.jpg", declaredLength, maxBytes: 1_000_000, default);
+        using var source = new MemoryStream(data);
+        using var pooled = ArchiveEntryReader.ReadBoundedPooled(source, "p1.jpg", declaredLength, maxBytes: 1_000_000, default);
 
         Assert.Equal(data.Length, pooled.Length);
         Assert.Equal(data, pooled.ToExactArray());
@@ -187,18 +188,23 @@ public sealed class ArchiveEntryReaderTests : IDisposable
     [Fact]
     public void ReadBoundedPooled_KeepsTheLimits()
     {
+        using var small = new MemoryStream(new byte[11]);
+        using var large = new MemoryStream(new byte[200_000]);
+        using var tiny = new MemoryStream(new byte[10]);
+
         Assert.Throws<ArchiveLimitExceededException>(
-            () => ArchiveEntryReader.ReadBoundedPooled(new MemoryStream(new byte[11]), "p1.jpg", declaredLength: 10, maxBytes: 1024, default));
+            () => ArchiveEntryReader.ReadBoundedPooled(small, "p1.jpg", declaredLength: 10, maxBytes: 1024, default));
         Assert.Throws<ArchiveLimitExceededException>(
-            () => ArchiveEntryReader.ReadBoundedPooled(new MemoryStream(new byte[200_000]), "p1.jpg", declaredLength: -1, maxBytes: 100_000, default));
+            () => ArchiveEntryReader.ReadBoundedPooled(large, "p1.jpg", declaredLength: -1, maxBytes: 100_000, default));
         Assert.Throws<ArchiveLimitExceededException>(
-            () => ArchiveEntryReader.ReadBoundedPooled(new MemoryStream(new byte[10]), "p1.jpg", declaredLength: 2048, maxBytes: 1024, default));
+            () => ArchiveEntryReader.ReadBoundedPooled(tiny, "p1.jpg", declaredLength: 2048, maxBytes: 1024, default));
     }
 
     [Fact]
     public void RentedBufferStream_IsReadOnlyAndCannotBeReadOnceDisposed()
     {
-        var pooled = ArchiveEntryReader.ReadBoundedPooled(new MemoryStream(new byte[] { 1, 2, 3 }), "p1.jpg", 3, 1024, default);
+        using var source = new MemoryStream(new byte[] { 1, 2, 3 });
+        using var pooled = ArchiveEntryReader.ReadBoundedPooled(source, "p1.jpg", 3, 1024, default);
 
         Assert.False(pooled.CanWrite);
         pooled.Dispose();

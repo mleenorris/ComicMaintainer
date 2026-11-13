@@ -33,6 +33,19 @@ for it.
 - Reader pages are cached on the device separately from library covers (150 pages), so reading a comic no
   longer pushes covers out of the cache. Series art is cached on the device too. A cover or page cached in
   the last 10 minutes is shown without asking the server again.
+- Reading a solid CBR no longer decompresses the archive from its start for every page. The reader keeps
+  its place in the archive between page turns, and the pages it fetches ahead are read in one pass instead
+  of one each. Going back a page starts again from the beginning, as before.
+- A page stored uncompressed in a CBZ, as most JPEG pages are, is sent straight from the file. Other pages
+  are decompressed into a reused buffer. A page the browser stops waiting for, such as a prefetch the reader
+  no longer needs, stops being read.
+- OPDS covers are converted to JPEG once and kept in the cover cache, instead of on every request. OPDS
+  pages that have to be converted are kept in memory for a while, so asking for one again does not convert
+  it again.
+- Series images can be asked for at the width a card shows them (`w=160`, `320`, `480` or `640`), as a
+  WebP copy made once and kept next to the original. The library's image links now carry the image's
+  content hash (`?v=`), and an image asked for with the current hash may be cached by the browser for a
+  year. Serving an image no longer loads the series' whole metadata record.
 
 ### Fixed
 

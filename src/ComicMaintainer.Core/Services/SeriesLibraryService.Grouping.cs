@@ -342,6 +342,7 @@ public partial class SeriesLibraryService
                     Aliases = new List<string>(),
                     HasExternalImage = imageRecord is not null,
                     ImageNormalizedKey = imageRecord?.NormalizedKey ?? record?.NormalizedKey,
+                    ImageFileName = imageRecord?.LocalImageFile,
                     Synopsis = record?.Synopsis,
                     Genres = record?.Genres ?? new List<string>(),
                     PublicationStatus = record?.PublicationStatus,
@@ -531,6 +532,7 @@ public partial class SeriesLibraryService
                 {
                     survivor.HasExternalImage = true;
                     survivor.ImageNormalizedKey = other.ImageNormalizedKey;
+                    survivor.ImageFileName = other.ImageFileName;
                 }
                 if (string.IsNullOrWhiteSpace(survivor.MetadataSource)
                     && !string.IsNullOrWhiteSpace(other.MetadataSource))
@@ -812,5 +814,8 @@ public partial class SeriesLibraryService
 
         /// <summary>Normalized cache key for the cached image (used to build the API URL).</summary>
         public string? ImageNormalizedKey { get; set; }
+
+        /// <summary>The stored file of the cached image, whose content hash versions the API URL.</summary>
+        public string? ImageFileName { get; set; }
     }
 }

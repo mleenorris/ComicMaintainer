@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Newtonsoft.Json.Linq;
+using static ComicMaintainer.Tests.Helpers.ServedContent;
 
 namespace ComicMaintainer.Tests.Controllers;
 
@@ -197,12 +198,12 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     private void SetupServicesFor(string physicalPath, string libraryPath)
     {
         _reader.Setup(r => r.GetPageCountAsync(physicalPath)).ReturnsAsync(24);
-        _reader.Setup(r => r.GetPageAsync(physicalPath, 1)).ReturnsAsync((new byte[] { 0xFF, 0xD8 }, "image/jpeg"));
+        _reader.Setup(r => r.OpenPageAsync(physicalPath, 1, It.IsAny<CancellationToken>())).ReturnsAsync(() => Page(new byte[] { 0xFF, 0xD8 }, "image/jpeg"));
         _reader.Setup(r => r.GetPageNamesAsync(physicalPath)).ReturnsAsync(new List<string> { "001.jpg" });
         _coverCache.Setup(c => c.GetValidator(physicalPath))
             .Returns(new FileCoverValidator(4, DateTimeOffset.UnixEpoch, "orig"));
-        _coverCache.Setup(c => c.GetOrCreateAsync(physicalPath, _cts.Token))
-            .ReturnsAsync(new FileCoverCacheEntry(new byte[] { 1 }, "image/jpeg", DateTimeOffset.UnixEpoch, 4, "orig"));
+        _coverCache.Setup(c => c.OpenAsync(physicalPath, FileCoverFormat.Configured, _cts.Token))
+            .ReturnsAsync(() => Cover(new FileCoverCacheEntry(new byte[] { 1 }, "image/jpeg", DateTimeOffset.UnixEpoch, 4, "orig")));
         _library.Setup(l => l.GetAdjacentIssueAsync(libraryPath, "next", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AdjacentIssueResult { Found = true, HasAdjacent = false });
         _fileStore.Setup(f => f.GetReadingProgressAsync(libraryPath, _cts.Token)).ReturnsAsync(7);
@@ -243,7 +244,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
 
         var result = await InvokeAsync(endpoint, nested);
 
-        Assert.True(result is OkResult or OkObjectResult or FileContentResult, $"{endpoint}: {result}");
+        Assert.True(result is OkResult or OkObjectResult or FileStreamResult, $"{endpoint}: {result}");
     }
 
     [SymbolicLinkFact]
@@ -263,8 +264,8 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         Assert.Equal("alias.cbz", info["fileName"]!.ToString());
         Assert.Equal(alias, info["filePath"]!.ToString());
         Assert.Equal(24, info["pageCount"]!.Value<int>());
-        Assert.Equal(new byte[] { 0xFF, 0xD8 }, Assert.IsType<FileContentResult>(await InvokeAsync("page", alias)).FileContents);
-        Assert.Equal(new byte[] { 1 }, Assert.IsType<FileContentResult>(await InvokeAsync("cover", alias)).FileContents);
+        Assert.Equal(new byte[] { 0xFF, 0xD8 }, Bytes(Assert.IsType<FileStreamResult>(await InvokeAsync("page", alias))));
+        Assert.Equal(new byte[] { 1 }, Bytes(Assert.IsType<FileStreamResult>(await InvokeAsync("cover", alias))));
         Assert.IsType<OkObjectResult>(await InvokeAsync("pages", alias));
         Assert.IsType<OkObjectResult>(await InvokeAsync("adjacent", alias));
         Assert.IsType<OkResult>(await InvokeAsync("mark-read", alias, user));
@@ -324,13 +325,13 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         var result = await CreateController().GetPage(_file, page);
 
         AssertError<BadRequestObjectResult>(result, "Page number must be 1 or greater");
-        _reader.Verify(r => r.GetPageAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+        _reader.Verify(r => r.OpenPageAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public async Task GetPage_PageNotInArchive_ReturnsNotFound()
     {
-        _reader.Setup(r => r.GetPageAsync(_file, 99)).ReturnsAsync(((byte[] Data, string ContentType)?)null);
+        _reader.Setup(r => r.OpenPageAsync(_file, 99, It.IsAny<CancellationToken>())).ReturnsAsync(default(ComicPageStream?));
 
         var result = await CreateController().GetPage(_file, 99);
 
@@ -341,13 +342,13 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     public async Task GetPage_ExistingPage_StreamsImageThatOnlyTheRequestingBrowserMayCache()
     {
         var bytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0 };
-        _reader.Setup(r => r.GetPageAsync(_file, 3)).ReturnsAsync((bytes, "image/jpeg"));
+        _reader.Setup(r => r.OpenPageAsync(_file, 3, It.IsAny<CancellationToken>())).ReturnsAsync(() => Page(bytes, "image/jpeg"));
         var controller = CreateController();
 
         var result = await controller.GetPage(_file, 3);
 
-        var file = Assert.IsType<FileContentResult>(result);
-        Assert.Equal(bytes, file.FileContents);
+        var file = Assert.IsType<FileStreamResult>(result);
+        Assert.Equal(bytes, Bytes(file));
         Assert.Equal("image/jpeg", file.ContentType);
         // Pages are behind authentication: never "public", so no shared cache stores them.
         Assert.Equal("private, max-age=3600", controller.Response.Headers.CacheControl.ToString());
@@ -356,7 +357,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     [Fact]
     public async Task GetPage_ExistingPage_CarriesValidatorsFromTheFilesMetadata()
     {
-        _reader.Setup(r => r.GetPageAsync(_file, 3)).ReturnsAsync((new byte[] { 1 }, "image/png"));
+        _reader.Setup(r => r.OpenPageAsync(_file, 3, It.IsAny<CancellationToken>())).ReturnsAsync(() => Page(new byte[] { 1 }, "image/png"));
         var lastWrite = new DateTime(2026, 3, 4, 5, 6, 7, DateTimeKind.Utc);
         File.SetLastWriteTimeUtc(_file, lastWrite);
         var controller = CreateController();
@@ -389,13 +390,13 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         var info = new FileInfo(_file);
         var stale = ComicReaderController.BuildPageETag(info.Length, info.LastWriteTimeUtc, 2);
         File.WriteAllBytes(_file, new byte[] { 0x50, 0x4B, 0x05, 0x06, 0x00 });
-        _reader.Setup(r => r.GetPageAsync(_file, 2)).ReturnsAsync((new byte[] { 7 }, "image/jpeg"));
+        _reader.Setup(r => r.OpenPageAsync(_file, 2, It.IsAny<CancellationToken>())).ReturnsAsync(() => Page(new byte[] { 7 }, "image/jpeg"));
         var controller = CreateController();
         controller.Request.Headers.IfNoneMatch = stale;
 
         var result = await controller.GetPage(_file, 2);
 
-        Assert.Equal(new byte[] { 7 }, Assert.IsType<FileContentResult>(result).FileContents);
+        Assert.Equal(new byte[] { 7 }, Bytes(Assert.IsType<FileStreamResult>(result)));
         Assert.NotEqual(stale, controller.Response.Headers.ETag.ToString());
     }
 
@@ -439,20 +440,20 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
             $"\"v{ComicReaderService.PageListVersion - 1}-",
             StringComparison.Ordinal);
         Assert.NotEqual(current, otherRules);
-        _reader.Setup(r => r.GetPageAsync(_file, 2)).ReturnsAsync((new byte[] { 7 }, "image/jpeg"));
+        _reader.Setup(r => r.OpenPageAsync(_file, 2, It.IsAny<CancellationToken>())).ReturnsAsync(() => Page(new byte[] { 7 }, "image/jpeg"));
         var controller = CreateController();
         controller.Request.Headers.IfNoneMatch = otherRules;
 
         var result = await controller.GetPage(_file, 2);
 
-        Assert.Equal(new byte[] { 7 }, Assert.IsType<FileContentResult>(result).FileContents);
+        Assert.Equal(new byte[] { 7 }, Bytes(Assert.IsType<FileStreamResult>(result)));
         Assert.Equal(current, controller.Response.Headers.ETag.ToString());
     }
 
     [Fact]
     public async Task GetPage_ReaderFailure_Escapes()
     {
-        _reader.Setup(r => r.GetPageAsync(_file, 1)).ThrowsAsync(new IOException("truncated"));
+        _reader.Setup(r => r.OpenPageAsync(_file, 1, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("truncated"));
 
         await Assert.ThrowsAsync<IOException>(() => CreateController().GetPage(_file, 1));
     }
@@ -460,7 +461,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
     [Fact]
     public async Task GetPage_PageOverTheReadLimits_Returns422WithTheReasonAndNoCacheHeaders()
     {
-        _reader.Setup(r => r.GetPageAsync(_file, 1))
+        _reader.Setup(r => r.OpenPageAsync(_file, 1, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ArchiveLimitExceededException("Archive entry 'p1.png' is 2 GiB uncompressed, over the 100 MiB limit."));
         var controller = CreateController();
 
@@ -491,7 +492,7 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         var result = await CreateController().GetCover(outside);
 
         AssertError<BadRequestObjectResult>(result, OutsideError);
-        _coverCache.Verify(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _coverCache.Verify(c => c.OpenAsync(It.IsAny<string>(), It.IsAny<FileCoverFormat>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -500,15 +501,15 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         var result = await CreateController().GetCover(Path.Join(_watchDir, "Saga", "missing.cbz"));
 
         AssertError<NotFoundObjectResult>(result, "File not found");
-        _coverCache.Verify(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _coverCache.Verify(c => c.OpenAsync(It.IsAny<string>(), It.IsAny<FileCoverFormat>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public async Task GetCover_NoExtractableCover_ReturnsNotFound()
     {
         _coverCache.Setup(c => c.GetValidator(_file)).Returns(new FileCoverValidator(4, DateTimeOffset.UnixEpoch, "orig"));
-        _coverCache.Setup(c => c.GetOrCreateAsync(_file, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(default(FileCoverCacheEntry?));
+        _coverCache.Setup(c => c.OpenAsync(_file, FileCoverFormat.Configured, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(default(FileCoverStream?));
 
         var result = await CreateController().GetCover(_file);
 
@@ -521,13 +522,13 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         var entry = new FileCoverCacheEntry(
             new byte[] { 1, 2, 3 }, "image/jpeg", new DateTimeOffset(2026, 1, 2, 5, 4, 5, TimeSpan.FromHours(2)), 4, "orig");
         _coverCache.Setup(c => c.GetValidator(_file)).Returns(entry.Validator);
-        _coverCache.Setup(c => c.GetOrCreateAsync(_file, _cts.Token)).ReturnsAsync(entry);
+        _coverCache.Setup(c => c.OpenAsync(_file, FileCoverFormat.Configured, _cts.Token)).ReturnsAsync(() => Cover(entry));
         var controller = CreateController();
 
         var result = await controller.GetCover(_file, _cts.Token);
 
-        var file = Assert.IsType<FileContentResult>(result);
-        Assert.Equal(new byte[] { 1, 2, 3 }, file.FileContents);
+        var file = Assert.IsType<FileStreamResult>(result);
+        Assert.Equal(new byte[] { 1, 2, 3 }, Bytes(file));
         Assert.Equal("image/jpeg", file.ContentType);
         var headers = controller.Response.Headers;
         Assert.Equal(ComicReaderController.BuildCoverETag(entry.Validator), headers.ETag.ToString());
@@ -551,14 +552,14 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         Assert.Equal(etag, controller.Response.Headers.ETag.ToString());
         Assert.Equal("private, max-age=3600", controller.Response.Headers.CacheControl.ToString());
         Assert.Equal(0, controller.Response.Headers.LastModified.Count);
-        _coverCache.Verify(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _coverCache.Verify(c => c.OpenAsync(It.IsAny<string>(), It.IsAny<FileCoverFormat>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public async Task GetCover_CacheFailure_Escapes()
     {
         _coverCache.Setup(c => c.GetValidator(_file)).Returns(new FileCoverValidator(4, DateTimeOffset.UnixEpoch, "orig"));
-        _coverCache.Setup(c => c.GetOrCreateAsync(_file, It.IsAny<CancellationToken>()))
+        _coverCache.Setup(c => c.OpenAsync(_file, FileCoverFormat.Configured, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("cache dir unavailable"));
 
         await Assert.ThrowsAsync<IOException>(() => CreateController().GetCover(_file));

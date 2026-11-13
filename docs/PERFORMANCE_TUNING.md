@@ -101,9 +101,18 @@ The reader keeps a 16 MiB in-memory cache of each archive's sorted page list, so
 
 Pages are sent with `Cache-Control: private, max-age=3600`, a strong `ETag` and `Last-Modified`, taken from the archive's size and modification time. A revalidation answers 304 after a `stat`, without opening the archive.
 
+A page stored uncompressed in a CBZ, which is how most JPEG pages are stored, is sent straight from the archive file as it goes out, without first being copied into memory. Any other page is decompressed into a reusable buffer and then sent. When the browser drops a request, as the reader does with prefetches it no longer needs, the server stops reading that page.
+
 ### Solid RAR Archives
 
-The pages of a solid RAR can only be decompressed from the start of the archive, so page turns in a large solid CBR are slower than in a CBZ. If that matters, convert such files to CBZ.
+The pages of a solid RAR can only be decompressed in order, after every entry before them. The reader keeps a pass over each solid CBR open between page turns, so reading forward decompresses each entry once. Requests for the same archive take turns, nearest page first, so the pages the reader prefetches around the current one are read in one pass instead of each from the start.
+
+- Going back to an earlier page starts a new pass from the beginning of the archive. Page 1 is read on its own and does not disturb the pass.
+- At most 4 passes are kept, holding at most 256 MiB between them, mostly the decompression window each one keeps. A pass that does not fit is closed after its read.
+- A pass unused for 60 seconds is closed, and one is never reused once the file has changed.
+- Each pass gets the archive limits of a rewrite: every entry it passes through counts against the archive's total budget.
+
+Opening a large solid CBR in the middle still means decompressing everything before that page once. If that matters, convert such files to CBZ.
 
 ### Cover Thumbnails
 
@@ -119,7 +128,19 @@ Library covers (`/api/comicreader/cover`) are served from an on-disk cache of do
 
 Covers that are not cached yet are generated at most one per processor core at a time, so opening a library page of uncached covers does not decode dozens of full-size pages at once. A JPEG page is decoded at 1/2, 1/4 or 1/8 of its size, the smallest that is still at least the thumbnail width.
 
-Covers are sent with `Cache-Control: private, max-age=3600` and a strong `ETag` that includes the source file's size and modification time and the thumbnail variant, so changing any of these settings regenerates entries on the next request. A revalidation answers 304 without reading the thumbnail or the archive. If a page cannot be decoded, the original image is served.
+Covers are sent with `Cache-Control: private, max-age=3600` and a strong `ETag` that includes the source file's size and modification time and the thumbnail variant, so changing any of these settings regenerates entries on the next request. A revalidation answers 304 without reading the thumbnail or the archive. If a page cannot be decoded, the original image is served. A cached cover is sent straight from its file.
+
+OPDS clients get covers as JPEG. When the thumbnail format is WebP, the cache keeps a JPEG of the same width and quality beside it (`<key>.jpeg.img`), so each cover is encoded for OPDS once, not on every request. With `FileCoverThumbnailMaxWidth=0`, the OPDS cover is the first page itself, converted to JPEG when it is not one already. Both count towards `FileCoverCacheMaxMegabytes`.
+
+### OPDS Pages
+
+OPDS pages are sent in their own format when the whole comic uses one format that OPDS page streaming allows, straight from the archive like the reader's. Otherwise each page is converted to JPEG, two at a time across all clients. The last 32 MiB of converted pages are kept in memory for 10 minutes since they were last asked for, keyed by the file and the page's `ETag`, so asking for the same page again does not convert it again.
+
+### Series Images
+
+Series images (`/api/series-images/{key}`) are stored as the provider or the user supplied them, up to `SeriesImageMaxDimension` (2048 pixels). The library asks for a copy no wider than the card it draws, with `w=160`, `320`, `480` or `640`. Each copy is made once, as WebP at quality 80, and stored next to the original until the image is replaced or cleared; an image that is already no wider is sent as it is. At most one copy per processor core is made at a time.
+
+The image's file name holds a hash of its content, and the library's image URL carries that hash as `v`. A request whose `v` matches the stored image is sent with `Cache-Control: private, max-age=31536000, immutable`, since a new image gets a new hash and so a new URL. Without it, the image is sent with `private, max-age=300` and then revalidated. Which file and content type a series has is remembered in memory until the series metadata cache changes, so neither a request nor a revalidation reads the series' metadata record.
 
 ## Archive Limits
 

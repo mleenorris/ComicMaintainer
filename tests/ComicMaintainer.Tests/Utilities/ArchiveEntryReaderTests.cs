@@ -150,6 +150,63 @@ public sealed class ArchiveEntryReaderTests : IDisposable
         Assert.Equal(0, stream.BytesRead);
     }
 
+    [Theory]
+    [InlineData(1_000_000L)]
+    [InlineData(-1L)]
+    public void ReadBounded_CancelledPartWay_StopsReading(long declaredLength)
+    {
+        // A page the browser no longer wants stops being decompressed between chunks.
+        using var cancellation = new CancellationTokenSource();
+        var stream = new CountingStream(new MemoryStream(new byte[1_000_000]), afterRead: (_, total) =>
+        {
+            if (total >= 200_000)
+            {
+                cancellation.Cancel();
+            }
+        });
+
+        Assert.ThrowsAny<OperationCanceledException>(
+            () => ArchiveEntryReader.ReadBounded(stream, "p1.jpg", declaredLength, maxBytes: 2_000_000, cancellation.Token));
+
+        Assert.True(stream.BytesRead < 400_000, $"read {stream.BytesRead} bytes");
+    }
+
+    [Theory]
+    [InlineData(300_000L)]
+    [InlineData(-1L)]
+    public void ReadBoundedPooled_ReturnsTheDataInAStreamOfItsExactLength(long declaredLength)
+    {
+        var data = Enumerable.Range(0, 300_000).Select(i => (byte)(i * 7)).ToArray();
+
+        using var pooled = ArchiveEntryReader.ReadBoundedPooled(new MemoryStream(data), "p1.jpg", declaredLength, maxBytes: 1_000_000, default);
+
+        Assert.Equal(data.Length, pooled.Length);
+        Assert.Equal(data, pooled.ToExactArray());
+    }
+
+    [Fact]
+    public void ReadBoundedPooled_KeepsTheLimits()
+    {
+        Assert.Throws<ArchiveLimitExceededException>(
+            () => ArchiveEntryReader.ReadBoundedPooled(new MemoryStream(new byte[11]), "p1.jpg", declaredLength: 10, maxBytes: 1024, default));
+        Assert.Throws<ArchiveLimitExceededException>(
+            () => ArchiveEntryReader.ReadBoundedPooled(new MemoryStream(new byte[200_000]), "p1.jpg", declaredLength: -1, maxBytes: 100_000, default));
+        Assert.Throws<ArchiveLimitExceededException>(
+            () => ArchiveEntryReader.ReadBoundedPooled(new MemoryStream(new byte[10]), "p1.jpg", declaredLength: 2048, maxBytes: 1024, default));
+    }
+
+    [Fact]
+    public void RentedBufferStream_IsReadOnlyAndCannotBeReadOnceDisposed()
+    {
+        var pooled = ArchiveEntryReader.ReadBoundedPooled(new MemoryStream(new byte[] { 1, 2, 3 }), "p1.jpg", 3, 1024, default);
+
+        Assert.False(pooled.CanWrite);
+        pooled.Dispose();
+        pooled.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => pooled.ToExactArray());
+    }
+
     // ---- EnsureWithinLimits -----------------------------------------------------------
 
     [Fact]
@@ -523,8 +580,8 @@ public sealed class ArchiveEntryReaderTests : IDisposable
         return zip[..eocdStart].Concat(zip64Record).Concat(locator).Concat(classic).ToArray();
     }
 
-    /// <summary>Counts the bytes read through it.</summary>
-    private sealed class CountingStream(Stream inner) : Stream
+    /// <summary>Counts the bytes read through it, telling <paramref name="afterRead"/> after each read.</summary>
+    private sealed class CountingStream(Stream inner, Action<int, long>? afterRead = null) : Stream
     {
         public long BytesRead { get; private set; }
 
@@ -538,6 +595,7 @@ public sealed class ArchiveEntryReaderTests : IDisposable
         {
             var read = inner.Read(buffer, offset, count);
             BytesRead += read;
+            afterRead?.Invoke(read, BytesRead);
             return read;
         }
 

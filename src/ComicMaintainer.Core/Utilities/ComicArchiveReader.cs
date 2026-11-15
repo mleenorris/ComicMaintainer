@@ -744,14 +744,22 @@ public sealed class ComicArchiveReader : IDisposable
                 }
             }
 
-            if (page.Length != locator.Length
-                || Crc32Stream.Compute(Crc32Stream.DEFAULT_POLYNOMIAL, Crc32Stream.DEFAULT_SEED, page.Bytes) != locator.Crc32)
+            try
+            {
+                if (page.Length == locator.Length
+                    && Crc32Stream.Compute(Crc32Stream.DEFAULT_POLYNOMIAL, Crc32Stream.DEFAULT_SEED, page.Bytes) == locator.Crc32)
+                {
+                    return page;
+                }
+            }
+            catch
             {
                 page.Dispose();
-                return null;
+                throw;
             }
 
-            return page;
+            page.Dispose();
+            return null;
         }
         finally
         {
@@ -816,9 +824,13 @@ public sealed class ComicArchiveReader : IDisposable
         var crc = BinaryPrimitives.ReadUInt32LittleEndian(crcAndSizes);
         var compressed = BinaryPrimitives.ReadUInt32LittleEndian(crcAndSizes[4..]);
         var length = BinaryPrimitives.ReadUInt32LittleEndian(crcAndSizes[8..]);
-        return crc == locator.Crc32
-            && ((compressed == uint.MaxValue && length == uint.MaxValue)
-                || (compressed == locator.CompressedLength && length == locator.Length));
+        if (crc != locator.Crc32)
+        {
+            return false;
+        }
+
+        var zip64 = compressed == uint.MaxValue && length == uint.MaxValue;
+        return zip64 || (compressed == locator.CompressedLength && length == locator.Length);
     }
 
     /// <summary>The data descriptor after an entry's data, with or without its signature, matches the locator.</summary>

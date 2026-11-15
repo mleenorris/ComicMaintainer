@@ -244,18 +244,64 @@ public partial class SeriesLibraryService
     {
         // Overview never reads archives on disk; it relies on the cached
         // grouping so the home page stays fast even for huge libraries.
-        var groups = await BuildGroupsAsync(filter: null, cancellationToken);
+        var snapshot = await GetGroupsSnapshotAsync(filter: null, cancellationToken);
         var readPaths = await GetReadPathsForProjectionAsync(cancellationToken);
 
-        var entries = new List<SeriesOverviewEntry>(groups.Count);
+        // The summaries and path lists are the same for every user, so they are made once per
+        // snapshot (a race makes them twice, harmlessly) instead of on every visit to the home page.
+        var shared = snapshot.OverviewEntries ??= BuildSharedOverviewEntries(snapshot.Groups);
+
+        var entries = new List<SeriesOverviewEntry>(shared.Length);
+        foreach (var series in shared)
+        {
+            var entry = new SeriesOverviewEntry
+            {
+                Summary = series.Summary,
+                EarliestCreatedAt = series.EarliestCreatedAt,
+                LatestCreatedAt = series.LatestCreatedAt,
+                FilePaths = series.FilePaths,
+            };
+
+            // Issues marked read via the file read flag (independent of the per-user reading
+            // progress) so Continue Reading can recognise a fully-read series and drop it from
+            // the row. Worked out only for the series the overview asks about: those the user
+            // has reading progress in.
+            entry.SetReadFilePaths(() => ReadFilePathsOf(series, readPaths));
+            entries.Add(entry);
+        }
+
+        return entries;
+    }
+
+    /// <summary>The part of a series' overview entry that is the same for every user.</summary>
+    private sealed record SharedOverviewEntry(
+        SeriesSummaryDto Summary,
+        DateTime EarliestCreatedAt,
+        DateTime LatestCreatedAt,
+        List<string> FilePaths,
+        IReadOnlyList<SeriesIssueDto> SortedIssues);
+
+    private static List<string> ReadFilePathsOf(SharedOverviewEntry series, IReadOnlySet<string>? readPaths)
+    {
+        if (readPaths is null)
+        {
+            // A store without a separate read-state source baked the read flags into the issues.
+            return series.SortedIssues.Where(i => i.Read).Select(i => i.FilePath).ToList();
+        }
+
+        return readPaths.Count == 0 ? new List<string>() : series.FilePaths.Where(readPaths.Contains).ToList();
+    }
+
+    private static SharedOverviewEntry[] BuildSharedOverviewEntries(Dictionary<string, SeriesAccumulator> groups)
+    {
+        var entries = new List<SharedOverviewEntry>(groups.Count);
         foreach (var accumulator in groups.Values)
         {
             var sortedIssues = accumulator.GetSortedIssues();
             var cover = sortedIssues.FirstOrDefault()?.FilePath ?? string.Empty;
 
-            entries.Add(new SeriesOverviewEntry
-            {
-                Summary = new SeriesSummaryDto
+            entries.Add(new SharedOverviewEntry(
+                Summary: new SeriesSummaryDto
                 {
                     Id = accumulator.Id,
                     Title = accumulator.DisplayTitle,
@@ -275,24 +321,17 @@ public partial class SeriesLibraryService
                     PublicationStatus = accumulator.PublicationStatus,
                     SiteUrl = accumulator.SiteUrl
                 },
-                EarliestCreatedAt = accumulator.EarliestCreatedAt == DateTime.MaxValue
+                EarliestCreatedAt: accumulator.EarliestCreatedAt == DateTime.MaxValue
                     ? DateTime.MinValue
                     : accumulator.EarliestCreatedAt,
-                LatestCreatedAt = accumulator.LatestCreatedAt,
+                LatestCreatedAt: accumulator.LatestCreatedAt,
                 // Emit file paths in series (issue) order so the overview can
                 // resolve the "next unread issue" when resuming a series.
-                FilePaths = sortedIssues.Select(i => i.FilePath).ToList(),
-                // Issues marked read via the file read flag (independent of the
-                // per-user reading progress) so Continue Reading can recognise a
-                // fully-read series and drop it from the row.
-                ReadFilePaths = sortedIssues
-                    .Where(i => ProjectIssue(i, readPaths).Read)
-                    .Select(i => i.FilePath)
-                    .ToList()
-            });
+                FilePaths: sortedIssues.Select(i => i.FilePath).ToList(),
+                SortedIssues: sortedIssues));
         }
 
-        return entries;
+        return entries.ToArray();
     }
 
     /// <inheritdoc />

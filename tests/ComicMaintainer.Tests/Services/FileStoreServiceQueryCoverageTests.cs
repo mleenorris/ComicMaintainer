@@ -260,6 +260,143 @@ public sealed class FileStoreServiceQueryCoverageTests : IAsyncLifetime
         Assert.Equal(4, await service.GetUnmarkedCountAsync());
     }
 
+    // ---- Counts kept with the in-memory copy ---------------------------------------------
+
+    [Fact]
+    public async Task FileCounts_OnceTheStoreIsLoaded_AreAnsweredWithoutAQuery()
+    {
+        var service = CreateService();
+        await service.InitializeFromDatabaseAsync();
+        var created = _factory.Created;
+
+        Assert.Equal((5, 1, 3, 1), await service.GetFileCountsAsync());
+        Assert.Equal(3, await service.GetUnmarkedCountAsync());
+        Assert.Equal(created, _factory.Created);
+    }
+
+    [Fact]
+    public async Task FileCounts_FollowEveryCommittedWrite()
+    {
+        var service = CreateService();
+        await service.InitializeFromDatabaseAsync();
+
+        await service.MarkFileNormalizedAsync(PathB, true);
+        Assert.Equal((5, 2, 2, 1), await service.GetFileCountsAsync());
+
+        await service.MarkFileDuplicateAsync(Path.Join(_library, "B", "e.cbz"), true);
+        Assert.Equal((5, 2, 1, 2), await service.GetFileCountsAsync());
+
+        await service.RemoveFileAsync(PathA);
+        Assert.Equal((4, 1, 1, 2), await service.GetFileCountsAsync());
+        Assert.Equal(1, await service.GetUnmarkedCountAsync());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("processed")]
+    [InlineData("UNPROCESSED")]
+    [InlineData("duplicates")]
+    [InlineData("renamed")]
+    [InlineData("normalized")]
+    [InlineData("read")]
+    [InlineData("unread")]
+    [InlineData("no-such-filter")]
+    public async Task GetFilesPageAsync_OnceTheStoreIsLoaded_CountsEachFilterAsTheDatabaseDoes(string? filter)
+    {
+        var fromDatabase = await CreateService().GetFilesPageAsync(filter: filter, perPage: 2);
+        var loaded = CreateService();
+        await loaded.InitializeFromDatabaseAsync();
+
+        var page = await loaded.GetFilesPageAsync(filter: filter, perPage: 2);
+
+        Assert.Equal(fromDatabase.TotalFiles, page.TotalFiles);
+        Assert.Equal(fromDatabase.TotalPages, page.TotalPages);
+        Assert.Equal(Names(fromDatabase.Files), Names(page.Files));
+    }
+
+    [Fact]
+    public async Task GetFilesPageAsync_WithASearch_CountsTheMatchesInTheDatabase()
+    {
+        var service = CreateService();
+        await service.InitializeFromDatabaseAsync();
+
+        var page = await service.GetFilesPageAsync(search: "b.cbz");
+
+        Assert.Equal(1, page.TotalFiles);
+    }
+
+    // ---- Search -------------------------------------------------------------------------
+
+    // The path holds the folder and the file name, so a search on either finds the file.
+    [Theory]
+    [InlineData("b.cbz", "b")]
+    [InlineData("B.CBZ", "b")]
+    [InlineData("library", "a,b,c,d,e")]
+    [InlineData("zzz", "")]
+    public async Task Search_MatchesTheFileNameOrItsFolder(string search, string expected)
+    {
+        var service = CreateService();
+
+        var files = (await service.GetFilesPageAsync(search: search, perPage: -1)).Files;
+
+        Assert.Equal(expected, Names(files));
+    }
+
+    // ---- Folder summaries cache ---------------------------------------------------------
+
+    [Fact]
+    public async Task GetFolderSummariesAsync_WithCache_ServesEveryPageFromOneGroupingUntilTheStoreChanges()
+    {
+        var service = CreateService(_cache);
+        Assert.Equal(3, (await service.GetFolderSummariesAsync(limit: 1)).TotalFolders);
+        var created = _factory.Created;
+
+        var second = await service.GetFolderSummariesAsync(offset: 1, limit: 1);
+        await AddRowOutOfBandAsync(Path.Join(_library, "C", "f.cbz"));
+        var third = await service.GetFolderSummariesAsync(offset: 2, limit: 1);
+
+        Assert.Equal(created, _factory.Created);
+        Assert.Equal("A", Assert.Single(second.Folders).Path);
+        Assert.Equal("B", Assert.Single(third.Folders).Path);
+        Assert.Equal(3, third.TotalFolders);
+
+        await service.InitializeFromDatabaseAsync();
+        Assert.Equal(4, (await service.GetFolderSummariesAsync(limit: 1)).TotalFolders);
+    }
+
+    [Fact]
+    public async Task GetFolderSummariesAsync_WithCache_ReadFilterFollowsTheCallersReadState()
+    {
+        var service = CreateService(_cache);
+        await service.InitializeFromDatabaseAsync();
+        Assert.Equal("B", Assert.Single((await service.GetFolderSummariesAsync(filter: "read")).Folders).Path);
+
+        await service.MarkFileReadAsync(PathA, true);
+
+        Assert.Equal("A,B", string.Join(',', (await service.GetFolderSummariesAsync(filter: "read")).Folders.Select(f => f.Path)));
+    }
+
+    [Fact]
+    public async Task GetFolderSummariesAsync_WithCache_KeepsEachSortApart()
+    {
+        var service = CreateService(_cache);
+
+        var byName = await service.GetFolderSummariesAsync(sort: "name", direction: "desc");
+        var bySize = await service.GetFolderSummariesAsync(sort: "size", direction: "asc");
+
+        Assert.Equal("B,A,", string.Join(',', byName.Folders.Select(f => f.Path)));
+        Assert.Equal("B,,A", string.Join(',', bySize.Folders.Select(f => f.Path)));
+    }
+
+    [Fact]
+    public async Task GetFolderFilesAsync_WithCache_FindsEachFolderInTheRememberedFolderMap()
+    {
+        var service = CreateService(_cache);
+        Assert.Equal("a,d", Names(await service.GetFolderFilesAsync("A")));
+        Assert.Equal("b,e", Names(await service.GetFolderFilesAsync("B")));
+        Assert.Equal("c", Names(await service.GetFolderFilesAsync(string.Empty)));
+    }
+
     // ---- In-memory queries --------------------------------------------------------------
 
     [Theory]

@@ -5,6 +5,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Services.Auth;
+using ComicMaintainer.Tests.Helpers;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -79,7 +80,7 @@ public class AuthServiceCoverageTests
     public async Task GetUserByApiKeyAsync_IgnoresTheKeyOfADisabledUser()
     {
         var user = new ApplicationUser { Id = "disabled", ApiKeyHash = ApiKeys.Hash("the-key"), IsActive = false };
-        _userManager.Setup(x => x.Users).Returns(new List<ApplicationUser> { user }.AsQueryable());
+        _userManager.Setup(x => x.Users).Returns(InMemoryUsers.Of(user));
 
         Assert.Null(await _authService.GetUserByApiKeyAsync("the-key"));
     }
@@ -90,9 +91,9 @@ public class AuthServiceCoverageTests
     {
         var other = new ApplicationUser { Id = "other", ApiKeyHash = ApiKeys.Hash("another-key"), IsActive = true };
         var owner = new ApplicationUser { Id = "owner", ApiKeyHash = ApiKeys.Hash("the-key"), IsActive = true };
-        _userManager.Setup(x => x.Users).Returns(new List<ApplicationUser> { other, owner }.AsQueryable());
+        _userManager.Setup(x => x.Users).Returns(InMemoryUsers.Of(other, owner));
 
-        Assert.Same(owner, await _authService.GetUserByApiKeyAsync("the-key"));
+        Assert.Equal(owner.Id, (await _authService.GetUserByApiKeyAsync("the-key"))?.Id);
         Assert.Null(await _authService.GetUserByApiKeyAsync(owner.ApiKeyHash!));
         _userManager.Verify(x => x.IsInRoleAsync(It.IsAny<ApplicationUser>(), It.IsAny<string>()), Times.Never());
     }

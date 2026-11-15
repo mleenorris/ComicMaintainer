@@ -286,6 +286,8 @@ public class AutheliaAuthenticationHandlerTests
             u => u.UpdateAsync(It.Is<ApplicationUser>(x =>
                 x.Email == "new@example.com" && x.FullName == "New Name")),
             Times.Once);
+        // An account remembered for an API key or OPDS credential carries the old email: it is read again.
+        _sessions.Verify(s => s.Invalidate(existing.Id), Times.Once);
     }
 
     [Fact]
@@ -714,12 +716,15 @@ public class AutheliaAuthenticationHandlerTests
             NullLoggerFactory.Instance,
             UrlEncoder.Default,
             Options.Create(settings),
-            _userManager.Object,
-            _roleManager.Object,
             Mock.Of<IDbContextFactory<ComicMaintainerDbContext>>(),
             _sessions.Object,
             _cache);
 
+        // The account services come from the request, as they would from its scope.
+        context.RequestServices = new ServiceCollection()
+            .AddSingleton(_userManager.Object)
+            .AddSingleton(_roleManager.Object)
+            .BuildServiceProvider();
         await handler.InitializeAsync(
             new AuthenticationScheme(SchemeName, displayName: null, typeof(AutheliaAuthenticationHandler)),
             context);

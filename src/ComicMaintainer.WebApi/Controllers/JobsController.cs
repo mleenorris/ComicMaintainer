@@ -59,48 +59,66 @@ public class JobsController : ControllerBase
         _settings = settings;
     }
 
+    /// <summary>
+    /// A job's progress. The per-file <c>results</c> (one entry for every file of the job, so
+    /// megabytes for a whole-library job) are included only when asked for with
+    /// <c>?include=results</c>: polling for progress needs only the counts.
+    /// </summary>
     [HttpGet("{jobId}")]
-    public ActionResult<object> GetJob(Guid jobId)
+    public ActionResult<object> GetJob(Guid jobId, [FromQuery] string? include = null)
     {
         var job = _jobRegistry.GetJob(jobId);
         if (job == null)
             return NotFound();
 
-        // Return in snake_case format expected by frontend
-        // Build a set of successfully processed files (files that were processed but not in error list)
-        var processedFiles = job.Files.Take(job.ProcessedFiles + job.FailedFiles).ToHashSet(StringComparer.Ordinal);
-        var trackedItems = new HashSet<string>(job.Files, StringComparer.Ordinal);
+        // Problems a job's post-loop hook reported for things that were
+        // not tracked items (IBatchJobReport), e.g. a source folder that
+        // folder combine had to keep. They are not results, so they
+        // never change what the job's item counts or results say.
+        var trackedItems = job.Errors.Count == 0 ? null : new HashSet<string>(job.Files, StringComparer.Ordinal);
+        var reportedProblems = job.Errors
+            .Where(entry => !trackedItems!.Contains(entry.Key))
+            .Select(entry => new
+            {
+                subject = entry.Key,
+                message = entry.Value
+            })
+            .ToList();
 
-        return Ok(new
+        // Return in snake_case format expected by frontend
+        var status = new Dictionary<string, object?>
         {
-            job_id = job.JobId.ToString(),
-            status = job.Status.ToString().ToLower(),
-            total_items = job.TotalFiles,
-            processed_items = job.ProcessedFiles,
-            failed_items = job.FailedFiles,
-            current_file = job.CurrentFile,
-            start_time = job.StartTime,
-            end_time = job.EndTime,
-            results = job.Files.Select(f => new
+            ["job_id"] = job.JobId.ToString(),
+            ["status"] = job.Status.ToString().ToLower(),
+            ["total_items"] = job.TotalFiles,
+            ["processed_items"] = job.ProcessedFiles,
+            ["failed_items"] = job.FailedFiles,
+            ["current_file"] = job.CurrentFile,
+            ["start_time"] = job.StartTime,
+            ["end_time"] = job.EndTime,
+        };
+
+        if (IncludesResults(include))
+        {
+            // The files the job has been through, in order; one not in the error list succeeded.
+            var processedFiles = job.Files.Take(job.ProcessedFiles + job.FailedFiles).ToHashSet(StringComparer.Ordinal);
+            status["results"] = job.Files.Select(f => new
             {
                 file = f,
                 success = processedFiles.Contains(f) && !job.Errors.ContainsKey(f),
                 error = job.Errors.GetValueOrDefault(f)
-            }).ToList(),
-            // Problems a job's post-loop hook reported for things that were
-            // not tracked items (IBatchJobReport), e.g. a source folder that
-            // folder combine had to keep. They are not results, so they
-            // never change what the job's item counts or results say.
-            reported_problems = job.Errors
-                .Where(entry => !trackedItems.Contains(entry.Key))
-                .Select(entry => new
-                {
-                    subject = entry.Key,
-                    message = entry.Value
-                })
-                .ToList()
-        });
+            }).ToList();
+        }
+
+        status["reported_problems"] = reportedProblems;
+        return Ok(status);
     }
+
+    // `include` is a comma-separated list, so other parts can be added the same way.
+    private static bool IncludesResults(string? include) =>
+        include is not null
+        && include.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Contains("results", StringComparer.OrdinalIgnoreCase);
 
     [HttpGet("~/api/active-job")]
     public ActionResult<object> GetActiveJob()

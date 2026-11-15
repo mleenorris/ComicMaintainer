@@ -9,6 +9,7 @@ using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services.Auth;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -181,6 +182,8 @@ public class AuthService : IAuthService
         await _userManager.AccessFailedAsync(user);
         if (await _userManager.IsLockedOutAsync(user))
         {
+            // A password remembered by the OPDS routes must stop working while the account is locked out.
+            _sessions.Invalidate(user.Id);
             _logger.LogWarning(
                 "Locked out {Username} until {LockoutEnd:u} after {MaxAttempts} failed sign-ins, the last from {ClientAddress}",
                 safeUsername, await _userManager.GetLockoutEndDateAsync(user), _userManager.Options.Lockout.MaxFailedAccessAttempts, client);
@@ -300,18 +303,16 @@ public class AuthService : IAuthService
     /// The active account whose API key is <paramref name="apiKey"/>, found by the key's hash
     /// (<see cref="ApiKeys.Hash"/>, indexed), whatever its roles: the key acts as that account.
     /// </summary>
-    public Task<ApplicationUser?> GetUserByApiKeyAsync(string apiKey)
+    public async Task<ApplicationUser?> GetUserByApiKeyAsync(string apiKey)
     {
         if (string.IsNullOrEmpty(apiKey) || apiKey.Length > ApiKeys.MaxLength)
         {
-            return Task.FromResult<ApplicationUser?>(null);
+            return null;
         }
 
         var hash = ApiKeys.Hash(apiKey);
-        // The synchronous LINQ overload works against both EF Core and the mocked IQueryable<T> of unit tests;
-        // for SQLite it is one indexed, in-process lookup.
-        var user = _userManager.Users.FirstOrDefault(u => u.ApiKeyHash == hash && u.IsActive);
-        return Task.FromResult(user);
+        // Not tracked: the callers only read the account, and a fresh read is what tells them the key still stands.
+        return await _userManager.Users.AsNoTracking().FirstOrDefaultAsync(u => u.ApiKeyHash == hash && u.IsActive);
     }
 
     /// <summary>
@@ -338,6 +339,8 @@ public class AuthService : IAuthService
             return (false, null, "Failed to update user");
         }
 
+        // The account behind the previous key may be remembered for a while; it must stop working now.
+        _sessions.Invalidate(user.Id);
         _logger.LogInformation(
             replaced ? "{Username} created a new API key, revoking the previous one" : "{Username} created an API key",
             LoggingHelper.SanitizeForLog(user.UserName));
@@ -360,6 +363,7 @@ public class AuthService : IAuthService
             return false;
         }
 
+        _sessions.Invalidate(user.Id);
         _logger.LogInformation("{Username} revoked their API key", LoggingHelper.SanitizeForLog(user.UserName));
         return true;
     }

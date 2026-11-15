@@ -105,25 +105,14 @@ public partial class FilesController
     // RESTful endpoint: GET /api/files/scan-unmarked (read operation, no side effects)
     [HttpGet("scan-unmarked")]
     [FailureMessage("Error scanning files")]
-    public async Task<ActionResult> ScanUnmarked()
+    public async Task<ActionResult> ScanUnmarked(CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(LoggingHelper.WithWebsitePrefix("ScanUnmarked: Scan unmarked files requested"));
-        _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ScanUnmarked: Starting file count retrieval from file store"));
-            
-        // Get file counts - materialize collections to avoid multiple enumerations
-        var allFilesList = (await _fileStore.GetAllFilesAsync()).ToList();
-        _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ScanUnmarked: Retrieved {TotalCount} total files"), allFilesList.Count);
-            
-        var unmarkedFilesList = (await _fileStore.GetFilteredFilesAsync("unprocessed")).ToList();
-        _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ScanUnmarked: Retrieved {UnmarkedCount} unprocessed files after filtering"), unmarkedFilesList.Count);
-            
-        var markedFilesList = (await _fileStore.GetFilteredFilesAsync("processed")).ToList();
-        _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ScanUnmarked: Retrieved {MarkedCount} processed files after filtering"), markedFilesList.Count);
-            
-        var totalCount = allFilesList.Count;
-        var unmarkedCount = unmarkedFilesList.Count;
-        var markedCount = markedFilesList.Count;
-            
+
+        // The counts the file list and /api/files/counts use, with the same predicates as the
+        // "processed" and "unprocessed" filters; no copy of the library is made to count it.
+        var (totalCount, markedCount, unmarkedCount, _) = await _fileStore.GetFileCountsAsync(cancellationToken);
+
         _logger.LogInformation(LoggingHelper.WithWebsitePrefix("ScanUnmarked: File counts - Total: {TotalCount}, Unmarked: {UnmarkedCount}, Marked: {MarkedCount}"), 
             totalCount, unmarkedCount, markedCount);
             

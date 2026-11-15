@@ -443,7 +443,6 @@ public class FileCoverCacheService : IFileCoverCacheService
             }
 
             var validator = new FileCoverValidator(sourceLength, sourceMtime, variant);
-            Cover cover;
             if (openStream)
             {
                 // Opened before anything else can happen to it: a prune or a regeneration that
@@ -455,16 +454,24 @@ public class FileCoverCacheService : IFileCoverCacheService
                     Share = FileShare.Read | FileShare.Delete,
                     Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
                 });
-                cover = new Cover(null, content, meta.ContentType, validator);
-            }
-            else
-            {
-                cover = new Cover(File.ReadAllBytes(blobPath), null, meta.ContentType, validator);
+                try
+                {
+                    remembered ??= Remember(blobPath, meta);
+                    remembered.RefreshAccessTimeIfDue(blobPath, DateTime.UtcNow);
+                }
+                catch
+                {
+                    content.Dispose();
+                    throw;
+                }
+
+                return new Cover(null, content, meta.ContentType, validator);
             }
 
+            var data = File.ReadAllBytes(blobPath);
             remembered ??= Remember(blobPath, meta);
             remembered.RefreshAccessTimeIfDue(blobPath, DateTime.UtcNow);
-            return cover;
+            return new Cover(data, null, meta.ContentType, validator);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {

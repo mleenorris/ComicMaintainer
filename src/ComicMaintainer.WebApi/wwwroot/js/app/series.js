@@ -893,10 +893,29 @@
                                         <div class="series-detail-meta">${formatFileSize(issue.size)}</div>
                                     </div>
                                     <div class="series-issue-actions file-actions-dropdown" onclick="event.stopPropagation()">
-                                        <button type="button" class="dropdown-toggle series-issue-actions-toggle" aria-label="Issue actions" onclick="toggleDropdown(event, '${escapeJs(issue.file_path)}')">
+                                        <button type="button" class="dropdown-toggle series-issue-actions-toggle" aria-label="Issue actions" onclick="fillSeriesIssueMenu('${escapeJs(issue.file_path)}'); toggleDropdown(event, '${escapeJs(issue.file_path)}')">
                                             ${uiIcon('more')}
                                         </button>
-                                        <div class="dropdown-menu" id="${getDropdownId(issue.file_path)}">
+                                        <div class="dropdown-menu" id="${getDropdownId(issue.file_path)}"></div>
+                                    </div>
+                                </div>`;
+        }
+
+        // An issue's actions are put in its menu when the menu is first
+        // opened: a series of hundreds of issues would otherwise build a dozen
+        // buttons and icons for every card up front. A card redrawn (its issue
+        // changed) starts with an empty menu again.
+        function fillSeriesIssueMenu(filePath) {
+            const menu = document.getElementById(getDropdownId(filePath));
+            if (!menu || menu.childElementCount) return;
+            const cached = currentSeriesDetailId ? seriesIssuesCache.get(currentSeriesDetailId) : null;
+            const issue = cached && cached.issues.find(item => item && item.file_path === filePath);
+            if (!issue) return;
+            renderHtml(menu, rawHtml(renderSeriesIssueMenuItems(issue)));
+        }
+
+        function renderSeriesIssueMenuItems(issue) {
+            return `
                                             <button class="dropdown-item" onclick="showFileInfo('${escapeJs(issue.file_path)}', '${escapeJs(issue.file_name)}'); closeAllDropdowns();">
                                                 ${uiIcon('info')} Info
                                             </button>
@@ -940,10 +959,7 @@
                                             <div class="dropdown-divider" data-requires-write></div>
                                             <button class="dropdown-item" data-requires-write onclick="deleteSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
                                                 ${uiIcon('trash')} Delete
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>`;
+                                            </button>`;
         }
 
         // Renders the external-metadata synopsis block shown at the top of the

@@ -36,7 +36,7 @@ public sealed class ArchiveMetadataScanServiceTests
     }
 
     private ArchiveMetadataScanService CreateScanner() =>
-        new(_fileStore.Object, _processor.Object, NullLogger<ArchiveMetadataScanService>.Instance);
+        new(_fileStore.Object, _processor.Object, NullLogger<ArchiveMetadataScanService>.Instance, Mock.Of<IFileCoverWarmupQueue>());
 
     private static ArchiveMetadataScanCandidate Candidate(int id, long size = 100) =>
         new(id, $"/library/Saga/Saga {id:000}.cbz", size, T0);

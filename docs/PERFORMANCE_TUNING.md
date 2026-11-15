@@ -107,6 +107,8 @@ Pages are sent with `Cache-Control: private, max-age=3600`, a strong `ETag` and 
 
 A page stored uncompressed in a CBZ, which is how most JPEG pages are stored, is sent straight from the archive file as it goes out, without first being copied into memory. Any other page is decompressed into a reusable buffer and then sent. When the browser drops a request, as the reader does with prefetches it no longer needs, the server stops reading that page.
 
+For a CBZ, the cached page list also records where each page lies in the file. A page turn reads that page's own header and data and nothing else; the archive's directory is not read again. If the page's header no longer matches what was recorded (another name, method, size or CRC), the archive is opened and read as before. A deflated page read this way is checked against its CRC. A CBR that was a single file when it was listed is opened as one, without looking for volumes that follow it; its headers are still checked up to the page on every read.
+
 ### Solid RAR Archives
 
 The pages of a solid RAR can only be decompressed in order, after every entry before them. The reader keeps a pass over each solid CBR open between page turns, so reading forward decompresses each entry once. Requests for the same archive take turns, nearest page first, so the pages the reader prefetches around the current one are read in one pass instead of each from the start.
@@ -131,6 +133,10 @@ Library covers (`/api/comicreader/cover`) are served from an on-disk cache of do
 | `FileCoverCacheMaxMegabytes` | `512` | Soft cap. The least recently used entries are removed; a thumbnail's last-used time is refreshed at most once a day. |
 
 Covers that are not cached yet are generated at most one per processor core at a time, so opening a library page of uncached covers does not decode dozens of full-size pages at once. A JPEG page is decoded at 1/2, 1/4 or 1/8 of its size, the smallest that is still at least the thumbnail width.
+
+Covers are also generated ahead of time, in the background, for files new to the library (found by the file watcher or a library scan, once the archive-metadata scan has read them), files changed outside the app, and files that processing rewrote or renamed. They are made one at a time, and wait while any cover someone asked for is being generated. Up to 10,000 files can wait; the work stops on shutdown, and a cover that was not made ahead is made on its first request as before.
+
+The details of the latest 20,000 covers served or written are kept in memory, so a cached cover costs one file open instead of reading its `.meta` sidecar first. Pruning runs in the background, never on a cover request, one pass at a time. The first pass, after 32 covers have been written, counts the cache; after that the count is kept up to date as covers are written, and the directory is scanned again only when the count goes over `FileCoverCacheMaxMegabytes`. A pass removes the least recently used covers until the cache is at most 90% of the cap.
 
 Covers are sent with `Cache-Control: private, max-age=3600` and a strong `ETag` that includes the source file's size and modification time and the thumbnail variant, so changing any of these settings regenerates entries on the next request. A revalidation answers 304 without reading the thumbnail or the archive. If a page cannot be decoded, the original image is served. A cached cover is sent straight from its file.
 

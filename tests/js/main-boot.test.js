@@ -59,6 +59,84 @@ test('saved preferences that change nothing the library lists do not reload it',
     assert.equal(seriesListLoads(defaults).length, 1);
 });
 
+const rememberedQuery = page => JSON.parse(page.window.localStorage.getItem('libraryQuery'));
+
+test('the filter and sort this device remembers are used for the first library request', async () => {
+    const saved = { filterMode: 'unmarked', sortMode: 'date', sortDirection: 'desc' };
+    const page = await boot({
+        hash: '#/library',
+        localStorage: { libraryQuery: JSON.stringify(saved) },
+        routes: libraryRoutes({ 'GET /api/preferences': preferences(saved) })
+    });
+
+    const loads = seriesListLoads(page);
+    assert.equal(loads.length, 1, 'no reload once the server agrees');
+    assert.equal(loads[0].query.filter, 'unmarked');
+    assert.equal(loads[0].query.sort, 'date');
+    assert.equal(loads[0].query.direction, 'desc');
+    assert.equal(page.$('#headerSortLabel').textContent, 'Date ↓');
+});
+
+test('the server\'s preferences win over what the device remembered, and are remembered for next time', async () => {
+    const page = await boot({
+        hash: '#/library',
+        localStorage: { libraryQuery: JSON.stringify({ filterMode: 'unmarked', sortMode: 'date', sortDirection: 'desc' }) },
+        routes: libraryRoutes({ 'GET /api/preferences': preferences({ filterMode: 'all', sortMode: 'size', sortDirection: 'asc' }) })
+    });
+
+    const loads = seriesListLoads(page);
+    assert.equal(loads.length, 2);
+    assert.equal(loads[1].query.sort, 'size');
+    assert.equal(loads[1].query.filter, undefined);
+    assert.deepEqual(rememberedQuery(page), { filterMode: 'all', sortMode: 'size', sortDirection: 'asc' });
+});
+
+test('changing the filter or the sort remembers it on this device', async () => {
+    const page = await boot({ hash: '#/library', routes: libraryRoutes() });
+
+    await page.run("setHeaderFilter('duplicates')");
+    page.run("setSort('size')");
+    await page.settle(2);
+
+    assert.deepEqual(rememberedQuery(page), { filterMode: 'duplicates', sortMode: 'size', sortDirection: 'asc' });
+    // A theme change is not part of it.
+    await page.run("setPreferences({ theme: 'dark' })");
+    assert.deepEqual(rememberedQuery(page), { filterMode: 'duplicates', sortMode: 'size', sortDirection: 'asc' });
+});
+
+test('unreadable remembered preferences are ignored', async () => {
+    for (const libraryQuery of ['not json', 'null', '"a string"']) {
+        const page = await boot({ hash: '#/library', localStorage: { libraryQuery }, routes: libraryRoutes() });
+        const [first] = seriesListLoads(page);
+        assert.deepEqual(first.query, { offset: '0', limit: '60' }, libraryQuery);
+        assert.deepEqual(page.errors, []);
+    }
+});
+
+test('a device that cannot store the preferences still saves them on the server', async () => {
+    const page = await boot({ hash: '#/library', routes: libraryRoutes() });
+    page.run("Storage.prototype.setItem = function () { throw new Error('QuotaExceededError'); }");
+
+    await page.run("setHeaderFilter('duplicates')");
+
+    assert.deepEqual(requests(page, 'PUT', '/api/preferences').at(-1).body, { filterMode: 'duplicates' });
+    assert.deepEqual(page.errors, []);
+});
+
+test('opened on the overview, the library is fetched only when it is first shown, with the saved preferences', async () => {
+    const page = await boot({ routes: libraryRoutes({ 'GET /api/preferences': preferences({ filterMode: 'unmarked' }) }) });
+    assert.equal(page.evaluate('currentView'), 'home');
+    assert.equal(seriesListLoads(page).length, 0);
+
+    page.run("navigate('#/library')");
+    await page.settle(3);
+
+    const loads = seriesListLoads(page);
+    assert.equal(loads.length, 1);
+    assert.equal(loads[0].query.filter, 'unmarked');
+    assert.ok(page.$('#fileList .series-card'));
+});
+
 test('a saved filter alone is applied to the library, not just shown in the header', async () => {
     const page = await boot({ hash: '#/library', routes: libraryRoutes({ 'GET /api/preferences': preferences({ filterMode: 'unread' }) }) });
 

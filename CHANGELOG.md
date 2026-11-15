@@ -60,6 +60,29 @@ for it.
   WebP copy made once and kept next to the original. The library's image links now carry the image's
   content hash (`?v=`), and an image asked for with the current hash may be cached by the browser for a
   year. Serving an image no longer loads the series' whole metadata record.
+- The app's pages are sent with an ETag, so a page the browser already has costs a short "not modified"
+  answer instead of the whole page (index.html is over 200 KB), and the server builds each page once
+  instead of on every request. The service worker uses navigation preload where the browser has it.
+- Opening the app on the overview no longer loads the library until you open it. The library's filter
+  and sort are remembered on the device too, so its first request already uses them.
+- With Authelia, the app checks the session once at start instead of twice.
+- "Select all series" fetches the series' issue lists six at a time instead of all at once, and updates
+  the page once.
+- Library covers load eight at a time, in the order they come into view; covers scrolled past before their
+  turn are skipped.
+- The reader no longer requests a page twice when you turn to it while it is still being preloaded, and
+  decodes preloaded pages ahead of time.
+- SQLite connection settings are applied once per pooled connection instead of before every query.
+- Turning a page of a CBZ reads that page from where it lies in the file, instead of reading the archive's
+  whole directory again. Turning a page of a CBR that is a single file no longer opens the file a second
+  time to look for further volumes.
+- Covers of new files, of files changed outside the app and of files that processing rewrote or renamed
+  are generated in the background, one at a time and only while no one is waiting for a cover, so the
+  library does not have to generate them all when it first shows them.
+- Serving a cached cover opens just the cover: what its `.meta` file says is remembered for the latest
+  20,000 covers. The cover cache is pruned in the background instead of during a cover request, and once
+  it has been counted the cache directory is only scanned again when it goes over its size limit. A prune
+  now brings the cache down to 90% of `FileCoverCacheMaxMegabytes`.
 
 ### Fixed
 

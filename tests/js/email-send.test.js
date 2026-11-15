@@ -403,7 +403,10 @@ test('the email actions are write actions for read-only users', async t => {
     t.after(() => page.close());
 
     const card = page.$(`.series-issue-card[data-file-path="${FIRST}"]`);
-    const issueItem = [...card.querySelectorAll('.dropdown-item')].find(item => item.textContent.trim() === 'Email to Ereader…');
+    // An issue's menu is built when it is opened.
+    page.click(card.querySelector('.dropdown-toggle'));
+    const menu = page.document.getElementById(page.run(`getDropdownId(${JSON.stringify(FIRST)})`));
+    const issueItem = [...menu.querySelectorAll('.dropdown-item')].find(item => item.textContent.trim() === 'Email to Ereader…');
     const seriesItems = [...page.$$('.series-actions-dropdown .dropdown-item')]
         .filter(item => ['Email All Issues', 'Auto-send New Issues'].includes(item.textContent.trim()));
 

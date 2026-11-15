@@ -135,8 +135,11 @@
             return data.token;
         }
 
-        // Initialize SSE connection (also used to reconnect: it replaces any existing stream)
-        async function initEventSource() {
+        // Initialize SSE connection (also used to reconnect: it replaces any existing stream).
+        // `{ sessionChecked: true }` when the caller has just checked the session (the app
+        // start, after checkAuth), so an Authelia session is not asked about twice.
+        async function initEventSource(options) {
+            const sessionChecked = !!(options && options.sessionChecked === true);
             if (eventSourceConnecting) {
                 return;
             }
@@ -152,7 +155,7 @@
             try {
                 // Check authentication status for both JWT and Authelia before connecting
                 console.log('SSE: Checking authentication status...');
-                const session = await checkSessionState();
+                const session = sessionChecked ? SESSION_ACTIVE : await checkSessionState();
                 if (generation !== eventSourceGeneration) return;
                 if (session === SESSION_ENDED) {
                     console.error('SSE: Authentication check failed - cannot establish SSE connection');

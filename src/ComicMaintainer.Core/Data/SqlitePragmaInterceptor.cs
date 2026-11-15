@@ -1,5 +1,7 @@
 using System.Data;
 using System.Data.Common;
+using System.Runtime.CompilerServices;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
 
@@ -37,6 +39,13 @@ public sealed class SqlitePragmaInterceptor : DbConnectionInterceptor
         "PRAGMA cache_size=-65536;" +
         "PRAGMA mmap_size=268435456;";
 
+    // PRAGMAs last as long as the native connection they were set on, which the connection pool keeps open and
+    // hands to the next SqliteConnection. EF Core opens a connection for each query, so a native connection already
+    // configured is not configured again. One where a PRAGMA failed (a read-only database cannot switch to WAL, a
+    // locked one may not yet) is tried again on its next open.
+    private static readonly ConditionalWeakTable<object, object> ConfiguredHandles = new();
+    private static readonly object Configured = new();
+
     private readonly ILogger<SqlitePragmaInterceptor>? _logger;
 
     public SqlitePragmaInterceptor(ILogger<SqlitePragmaInterceptor>? logger = null)
@@ -59,9 +68,20 @@ public sealed class SqlitePragmaInterceptor : DbConnectionInterceptor
         await base.ConnectionOpenedAsync(connection, eventData, cancellationToken).ConfigureAwait(false);
     }
 
+    private static bool IsConfigured(DbConnection connection) =>
+        connection is SqliteConnection { Handle: { } handle } && ConfiguredHandles.TryGetValue(handle, out _);
+
+    private static void MarkConfigured(DbConnection connection)
+    {
+        if (connection is SqliteConnection { Handle: { } handle })
+        {
+            ConfiguredHandles.AddOrUpdate(handle, Configured);
+        }
+    }
+
     private void ApplyPragmas(DbConnection connection)
     {
-        if (connection.State != ConnectionState.Open)
+        if (connection.State != ConnectionState.Open || IsConfigured(connection))
         {
             return;
         }
@@ -70,16 +90,22 @@ public sealed class SqlitePragmaInterceptor : DbConnectionInterceptor
         {
             Execute(connection, BusyTimeoutPragma);
 
+            var walSet = true;
             try
             {
                 Execute(connection, JournalModePragma);
             }
             catch (DbException ex)
             {
+                walSet = false;
                 _logger?.LogWarning(ex, "Failed to switch SQLite journal mode to WAL");
             }
 
             Execute(connection, ConnectionPragmas);
+            if (walSet)
+            {
+                MarkConfigured(connection);
+            }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -89,7 +115,7 @@ public sealed class SqlitePragmaInterceptor : DbConnectionInterceptor
 
     private async Task ApplyPragmasAsync(DbConnection connection, CancellationToken cancellationToken)
     {
-        if (connection.State != ConnectionState.Open)
+        if (connection.State != ConnectionState.Open || IsConfigured(connection))
         {
             return;
         }
@@ -98,16 +124,22 @@ public sealed class SqlitePragmaInterceptor : DbConnectionInterceptor
         {
             await ExecuteAsync(connection, BusyTimeoutPragma, cancellationToken).ConfigureAwait(false);
 
+            var walSet = true;
             try
             {
                 await ExecuteAsync(connection, JournalModePragma, cancellationToken).ConfigureAwait(false);
             }
             catch (DbException ex)
             {
+                walSet = false;
                 _logger?.LogWarning(ex, "Failed to switch SQLite journal mode to WAL");
             }
 
             await ExecuteAsync(connection, ConnectionPragmas, cancellationToken).ConfigureAwait(false);
+            if (walSet)
+            {
+                MarkConfigured(connection);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

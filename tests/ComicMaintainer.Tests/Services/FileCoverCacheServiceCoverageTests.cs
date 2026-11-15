@@ -159,12 +159,13 @@ public class FileCoverCacheServiceCoverageTests : IDisposable
     [Fact]
     public async Task GetOrCreateAsync_CorruptMetadata_RegeneratesAndRepairsEntry()
     {
-        var service = CreateService();
         var file = CreateSource("a.cbz");
-        Assert.NotNull(await service.GetOrCreateAsync(file));
+        Assert.NotNull(await CreateService().GetOrCreateAsync(file));
         var metaPath = Path.Join(_cacheDir, KeyFor(file) + ".meta");
         File.WriteAllText(metaPath, "{ this is not json");
 
+        // Found by a service that has not seen the sidecar yet, as after a restart.
+        var service = CreateService();
         var regenerated = await service.GetOrCreateAsync(file);
         var cached = await service.GetOrCreateAsync(file);
 
@@ -185,15 +186,17 @@ public class FileCoverCacheServiceCoverageTests : IDisposable
         {
             Assert.NotNull(await service.GetOrCreateAsync(files[i]));
         }
-        // 31 x 64 KiB is well over 1 MiB, but pruning only runs on the 32nd write.
+        // 31 x 64 KiB is well over 1 MiB, but until the cache's size is known pruning only runs on the 32nd write.
         Assert.Equal(31, Directory.GetFiles(_cacheDir, "*.img").Length);
 
         var last = await service.GetOrCreateAsync(files[31]);
+        await service.PruneTask;
 
         Assert.NotNull(last);
         var blobs = Directory.GetFiles(_cacheDir, "*.img");
         Assert.InRange(blobs.Length, 1, 16);
-        Assert.True(blobs.Sum(b => new FileInfo(b).Length) <= 1024L * 1024L);
+        // Down to 90% of the cap, so the next write does not prune again.
+        Assert.True(blobs.Sum(b => new FileInfo(b).Length) <= 0.9 * 1024 * 1024);
         var metas = Directory.GetFiles(_cacheDir, "*.meta");
         Assert.Equal(
             blobs.Select(Path.GetFileNameWithoutExtension).Order(),
@@ -217,6 +220,7 @@ public class FileCoverCacheServiceCoverageTests : IDisposable
         Assert.Equal(31, Directory.GetFiles(_cacheDir, "*.img").Length);
 
         var last = await service.GetOrCreateAsync(CreateSource("huge-31.cbz"));
+        await service.PruneTask;
 
         // The freshly generated cover is still served, but no single entry fits
         // the 1 MiB budget so the prune pass empties the cache completely.
@@ -239,8 +243,81 @@ public class FileCoverCacheServiceCoverageTests : IDisposable
             Assert.NotNull(await service.GetOrCreateAsync(CreateSource($"issue-{i:D2}.cbz")));
         }
 
+        await service.PruneTask;
         Assert.Equal(32, Directory.GetFiles(_cacheDir, "*.img").Length);
         Assert.Equal(32, Directory.GetFiles(_cacheDir, "*.meta").Length);
+    }
+
+    [Fact]
+    public async Task OnceTheCacheSizeIsKnown_ACacheGoingOverItsCapIsPrunedWithoutWaitingFor32MoreWrites()
+    {
+        _settings.FileCoverCacheMaxMegabytes = 1;
+        var service = CreateService();
+        for (var i = 0; i < 32; i++)
+        {
+            Assert.NotNull(await service.GetOrCreateAsync(CreateSource($"first-{i:D2}.cbz")));
+        }
+
+        await service.PruneTask;
+        var afterFirstPrune = Directory.GetFiles(_cacheDir, "*.img").Length;
+
+        // The scan counted what was left, and each write since adds to that count: the cap is
+        // passed on the third 64 KiB cover, which prunes then and there.
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.NotNull(await service.GetOrCreateAsync(CreateSource($"more-{i}.cbz")));
+        }
+
+        await service.PruneTask;
+        var blobs = Directory.GetFiles(_cacheDir, "*.img");
+        Assert.True(blobs.Length < afterFirstPrune + 3, $"{blobs.Length} covers left; expected a prune after the cap was passed");
+        Assert.True(blobs.Sum(b => new FileInfo(b).Length) <= 0.9 * 1024 * 1024);
+    }
+
+    [Fact]
+    public async Task ACachedCover_IsServedAgainWithoutReadingItsSidecar()
+    {
+        var service = CreateService();
+        var file = CreateSource("a.cbz");
+        Assert.NotNull(await service.GetOrCreateAsync(file));
+
+        // The sidecar is remembered, so a hit only opens the cover itself.
+        File.Delete(Path.Join(_cacheDir, KeyFor(file) + ".meta"));
+
+        Assert.NotNull(await service.GetOrCreateAsync(file));
+        var opened = await service.OpenAsync(file, FileCoverFormat.Configured);
+        Assert.NotNull(opened);
+        await opened.Value.Content.DisposeAsync();
+        _reader.Verify(r => r.GetPageAsync(file, 1), Times.Once);
+    }
+
+    [Fact]
+    public async Task ARememberedCoverDeletedFromDisk_IsGeneratedAgain()
+    {
+        var service = CreateService();
+        var file = CreateSource("a.cbz");
+        Assert.NotNull(await service.GetOrCreateAsync(file));
+
+        File.Delete(Path.Join(_cacheDir, KeyFor(file) + ".img"));
+
+        Assert.NotNull(await service.GetOrCreateAsync(file));
+        Assert.True(File.Exists(Path.Join(_cacheDir, KeyFor(file) + ".img")));
+        _reader.Verify(r => r.GetPageAsync(file, 1), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task ARememberedCover_IsStillCheckedAgainstTheSourceFile()
+    {
+        var service = CreateService();
+        var file = CreateSource("a.cbz");
+        Assert.NotNull(await service.GetOrCreateAsync(file));
+
+        File.WriteAllBytes(file, [9, 9, 9, 9, 9, 9]);
+
+        var regenerated = await service.GetOrCreateAsync(file);
+
+        Assert.Equal(6, regenerated!.Value.SourceLength);
+        _reader.Verify(r => r.GetPageAsync(file, 1), Times.Exactly(2));
     }
 
     private FileCoverCacheService CreateService()

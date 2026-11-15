@@ -490,11 +490,7 @@ internal static class WebApplicationExtensions
             }
 
             var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0";
-            var html = HtmlVersionInjectionMiddleware.InjectPlaceholders(await File.ReadAllTextAsync(indexPath), version, basePath);
-
-            context.Response.Headers["Cache-Control"] = "no-store, private";
-            context.Response.ContentType = "text/html; charset=utf-8";
-            await context.Response.WriteAsync(html);
+            await HtmlPageResponder.WriteAsync(context, indexPath, version, basePath);
         });
 
         return app;

@@ -46,64 +46,44 @@
             // Decides whether the "Find on Suwayomi" actions are offered.
             refreshSuwayomiAvailability();
             
-            // Initialize SSE connection for real-time updates
-            initEventSource();
-            
+            // Initialize SSE connection for real-time updates. The session was
+            // checked just above, so the stream need not check it again.
+            initEventSource({ sessionChecked: true });
+
             // Start all async operations in parallel for faster initial load
             // This prevents sequential API calls from blocking the file list display
             const prefsPromise = getPreferences();
             const jobCheckPromise = checkAndResumeActiveJob();
             const libraryHealthPromise = loadLibraryHealth();
-            
+
+            // The filter and sort this device last used, so the library's
+            // first request already lists what the saved preferences will.
+            applyLibraryQueryPreferences(rememberedLibraryQuery());
+
             // Start loading the library immediately without waiting for preferences or
             // the job check; it is reloaded below if the saved preferences change it.
-            loadActiveLibraryView();
-            
+            // Opened on another page (the overview, by default), the library loads
+            // when it is first shown instead.
+            if (startsOnLibrary()) {
+                loadActiveLibraryView();
+            }
+
             // Fetch initial watcher status in parallel
             updateWatcherStatus();
-            
+
             // Apply preferences when they arrive (don't block file loading)
             prefsPromise.then(prefs => {
-                const oldFilterMode = filterMode;
-
-                // Restore filter mode from preferences
-                if (prefs.filterMode) {
-                    filterMode = prefs.filterMode;
-                    
-                    // Update button label
-                    document.getElementById('headerFilterLabel').textContent = FILTER_LABELS[filterMode] || FILTER_LABELS['all'];
-                    
-                    // Update active class on dropdown items
-                    document.querySelectorAll('#headerFilterMenu .header-dropdown-item').forEach(item => {
-                        if (item.dataset.filter === filterMode) {
-                            item.classList.add('active');
-                        } else {
-                            item.classList.remove('active');
-                        }
-                    });
-                }
-
-                // Restore sort field and direction from preferences
-                const oldSortMode = sortMode;
-                const oldSortDirection = sortDirection;
-                if (prefs.sortMode) {
-                    sortMode = prefs.sortMode;
-                }
-                if (VALID_SORT_DIRECTIONS.includes(prefs.sortDirection)) {
-                    sortDirection = prefs.sortDirection;
-                }
-                if (prefs.sortMode || prefs.sortDirection) {
-                    applySortUi();
-                }
+                rememberLibraryQuery(prefs);
+                const { filterChanged, sortChanged } = applyLibraryQueryPreferences(prefs);
 
                 updateSeriesLayoutButtons();
                 updateLibraryViewLayout();
 
                 // The library started loading with the defaults; reload it if
-                // the saved preferences change what it lists.
-                const filterChanged = filterMode !== oldFilterMode;
-                const sortChanged = sortMode !== oldSortMode || sortDirection !== oldSortDirection;
-                if (filterChanged || sortChanged) {
+                // the saved preferences change what it lists (a library not
+                // loaded yet will use them when it is).
+                const libraryRequested = seriesLibrary.length > 0 || seriesLoading;
+                if ((filterChanged || sortChanged) && libraryRequested) {
                     const libraryReload = loadActiveLibraryView();
 
                     // A series page opened before the preferences arrived listed

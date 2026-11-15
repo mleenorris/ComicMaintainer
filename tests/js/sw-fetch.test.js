@@ -71,6 +71,41 @@ test('API writes and server-sent event streams are left to the browser', async (
 
 // --- documents ----------------------------------------------------------------
 
+test('a navigation the browser preloaded is answered with the preload, not fetched again', async () => {
+    const sw = await installedWorker();
+    sw.network.route('GET /', html(INDEX_PAGE));
+    const preloaded = new Response('<title>preloaded</title>', { status: 200, headers: { 'Content-Type': 'text/html' } });
+
+    const { responded, lifetime } = sw.dispatch('fetch', {
+        request: navigationRequest('/'),
+        clientId: '',
+        resultingClientId: 'window-1',
+        preloadResponse: Promise.resolve(preloaded)
+    });
+    const response = await responded();
+    await Promise.all(lifetime);
+
+    assert.equal(await response.text(), '<title>preloaded</title>');
+    assert.equal(sw.network.calls.length, 0);
+});
+
+test('a navigation whose preload failed or was not made is fetched', async () => {
+    const sw = await installedWorker();
+    sw.network.route('GET /', html(INDEX_PAGE));
+
+    for (const preloadResponse of [Promise.reject(new Error('preload failed')), Promise.resolve(undefined)]) {
+        const { responded, lifetime } = sw.dispatch('fetch', {
+            request: navigationRequest('/'),
+            clientId: '',
+            resultingClientId: 'window-1',
+            preloadResponse
+        });
+        assert.equal(await (await responded()).text(), INDEX_PAGE);
+        await Promise.all(lifetime);
+    }
+    assert.equal(sw.network.calls.length, 2);
+});
+
 test('documents are fetched network-first and the app shell is stored by path for offline use', async () => {
     const sw = await installedWorker();
     sw.network.route('GET /reader.html', html(READER_PAGE));
@@ -80,7 +115,7 @@ test('documents are fetched network-first and the app shell is stored by path fo
 
     assert.equal(await response.text(), READER_PAGE);
     assert.equal(sw.network.calls[0].url, absolute('/reader.html?file=Series%2Fa.cbz'));
-    assert.equal(sw.network.calls[0].init.cache, 'no-store');
+    assert.equal(sw.network.calls[0].init.cache, 'no-cache');
     // Every ?file= URL renders the same document, so it is stored once, by path.
     assert.equal(await sw.caches.text(VERSIONED_CACHE, '/reader.html'), READER_PAGE);
     assert.equal(allCached(sw).some(url => url.includes('?file=')), false);
@@ -183,13 +218,13 @@ test('documents are recognised by navigation mode, destination, Accept header, t
         await sw.respond(request);
     }
 
-    // Documents bypass the HTTP cache...
+    // Documents are revalidated with the server every time...
     assert.deepEqual(sw.network.calls.map(call => [call.path, call.init.cache]), [
-        ['/series/1', 'no-store'],
-        ['/series/2', 'no-store'],
-        ['/series/3', 'no-store'],
-        ['/', 'no-store'],
-        ['/login.html', 'no-store']
+        ['/series/1', 'no-cache'],
+        ['/series/2', 'no-cache'],
+        ['/series/3', 'no-cache'],
+        ['/', 'no-cache'],
+        ['/login.html', 'no-cache']
     ]);
     // ...and the root document is stored even when a script fetched it.
     assert.equal(await sw.caches.text(VERSIONED_CACHE, '/'), '<title>page</title>');

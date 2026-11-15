@@ -352,7 +352,8 @@ public class FileCoverCacheServiceTests : IDisposable
         File.WriteAllText(metaPath,
             $"{{\"SourceLength\":{info.Length},\"SourceMtimeUtcTicks\":{info.LastWriteTimeUtc.Ticks},\"ContentType\":\"image/png\"}}");
 
-        var entry = await _service.GetOrCreateAsync(file);
+        // Found by a service that has not seen the sidecar yet, as after the upgrade.
+        var entry = await new FileCoverCacheService(_reader.Object, _options.Object, Mock.Of<ILogger<FileCoverCacheService>>()).GetOrCreateAsync(file);
 
         Assert.Equal("image/webp", entry!.Value.ContentType);
         _reader.Verify(r => r.GetPageAsync(It.IsAny<string>(), 1), Times.Exactly(2));
@@ -665,4 +666,112 @@ public class FileCoverCacheServiceTests : IDisposable
 
         Assert.Empty(Directory.EnumerateFiles(_cacheDir));
     }
+
+    // ---- warm-up ahead of the first request -----------------------------------------------
+
+    [Fact]
+    public async Task WarmUpAsync_StoresTheCoverTheFirstRequestThenGetsFromTheCache()
+    {
+        var file = CreateFile("a.cbz");
+        SetupPage(Png());
+
+        await _service.WarmUpAsync(file);
+        var cover = await _service.OpenAsync(file, FileCoverFormat.Configured);
+
+        Assert.Equal("image/webp", cover!.Value.ContentType);
+        Assert.IsType<FileStream>(cover.Value.Content);
+        await cover.Value.Content.DisposeAsync();
+        _reader.Verify(r => r.GetPageAsync(file, 1), Times.Once);
+    }
+
+    [Fact]
+    public async Task WarmUpAsync_ACoverAlreadyCached_IsLeftAsItIs()
+    {
+        var file = CreateFile("a.cbz");
+        SetupPage(new byte[] { 9, 8, 7 });
+        await _service.GetOrCreateAsync(file);
+
+        await _service.WarmUpAsync(file);
+        // Also when the cache was filled before this service started.
+        await new FileCoverCacheService(_reader.Object, _options.Object, Mock.Of<ILogger<FileCoverCacheService>>()).WarmUpAsync(file);
+
+        _reader.Verify(r => r.GetPageAsync(file, 1), Times.Once);
+    }
+
+    [Fact]
+    public async Task WarmUpAsync_WithTheCacheOffOrAMissingFile_DoesNothing()
+    {
+        var file = CreateFile("a.cbz");
+        SetupPage(new byte[] { 9, 8, 7 });
+
+        await _service.WarmUpAsync(Path.Join(_testDir, "missing.cbz"));
+        _settings.FileCoverCacheEnabled = false;
+        await _service.WarmUpAsync(file);
+
+        _reader.Verify(r => r.GetPageAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+        Assert.False(Directory.Exists(_cacheDir));
+    }
+
+    [Fact]
+    public async Task WarmUpAsync_WaitsWhileACoverSomeoneAskedForIsBeingGenerated()
+    {
+        var asked = CreateFile("asked.cbz");
+        var ahead = CreateFile("ahead.cbz");
+        var gate = new TaskCompletionSource();
+        var started = new TaskCompletionSource();
+        _reader
+            .Setup(r => r.GetPageAsync(asked, 1))
+            .Returns(async () =>
+            {
+                started.TrySetResult();
+                await gate.Task;
+                return (new byte[] { 1 }, "image/jpeg");
+            });
+        SetupPageFor(ahead, new byte[] { 2 });
+
+        var request = _service.GetOrCreateAsync(asked);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var warmUp = _service.WarmUpAsync(ahead);
+        await Task.Delay(100);
+
+        Assert.False(warmUp.IsCompleted);
+        _reader.Verify(r => r.GetPageAsync(ahead, 1), Times.Never);
+
+        gate.SetResult();
+        await request;
+        await warmUp.WaitAsync(TimeSpan.FromSeconds(10));
+        _reader.Verify(r => r.GetPageAsync(ahead, 1), Times.Once);
+    }
+
+    [Fact]
+    public async Task WarmUpAsync_CancelledWhileWaiting_StopsWithoutGenerating()
+    {
+        var asked = CreateFile("asked.cbz");
+        var ahead = CreateFile("ahead.cbz");
+        var gate = new TaskCompletionSource();
+        var started = new TaskCompletionSource();
+        _reader
+            .Setup(r => r.GetPageAsync(asked, 1))
+            .Returns(async () =>
+            {
+                started.TrySetResult();
+                await gate.Task;
+                return (new byte[] { 1 }, "image/jpeg");
+            });
+        SetupPageFor(ahead, new byte[] { 2 });
+
+        var request = _service.GetOrCreateAsync(asked);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        using var stopping = new CancellationTokenSource();
+        var warmUp = _service.WarmUpAsync(ahead, stopping.Token);
+        await stopping.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => warmUp);
+        gate.SetResult();
+        await request;
+        _reader.Verify(r => r.GetPageAsync(ahead, 1), Times.Never);
+    }
+
+    private void SetupPageFor(string file, byte[] data) =>
+        _reader.Setup(r => r.GetPageAsync(file, 1)).ReturnsAsync((data, "image/jpeg"));
 }

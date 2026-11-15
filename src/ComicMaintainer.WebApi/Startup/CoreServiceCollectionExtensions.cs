@@ -251,6 +251,8 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<IComicReaderService, ComicReaderService>();
         services.AddSingleton<IFileCoverCacheService, FileCoverCacheService>();
+        services.AddSingleton<FileCoverWarmupQueue>();
+        services.AddSingleton<IFileCoverWarmupQueue>(sp => sp.GetRequiredService<FileCoverWarmupQueue>());
         services.AddSingleton<ISeriesLibraryService, SeriesLibraryService>();
         services.AddSingleton<ArchiveMetadataScanService>();
         services.AddSingleton<IOverviewService, OverviewService>();
@@ -431,6 +433,9 @@ internal static class CoreServiceCollectionExtensions
         // Keep the cached archive metadata (ComicFiles.Metadata) in step with the files, so
         // library requests never open archives.
         services.AddHostedService<ArchiveMetadataScanHostedService>();
+
+        // Generate the covers of new and changed files, one at a time, before the library shows them.
+        services.AddHostedService<FileCoverWarmupHostedService>();
 
         // Reconcile persisted batch job state, marking anything left in flight by a restart as
         // interrupted so clients polling an old job id get a definite answer.

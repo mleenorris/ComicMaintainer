@@ -226,6 +226,39 @@ test('"Select all series" selects every loaded series and Clear empties the sele
     assert.equal(page.$('#selectInfo').textContent, 'No files selected');
 });
 
+test('"Select all series" fetches the issue lists six at a time, and shows every series selected at once', async () => {
+    const answers = [];
+    const page = await bootSelectable(20, call => {
+        const answer = deferred();
+        answers.push({ answer, call });
+        return answer.promise;
+    });
+
+    page.input('#seriesSelectAll', true);
+    await page.settle();
+
+    assert.equal(issuesCalls(page).length, 6, 'six requests at a time');
+    assert.equal(page.$$('#fileList .series-card--selected').length, 20, 'every series is shown selected straight away');
+    assert.equal(page.$('#seriesSelectionEmailBtn').disabled, true, 'while their files are still loading');
+
+    // Each answer lets the next series' request go, in order.
+    answers[0].answer.resolve(issuesFor(answers[0].call));
+    await page.settle();
+    assert.equal(issuesCalls(page).length, 7);
+    assert.equal(ISSUES_PATH.exec(issuesCalls(page)[6].path)[1], 'series-7');
+
+    for (let i = 1; i < 20; i++) {
+        await page.waitFor(() => answers.length > i);
+        answers[i].answer.resolve(issuesFor(answers[i].call));
+        await page.settle();
+    }
+
+    assert.equal(issuesCalls(page).length, 20);
+    assert.equal(selectedFiles(page).length, 40);
+    assert.equal(page.$('#selectInfo').textContent, '20 series · 40 files selected');
+    assert.equal(page.$('#seriesSelectionEmailBtn').disabled, false);
+});
+
 test('unticking "Select all series" clears the selection', async () => {
     const page = await bootSelectable(2);
     page.input('#seriesSelectAll', true);

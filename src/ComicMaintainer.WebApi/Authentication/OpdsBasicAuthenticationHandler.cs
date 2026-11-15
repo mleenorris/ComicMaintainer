@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -33,9 +32,11 @@ namespace ComicMaintainer.WebApi.Authentication;
 /// password, and <c>/opds/*</c> has to bypass Authelia because OPDS clients cannot follow its login, so accepting
 /// local passwords there would let anyone try them without Authelia's checks.</para>
 /// <para>OPDS clients repeat the credentials on every request, so a password that has passed is remembered for a short
-/// while to spare a key derivation per page; the memory holds a salted hash of it, never the password. Every request
-/// still reads the account: a disabled, locked out or deleted account, a changed security stamp (a password change, a
-/// sign-out of all sessions) or a role change applies at once. API keys are looked up on every request.</para>
+/// while to spare a key derivation per page; the memory holds a salted hash of it, never the password. The account a
+/// remembered credential stands for is itself remembered for <see cref="AuthSessionValidator.CacheDuration"/>
+/// (<see cref="RememberedAccount"/>), so a page of covers does not read it once per cover. Every change made in the
+/// app ends that at once: a disabled, locked out or deleted account, a changed security stamp (a password change, a
+/// sign-out of all sessions), a new or revoked API key and a role change all apply to the next request.</para>
 /// </remarks>
 public sealed class OpdsBasicAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {
@@ -63,39 +64,43 @@ public sealed class OpdsBasicAuthenticationHandler : AuthenticationHandler<Authe
 
     private const string RateLimitedItem = "OpdsBasic.RetryAfterSeconds";
     private const string CacheKeyPrefix = "opds-basic:";
+    private const string AccountKeySuffix = ":account";
 
     private static readonly byte[] CacheSalt = RandomNumberGenerator.GetBytes(32);
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
-    private readonly IAuthService _authService;
-    private readonly UserManager<ApplicationUser> _userManager;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly ClientAddressResolver _clientAddresses;
     private readonly AuthenticationAttemptLimiter _attempts;
     private readonly IMemoryCache _cache;
+    private readonly IAuthSessionValidator _sessions;
     private readonly AutheliaSettings _authelia;
 
+    // The account services (a DbContext and its stores) are resolved only when an account has to be read: a request
+    // whose account is remembered needs neither.
     public OpdsBasicAuthenticationHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder,
-        IAuthService authService,
-        UserManager<ApplicationUser> userManager,
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         ClientAddressResolver clientAddresses,
         AuthenticationAttemptLimiter attempts,
         IMemoryCache cache,
+        IAuthSessionValidator sessions,
         IOptions<AutheliaSettings> autheliaSettings)
         : base(options, logger, encoder)
     {
-        _authService = authService;
-        _userManager = userManager;
         _dbContextFactory = dbContextFactory;
         _clientAddresses = clientAddresses;
         _attempts = attempts;
         _cache = cache;
+        _sessions = sessions;
         _authelia = autheliaSettings.Value;
     }
+
+    private IAuthService AuthService => Context.RequestServices.GetRequiredService<IAuthService>();
+
+    private UserManager<ApplicationUser> UserManager => Context.RequestServices.GetRequiredService<UserManager<ApplicationUser>>();
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
@@ -113,13 +118,14 @@ public sealed class OpdsBasicAuthenticationHandler : AuthenticationHandler<Authe
         var cacheKey = CacheKeyPrefix + Fingerprint(username, secret);
         if (_cache.TryGetValue(cacheKey, out RememberedCredential? remembered) && remembered is not null)
         {
-            var user = await RecheckAsync(remembered, username, secret);
-            if (user is not null)
+            var account = await RecheckAsync(cacheKey, remembered, username, secret);
+            if (account is not null)
             {
-                return await SucceedAsync(user, remembered.IsApiKey);
+                return await SucceedAsync(account, remembered.IsApiKey);
             }
 
             _cache.Remove(cacheKey);
+            _cache.Remove(cacheKey + AccountKeySuffix);
         }
 
         // Every check that is not of a credential remembered above takes one attempt, right or wrong, as the sign-in
@@ -146,10 +152,14 @@ public sealed class OpdsBasicAuthenticationHandler : AuthenticationHandler<Authe
 
         _cache.Set(
             cacheKey,
-            new RememberedCredential(isApiKey, verified.SecurityStamp),
+            new RememberedCredential(isApiKey, verified.Id, verified.SecurityStamp),
             new MemoryCacheEntryOptions { SlidingExpiration = RememberedFor, AbsoluteExpirationRelativeToNow = RememberedAtMost });
 
-        return await SucceedAsync(verified, isApiKey);
+        // Not remembered as an account yet: the next request reads it under a version taken first (see RecheckAsync).
+        var roles = await UserManager.GetRolesAsync(verified);
+        var verifiedAccount = new RememberedAccount(
+            verified.Id, verified.UserName, verified.Email, roles, _sessions.GetAccountVersion(verified.Id), verified.ApiKeyLastUsedAt);
+        return await SucceedAsync(verifiedAccount, isApiKey);
     }
 
     /// <summary>The one answer to a request without valid credentials on the OPDS routes, or the wait after too many.</summary>
@@ -189,19 +199,46 @@ public sealed class OpdsBasicAuthenticationHandler : AuthenticationHandler<Authe
         await Response.WriteAsJsonAsync(problem, options: null, contentType: "application/problem+json", Context.RequestAborted);
     }
 
-    /// <summary>Whether the credential remembered for this exact username and secret still stands for a live account.</summary>
-    private async Task<ApplicationUser?> RecheckAsync(RememberedCredential remembered, string username, string secret)
+    /// <summary>
+    /// The account the credential remembered for this exact username and secret stands for, if it is still a live
+    /// account: as remembered, unless the account has changed in the app since, or read again.
+    /// </summary>
+    private async Task<RememberedAccount?> RecheckAsync(string cacheKey, RememberedCredential remembered, string username, string secret)
+    {
+        var accountKey = cacheKey + AccountKeySuffix;
+        if (_cache.TryGetValue(accountKey, out RememberedAccount? account) && account is not null && account.IsCurrent(_sessions))
+        {
+            return account;
+        }
+
+        // Read before the account: a change committed before this is in what is read below, and one committed after
+        // it has moved the version on, so the account is read again on the next request.
+        var version = _sessions.GetAccountVersion(remembered.UserId);
+        var user = await RecheckUserAsync(remembered, username, secret);
+        if (user is null || !string.Equals(user.Id, remembered.UserId, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        account = new RememberedAccount(user.Id, user.UserName, user.Email, await UserManager.GetRolesAsync(user), version, user.ApiKeyLastUsedAt);
+        _cache.Set(accountKey, account, AuthSessionValidator.CacheDuration);
+        return account;
+    }
+
+    /// <summary>Whether the remembered credential still stands for a live account, read from the database.</summary>
+    private async Task<ApplicationUser?> RecheckUserAsync(RememberedCredential remembered, string username, string secret)
     {
         if (remembered.IsApiKey)
         {
-            var keyOwner = await _authService.GetUserByApiKeyAsync(secret);
+            var keyOwner = await AuthService.GetUserByApiKeyAsync(secret);
             return keyOwner is not null && IsNamed(keyOwner, username) ? keyOwner : null;
         }
 
-        var user = await _userManager.FindByNameAsync(username);
+        var userManager = UserManager;
+        var user = await userManager.FindByNameAsync(username);
         return user is { IsActive: true }
             && string.Equals(user.SecurityStamp, remembered.SecurityStamp, StringComparison.Ordinal)
-            && !await _userManager.IsLockedOutAsync(user)
+            && !await userManager.IsLockedOutAsync(user)
                 ? user
                 : null;
     }
@@ -217,7 +254,7 @@ public sealed class OpdsBasicAuthenticationHandler : AuthenticationHandler<Authe
         // Only a value that can be a key is looked up.
         if (secret.StartsWith(ApiKeys.Prefix, StringComparison.Ordinal) && secret.Length <= ApiKeys.MaxLength)
         {
-            var keyOwner = await _authService.GetUserByApiKeyAsync(secret);
+            var keyOwner = await AuthService.GetUserByApiKeyAsync(secret);
             if (keyOwner is not null && IsNamed(keyOwner, username))
             {
                 return (keyOwner, true);
@@ -245,29 +282,23 @@ public sealed class OpdsBasicAuthenticationHandler : AuthenticationHandler<Authe
             return (null, false);
         }
 
-        return (await _authService.VerifyPasswordAsync(username, secret, client), false);
+        return (await AuthService.VerifyPasswordAsync(username, secret, client), false);
     }
 
-    private bool IsNamed(ApplicationUser user, string username) =>
-        string.Equals(_userManager.NormalizeName(user.UserName), _userManager.NormalizeName(username), StringComparison.Ordinal);
+    private bool IsNamed(ApplicationUser user, string username)
+    {
+        var userManager = UserManager;
+        return string.Equals(userManager.NormalizeName(user.UserName), userManager.NormalizeName(username), StringComparison.Ordinal);
+    }
 
-    private async Task<AuthenticateResult> SucceedAsync(ApplicationUser user, bool isApiKey)
+    private async Task<AuthenticateResult> SucceedAsync(RememberedAccount account, bool isApiKey)
     {
         if (isApiKey)
         {
-            await ApiKeyAuthenticationHandler.RecordUseAsync(_dbContextFactory, user, Logger, Context.RequestAborted);
+            await ApiKeyAuthenticationHandler.RecordUseAsync(_dbContextFactory, account, Logger, Context.RequestAborted);
         }
 
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.NameIdentifier, user.Id),
-            new(ClaimTypes.Name, user.UserName ?? string.Empty),
-            new(ClaimTypes.Email, user.Email ?? string.Empty),
-            new("auth_method", isApiKey ? ApiKeys.AuthMethod : PasswordAuthMethod),
-        };
-        claims.AddRange((await _userManager.GetRolesAsync(user)).Select(role => new Claim(ClaimTypes.Role, role)));
-
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, Scheme.Name));
+        var principal = account.ToPrincipal(Scheme.Name, isApiKey ? ApiKeys.AuthMethod : PasswordAuthMethod);
         return AuthenticateResult.Success(new AuthenticationTicket(principal, Scheme.Name));
     }
 
@@ -306,6 +337,9 @@ public sealed class OpdsBasicAuthenticationHandler : AuthenticationHandler<Authe
     private static string Fingerprint(string username, string secret) =>
         Convert.ToHexString(HMACSHA256.HashData(CacheSalt, Encoding.UTF8.GetBytes(username + "\0" + secret)));
 
-    /// <summary>What was verified: the kind of credential and, for a password, the security stamp it passed under.</summary>
-    private sealed record RememberedCredential(bool IsApiKey, string? SecurityStamp);
+    /// <summary>
+    /// What was verified: the kind of credential, the account it stood for and, for a password, the security stamp it
+    /// passed under.
+    /// </summary>
+    private sealed record RememberedCredential(bool IsApiKey, string UserId, string? SecurityStamp);
 }

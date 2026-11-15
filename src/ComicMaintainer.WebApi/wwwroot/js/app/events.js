@@ -224,7 +224,8 @@
             // This ensures we don't miss updates that occurred while disconnected
             if (hasActiveJob && currentJobId) {
                 console.log(`SSE: Reconnected with active job ${currentJobId}, fetching current status...`);
-                pollJobStatusOnce(currentJobId);
+                // With the files done meanwhile, whose progress rows the stream did not deliver.
+                pollJobStatusOnce(currentJobId, { withResults: true });
             }
 
             if (reconnected) {

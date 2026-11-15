@@ -92,6 +92,10 @@ Keep the database on local block storage. SQLite over NFS or SMB risks corruptio
 - Real-time updates use Server-Sent Events rather than polling.
 - Responses are compressed with Brotli or gzip.
 - Read and unread views are cached per user, so marking comics read affects only that user.
+- File counts (the unmarked count, `/api/files/counts`, Scan Unmarked and the total of the file list) are kept up to date in memory as files change, so they do not scan the file table.
+- The folder list is grouped once and every page of it is served from that until the library changes.
+- An API key or an OPDS username and password is checked against the account at most every 30 seconds, as signed-in sessions are; a change on the Users page or in your account applies at once.
+- Following a batch job asks for its counts only. The outcome of every file is fetched once, when the page starts following the job or the real-time connection comes back.
 
 ## Comic Pages and Covers
 

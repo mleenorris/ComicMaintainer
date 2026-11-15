@@ -310,12 +310,17 @@
             }
         }
 
-        async function pollJobStatusOnce(jobId) {
-            // Poll job status once to catch up after SSE reconnection or to handle stuck jobs
+        // Poll job status once to catch up after SSE reconnection or to handle stuck jobs.
+        // withResults also fetches the outcome of every file (one entry per file of the
+        // job, megabytes for a whole library), to fill in the progress details: wanted
+        // when the page starts following a job or the stream comes back, not on every
+        // poll while the stream is down.
+        async function pollJobStatusOnce(jobId, { withResults = false } = {}) {
             console.log(`[JOB ${jobId}] Polling job status once...`);
-            
+
             try {
-                const response = await apiFetch(`/api/jobs/${jobId}`, { json: false });
+                const query = withResults ? '?include=results' : '';
+                const response = await apiFetch(`/api/jobs/${jobId}${query}`, { json: false });
                 if (!response.ok) {
                     console.warn(`[JOB ${jobId}] Could not fetch job status: ${response.status}`);
                     return;
@@ -388,8 +393,8 @@
             // must neither retitle nor close it.
             clearProgressModalTimers();
             
-            // Fetch initial job state to display immediately
-            await pollJobStatusOnce(jobId);
+            // Fetch initial job state, with the files already done, to display immediately
+            await pollJobStatusOnce(jobId, { withResults: true });
             
             // From this point on, all updates come from SSE events via handleJobUpdatedEvent
             // (events.js polls the job instead whenever the stream is down)
@@ -490,19 +495,9 @@
                 } else if (status.status === 'completed') {
                     // Job completed while we were away - show results
                     console.log(`[JOB RESUME] Job ${activeJobId} already completed`);
-                    let successCount = 0;
-                    let errorCount = 0;
-                    
-                    if (status.results && Array.isArray(status.results)) {
-                        for (const result of status.results) {
-                            if (result.success) {
-                                successCount++;
-                            } else {
-                                errorCount++;
-                            }
-                        }
-                    }
-                    
+                    // processed_items counts the files that succeeded, failed_items those that failed.
+                    const successCount = status.processed_items || 0;
+                    const errorCount = status.failed_items || 0;
                     const total = status.total_items || 0;
                     showMessage(`Batch processing completed: ${successCount} of ${total} files processed successfully${errorCount > 0 ? `, ${errorCount} failed` : ''}`, successCount > 0 ? 'success' : 'warning');
                     

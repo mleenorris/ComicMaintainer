@@ -49,6 +49,12 @@ public partial class FileStoreService
                 {
                     ForgetCommittedRow(stalePath);
                 }
+
+                // From here on every commit is mirrored, so the counts kept with the copy describe the table.
+                lock (_statusCountsLock)
+                {
+                    _mirrorsDatabase = true;
+                }
             }
             finally
             {
@@ -56,9 +62,10 @@ public partial class FileStoreService
             }
 
             MarkChanged();
-            var loadedCount = _files.Count;
-            var processedCount = _files.Values.Count(f => f.IsProcessed);
-            var duplicateCount = _files.Values.Count(f => f.IsDuplicate);
+            TryGetStatusCounts(out var counts);
+            var loadedCount = counts.Total;
+            var processedCount = counts.Processed;
+            var duplicateCount = counts.Duplicates;
 
             _logger.LogInformation("Loaded {FileCount} files from database ({ProcessedCount} processed, {DuplicateCount} duplicates)",
                 loadedCount, processedCount, duplicateCount);

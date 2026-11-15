@@ -425,10 +425,9 @@ public partial class FileStoreService
                 return files;
             case FileReadScopeKind.Folder:
                 // The same folder-key mapping the folder's file list uses.
-                var watchedDir = _settings.CurrentValue?.WatchedDirectory;
-                var directories = (await GetDistinctDirectoriesAsync(dbContext, cancellationToken))
-                    .Where(d => string.Equals(ComputeFolderKeyFromDirectory(d, watchedDir), scope.FolderKey, StringComparison.Ordinal))
-                    .ToList();
+                var directories = scope.FolderKey is null
+                    ? Array.Empty<string>()
+                    : await GetDirectoriesOfFolderAsync(dbContext, scope.FolderKey, cancellationToken);
                 return files.Where(f => directories.Contains(f.Directory));
             default:
                 var paths = scope.FilePaths ?? Array.Empty<string>();

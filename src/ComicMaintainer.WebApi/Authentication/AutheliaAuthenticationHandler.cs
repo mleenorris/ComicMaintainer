@@ -39,8 +39,6 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
     private static readonly EmailAddressAttribute EmailValidator = new();
 
     private readonly AutheliaSettings _autheliaSettings;
-    private readonly UserManager<ApplicationUser> _userManager;
-    private readonly RoleManager<ApplicationRole> _roleManager;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IAuthSessionValidator _sessions;
     private readonly IMemoryCache _cache;
@@ -56,13 +54,13 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
     private const int MaxReportedUntrustedPeers = 1000;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> ReportedUntrustedPeers = new();
 
+    // A handler is made for every request while Authelia is enabled. The account services (a DbContext and its
+    // stores) are resolved only when an account has to be read: a request whose account is remembered needs neither.
     public AutheliaAuthenticationHandler(
         IOptionsMonitor<AutheliaAuthenticationOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder,
         IOptions<AutheliaSettings> autheliaSettings,
-        UserManager<ApplicationUser> userManager,
-        RoleManager<ApplicationRole> roleManager,
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         IAuthSessionValidator sessions,
         IMemoryCache cache)
@@ -71,11 +69,13 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         _sessions = sessions;
         _cache = cache;
         _autheliaSettings = autheliaSettings.Value;
-        _userManager = userManager;
-        _roleManager = roleManager;
         _dbContextFactory = dbContextFactory;
         _logger = logger.CreateLogger<AutheliaAuthenticationHandler>();
     }
+
+    private UserManager<ApplicationUser> UserManager => Context.RequestServices.GetRequiredService<UserManager<ApplicationUser>>();
+
+    private RoleManager<ApplicationRole> RoleManager => Context.RequestServices.GetRequiredService<RoleManager<ApplicationRole>>();
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
@@ -238,7 +238,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         try
         {
             // Try to find existing user
-            var user = await _userManager.FindByNameAsync(username);
+            var user = await UserManager.FindByNameAsync(username);
             
             if (user != null)
             {
@@ -259,7 +259,10 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
                 
                 if (needsUpdate)
                 {
-                    await _userManager.UpdateAsync(user);
+                    await UserManager.UpdateAsync(user);
+
+                    // An account remembered by an API key or OPDS request carries its email.
+                    _sessions.Invalidate(user.Id);
                     _logger.LogInformation("Updated user information for Authelia user: {Username}", username);
                 }
                 
@@ -278,8 +281,8 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
             };
 
             // Generate a random password (won't be used since Authelia handles auth)
-            var randomPassword = GenerateRandomPassword(_userManager.Options.Password);
-            var result = await _userManager.CreateAsync(user, randomPassword);
+            var randomPassword = GenerateRandomPassword(UserManager.Options.Password);
+            var result = await UserManager.CreateAsync(user, randomPassword);
 
             if (!result.Succeeded)
             {
@@ -325,14 +328,14 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         }
 
         // Ensure the target role exists
-        if (!await _roleManager.RoleExistsAsync(targetRole))
+        if (!await RoleManager.RoleExistsAsync(targetRole))
         {
             _logger.LogWarning("Target role {Role} does not exist, using 'User' instead", targetRole);
             targetRole = "User";
         }
 
         // Check if user already has the correct role
-        var currentRoles = await _userManager.GetRolesAsync(user);
+        var currentRoles = await UserManager.GetRolesAsync(user);
         if (currentRoles.Contains(targetRole))
         {
             return currentRoles;
@@ -341,14 +344,14 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         // Remove all current roles and add the target role
         if (currentRoles.Any())
         {
-            await _userManager.RemoveFromRolesAsync(user, currentRoles);
+            await UserManager.RemoveFromRolesAsync(user, currentRoles);
         }
 
-        await _userManager.AddToRoleAsync(user, targetRole);
+        await UserManager.AddToRoleAsync(user, targetRole);
 
         // Tokens carry the roles they were issued with: a new security stamp ends the account's sessions
         // (session and stream tokens), so a demoted user cannot keep acting with the old role.
-        await _userManager.UpdateSecurityStampAsync(user);
+        await UserManager.UpdateSecurityStampAsync(user);
         _sessions.Invalidate(user.Id);
         _logger.LogInformation("Assigned role {Role} to Authelia user: {Username}", targetRole, user.UserName);
         return [targetRole];

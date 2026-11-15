@@ -61,6 +61,45 @@ public class OverviewServiceTests
             ReadFilePaths = readFilePaths.ToList()
         };
 
+    // Working out a series' read paths walks all its issues; only a series the user is reading needs them.
+    [Fact]
+    public async Task GetOverviewAsync_ReadsTheReadPathsOnlyOfSeriesTheUserIsReading()
+    {
+        var now = DateTime.UtcNow;
+        var factory = CreateFactory(out var options);
+        await using (var db = new ComicMaintainerDbContext(options))
+        {
+            db.ReadingProgresses.Add(new ReadingProgressEntity
+            {
+                UserId = "user-1",
+                ContentId = "/lib/reading/1.cbz",
+                CurrentPage = 4,
+                PercentComplete = 40,
+                LastReadAt = now.AddHours(-1),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var reading = Entry("reading", now.AddDays(-90), now.AddDays(-90), "/lib/reading/1.cbz", "/lib/reading/2.cbz");
+        var readingPathsAsked = 0;
+        reading.SetReadFilePaths(() =>
+        {
+            readingPathsAsked++;
+            return new List<string>();
+        });
+        var untouched = Entry("untouched", now.AddDays(-90), now.AddDays(-90), "/lib/untouched/1.cbz");
+        untouched.SetReadFilePaths(() => throw new InvalidOperationException("the read paths of an unread series were worked out"));
+        var service = CreateService(new[] { reading, untouched }, factory);
+
+        var result = await service.GetOverviewAsync("user-1");
+
+        var card = Assert.Single(result.ContinueReading);
+        Assert.Equal("reading", card.Id);
+        Assert.Equal("/lib/reading/1.cbz", card.ResumeFilePath);
+        Assert.Equal(4, card.ResumePage);
+        Assert.Equal(1, readingPathsAsked);
+    }
+
     [Fact]
     public async Task GetOverviewAsync_CardsKeepTheProviderDetails()
     {

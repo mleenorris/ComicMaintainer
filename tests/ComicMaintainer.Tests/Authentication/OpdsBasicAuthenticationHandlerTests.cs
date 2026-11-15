@@ -47,6 +47,8 @@ public sealed class OpdsBasicAuthenticationHandlerTests : IAsyncLifetime
     private readonly ManualClock _clock = new();
     private readonly AuthenticationAttemptLimiter _attempts = new();
     private readonly MemoryCache _cache;
+    private readonly Mock<IAuthSessionValidator> _sessions = new();
+    private readonly Dictionary<string, long> _accountVersions = new(StringComparer.Ordinal);
     private readonly ILoggerFactory _loggerFactory;
     private ServiceProvider _provider = null!;
     private IDbContextFactory<ComicMaintainerDbContext> _factory = null!;
@@ -60,6 +62,14 @@ public sealed class OpdsBasicAuthenticationHandlerTests : IAsyncLifetime
         // Names compare the way Identity normalizes them; a loose mock would call every two names equal.
         _userManager.Setup(u => u.NormalizeName(It.IsAny<string>())).Returns<string?>(name => name?.ToUpperInvariant()!);
         _userManager.Setup(u => u.GetRolesAsync(It.IsAny<ApplicationUser>())).ReturnsAsync(["User"]);
+
+        // Account versions as AuthSessionValidator keeps them: each Invalidate moves the account's on.
+        _sessions
+            .Setup(s => s.GetAccountVersion(It.IsAny<string>()))
+            .Returns((string userId) => _accountVersions.GetValueOrDefault(userId));
+        _sessions
+            .Setup(s => s.Invalidate(It.IsAny<string>()))
+            .Callback((string userId) => _accountVersions[userId] = _accountVersions.GetValueOrDefault(userId) + 1);
     }
 
     public async Task InitializeAsync()
@@ -67,6 +77,8 @@ public sealed class OpdsBasicAuthenticationHandlerTests : IAsyncLifetime
         await _connection.OpenAsync();
         var services = new ServiceCollection();
         services.AddDbContextFactory<ComicMaintainerDbContext>(o => o.UseSqlite(_connection));
+        services.AddSingleton(_ => _authService.Object);
+        services.AddSingleton(_ => _userManager.Object);
         _provider = services.BuildServiceProvider();
         _factory = _provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         await using var db = await _factory.CreateDbContextAsync();
@@ -405,8 +417,11 @@ public sealed class OpdsBasicAuthenticationHandlerTests : IAsyncLifetime
         var user = Account();
         AcceptPassword(user);
         Assert.True((await AuthenticateAsync(CreateContext(Credentials()))).Succeeded);
-        Assert.Equal(1, _cache.Count);
+        Assert.True((await AuthenticateAsync(CreateContext(Credentials()))).Succeeded);
+        Assert.Equal(2, _cache.Count);
 
+        // Each of these changes, made in the app, invalidates the account.
+        _sessions.Object.Invalidate(user.Id);
         switch (change)
         {
             case "disabled":
@@ -434,13 +449,61 @@ public sealed class OpdsBasicAuthenticationHandlerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Authenticate_ARememberedKey_IsLookedUpEachTimeAndStopsWorkingWhenRevoked()
+    public async Task Authenticate_ARememberedPassword_IsNotReadAgainWithinTheCacheDuration()
+    {
+        AcceptPassword(Account());
+        for (var i = 0; i < 5; i++)
+        {
+            Assert.True((await AuthenticateAsync(CreateContext(Credentials()))).Succeeded);
+        }
+
+        // Verified on the first request, read again on the second, remembered from then on.
+        _userManager.Verify(u => u.FindByNameAsync(Username), Times.Once);
+        _userManager.Verify(u => u.GetRolesAsync(It.IsAny<ApplicationUser>()), Times.Exactly(2));
+
+        _clock.Advance(AuthSessionValidator.CacheDuration + TimeSpan.FromSeconds(1));
+        Assert.True((await AuthenticateAsync(CreateContext(Credentials()))).Succeeded);
+        _userManager.Verify(u => u.FindByNameAsync(Username), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task Authenticate_ARememberedPassword_CarriesTheRolesOfTheAccountAfterAChange()
+    {
+        var user = Account();
+        AcceptPassword(user);
+        Assert.True((await AuthenticateAsync(CreateContext(Credentials()))).Succeeded);
+        Assert.True((await AuthenticateAsync(CreateContext(Credentials()))).Succeeded);
+
+        _userManager.Setup(u => u.GetRolesAsync(user)).ReturnsAsync(["ReadOnly"]);
+        _sessions.Object.Invalidate(user.Id);
+
+        var result = await AuthenticateAsync(CreateContext(Credentials()));
+
+        Assert.Equal("ReadOnly", Assert.Single(result.Principal!.FindAll(ClaimTypes.Role)).Value);
+    }
+
+    [Fact]
+    public async Task Authenticate_ARememberedCredential_ResolvesNoAccountServices()
+    {
+        AcceptPassword(Account());
+        Assert.True((await AuthenticateAsync(CreateContext(Credentials()))).Succeeded);
+        Assert.True((await AuthenticateAsync(CreateContext(Credentials()))).Succeeded);
+
+        using var empty = new ServiceCollection().BuildServiceProvider();
+        var handler = await CreateHandlerAsync(CreateContext(Credentials()), requestServices: empty);
+
+        Assert.True((await handler.AuthenticateAsync()).Succeeded);
+    }
+
+    [Fact]
+    public async Task Authenticate_ARememberedKey_IsRememberedAsItsAccountAndStopsWorkingWhenRevoked()
     {
         var user = await SeedOwnerAsync();
         _authService.Setup(a => a.GetUserByApiKeyAsync(Key)).ReturnsAsync(user);
         // The account itself is fine, so a key wrongly remembered as a password would pass the password recheck.
         _userManager.Setup(u => u.FindByNameAsync(Username)).ReturnsAsync(user);
         var credentials = Basic($"{Username}:{Key}");
+        Assert.True((await AuthenticateAsync(CreateContext(credentials))).Succeeded);
         Assert.True((await AuthenticateAsync(CreateContext(credentials))).Succeeded);
 
         var remembered = await AuthenticateAsync(CreateContext(credentials));
@@ -449,7 +512,9 @@ public sealed class OpdsBasicAuthenticationHandlerTests : IAsyncLifetime
         _authService.Verify(a => a.GetUserByApiKeyAsync(Key), Times.Exactly(2));
         Assert.Equal(ApiKeys.AuthMethod, remembered.Principal!.FindFirstValue("auth_method"));
 
+        // Revoking the key invalidates the account.
         _authService.Setup(a => a.GetUserByApiKeyAsync(Key)).ReturnsAsync(default(ApplicationUser?));
+        _sessions.Object.Invalidate(user.Id);
 
         var result = await AuthenticateAsync(CreateContext(credentials));
 
@@ -664,19 +729,19 @@ public sealed class OpdsBasicAuthenticationHandlerTests : IAsyncLifetime
     }
 
     private async Task<OpdsBasicAuthenticationHandler> CreateHandlerAsync(
-        HttpContext context, IDbContextFactory<ComicMaintainerDbContext>? factory = null)
+        HttpContext context, IDbContextFactory<ComicMaintainerDbContext>? factory = null, IServiceProvider? requestServices = null)
     {
         var handler = new OpdsBasicAuthenticationHandler(
             new TestOptionsMonitor<AuthenticationSchemeOptions>(new AuthenticationSchemeOptions()),
             _loggerFactory,
             UrlEncoder.Default,
-            _authService.Object,
-            _userManager.Object,
             factory ?? _factory,
             ClientAddressResolver.Direct,
             _attempts,
             _cache,
+            _sessions.Object,
             Options.Create(new AutheliaSettings { Enabled = _autheliaEnabled }));
+        context.RequestServices = requestServices ?? _provider;
         await handler.InitializeAsync(
             new AuthenticationScheme(OpdsBasicAuthenticationHandler.SchemeName, displayName: null, typeof(OpdsBasicAuthenticationHandler)),
             context);

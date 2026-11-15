@@ -28,10 +28,12 @@ jobs:
     steps:
       # Claude pushes with the Claude GitHub App's token. Persisted credentials would put this workflow's token
       # (contents: read) in the git config, and git push would use it and be refused as github-actions[bot].
+      # Full history, so a merge of the base branch into a pull request finds the merge base (a shallow clone has
+      # none, and the action keeps a full checkout full).
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       # So Claude can build and test what it changes (see the allowed commands below).
@@ -93,9 +95,11 @@ jobs:
           # - The pull request's review comments and reviews can be read with gh api (the inline comments,
           #   CodeQL's included, are not in what the action gives Claude). The patterns name this pull request.
           # - Claude may build and test (.NET and npm are set up above), so a fix it pushes has been checked.
+          # - Claude may fetch from origin and merge, to bring a pull request up to date with its base branch and
+          #   resolve the conflicts (the action allows git add, commit and push, but not fetch or merge).
           # - Claude is told where the code scanning alerts fetched above are, and how to check a change.
           claude_args: >-
-            --allowedTools "Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number || github.event.pull_request.number }}/comments:*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number || github.event.pull_request.number }}/reviews:*),Bash(dotnet restore:*),Bash(dotnet build:*),Bash(dotnet test:*),Bash(npm ci),Bash(npm test:*)"
+            --allowedTools "Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number || github.event.pull_request.number }}/comments:*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number || github.event.pull_request.number }}/reviews:*),Bash(dotnet restore:*),Bash(dotnet build:*),Bash(dotnet test:*),Bash(npm ci),Bash(npm test:*),Bash(git fetch origin:*),Bash(git merge:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*)"
             --append-system-prompt "On a pull request, its open code scanning alerts (CodeQL and Trivy findings),
             as they stood when this run started, are in .claude-context/code-scanning-alerts.jsonl: one JSON object
             per line with the alert number, url, tool, rule, severity, description, path, start_line, end_line and
@@ -105,5 +109,8 @@ jobs:
             by an image rebuild or in Dockerfile.dotnet, not in the code.
             Before you push a change, build and test it: dotnet build -warnaserror, then
             dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj (with --filter while iterating),
-            and npm ci then npm test when you changed JavaScript. Say in your reply what you ran and its result."
+            and npm ci then npm test when you changed JavaScript. Say in your reply what you ran and its result.
+            To resolve a pull request's merge conflicts, run git fetch origin <base branch>, then
+            git merge origin/<base branch>, resolve each conflicted file (in CHANGELOG.md keep the entries of both
+            sides), build and test, then commit the merge and push it. Never rebase: a force push is refused."
 

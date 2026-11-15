@@ -210,7 +210,7 @@ public class HtmlVersionInjectionMiddlewareTests : IDisposable
         await mw.InvokeAsync(first);
 
         var revisit = CreateContext("/");
-        revisit.Request.Headers.IfNoneMatch = string.Format(System.Globalization.CultureInfo.InvariantCulture, ifNoneMatch, first.Response.Headers.ETag.ToString());
+        revisit.Request.Headers.IfNoneMatch = string.Format(System.Globalization.CultureInfo.InvariantCulture, ifNoneMatch, first.Response.Headers.ETag);
         await mw.InvokeAsync(revisit);
 
         Assert.Equal(StatusCodes.Status304NotModified, revisit.Response.StatusCode);

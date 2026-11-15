@@ -20,6 +20,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using static ComicMaintainer.Tests.Helpers.ServedContent;
 
 namespace ComicMaintainer.Tests.Controllers;
 
@@ -66,7 +67,7 @@ public sealed class OpdsControllerTests : IDisposable
         TestIO.TryDeleteDirectory(_root);
     }
 
-    private OpdsController CreateController(string? userId = "reader")
+    private OpdsController CreateController(string? userId = "reader", OpdsImageConverter? converter = null)
     {
         var controller = new OpdsController(
             _library.Object,
@@ -75,7 +76,7 @@ public sealed class OpdsControllerTests : IDisposable
             _reader.Object,
             _covers.Object,
             _progress.Object,
-            new OpdsImageConverter(),
+            converter ?? new OpdsImageConverter(),
             _cache,
             new TestOptionsMonitor<AppSettings>(_settings),
             NullLogger<OpdsController>.Instance);
@@ -95,7 +96,7 @@ public sealed class OpdsControllerTests : IDisposable
     private void SetupPage(byte[] data, string contentType, params string[] names)
     {
         _reader.Setup(r => r.GetPageNamesAsync(It.IsAny<string>())).ReturnsAsync(names.ToList());
-        _reader.Setup(r => r.GetPageAsync(It.IsAny<string>(), 1)).ReturnsAsync((data, contentType));
+        _reader.Setup(r => r.OpenPageAsync(It.IsAny<string>(), 1, It.IsAny<CancellationToken>())).ReturnsAsync(() => Page(data, contentType));
     }
 
     [Fact]
@@ -104,10 +105,10 @@ public sealed class OpdsControllerTests : IDisposable
         var jpeg = Image(MagickFormat.Jpeg);
         SetupPage(jpeg, "image/jpeg", "p1.jpg", "p2.jpg");
 
-        var file = Assert.IsType<FileContentResult>(await CreateController().Page(Id, 0, default));
+        var file = Assert.IsType<FileStreamResult>(await CreateController().Page(Id, 0, default));
 
         Assert.Equal("image/jpeg", file.ContentType);
-        Assert.Equal(jpeg, file.FileContents);
+        Assert.Equal(jpeg, Bytes(file));
     }
 
     [Fact]
@@ -116,10 +117,10 @@ public sealed class OpdsControllerTests : IDisposable
         var webp = Image(MagickFormat.WebP);
         SetupPage(webp, "image/webp", "p1.webp", "p2.webp");
 
-        var file = Assert.IsType<FileContentResult>(await CreateController().Page(Id, 0, default));
+        var file = Assert.IsType<FileStreamResult>(await CreateController().Page(Id, 0, default));
 
         Assert.Equal("image/jpeg", file.ContentType);
-        Assert.Equal(MagickFormat.Jpeg, new MagickImageInfo(file.FileContents).Format);
+        Assert.Equal(MagickFormat.Jpeg, new MagickImageInfo(Bytes(file)).Format);
     }
 
     [Fact]
@@ -128,10 +129,10 @@ public sealed class OpdsControllerTests : IDisposable
         var png = Image(MagickFormat.Png);
         SetupPage(png, "image/png", "p1.png", "p2.jpg");
 
-        var file = Assert.IsType<FileContentResult>(await CreateController().Page(Id, 0, default));
+        var file = Assert.IsType<FileStreamResult>(await CreateController().Page(Id, 0, default));
 
         Assert.Equal("image/jpeg", file.ContentType);
-        Assert.Equal(MagickFormat.Jpeg, new MagickImageInfo(file.FileContents).Format);
+        Assert.Equal(MagickFormat.Jpeg, new MagickImageInfo(Bytes(file)).Format);
     }
 
     [Fact]
@@ -140,10 +141,10 @@ public sealed class OpdsControllerTests : IDisposable
         var png = Image(MagickFormat.Png);
         SetupPage(png, "image/png", "p1.png", "p2.png");
 
-        var file = Assert.IsType<FileContentResult>(await CreateController().Page(Id, 0, default));
+        var file = Assert.IsType<FileStreamResult>(await CreateController().Page(Id, 0, default));
 
         Assert.Equal("image/png", file.ContentType);
-        Assert.Equal(png, file.FileContents);
+        Assert.Equal(png, Bytes(file));
     }
 
     [Theory]
@@ -166,7 +167,7 @@ public sealed class OpdsControllerTests : IDisposable
 
         var content = Assert.IsType<ContentResult>(await CreateController().Series("saga"));
         var stream = XDocument.Parse(content.Content!).Root!.Elements(Atom + "entry").Single().Elements(Atom + "link").Single(l => (string?)l.Attribute("rel") == StreamRel);
-        var page = Assert.IsType<FileContentResult>(await CreateController().Page(Id, 0, default));
+        var page = Assert.IsType<FileStreamResult>(await CreateController().Page(Id, 0, default));
 
         Assert.Equal(expected, stream.Attribute("type")!.Value);
         Assert.Equal(expected, page.ContentType);
@@ -178,16 +179,16 @@ public sealed class OpdsControllerTests : IDisposable
         byte[] notAnImage = [1, 2, 3];
         SetupPage(notAnImage, "image/webp", "p1.webp");
 
-        var file = Assert.IsType<FileContentResult>(await CreateController().Page(Id, 0, default));
+        var file = Assert.IsType<FileStreamResult>(await CreateController().Page(Id, 0, default));
 
         Assert.Equal("image/webp", file.ContentType);
-        Assert.Equal(notAnImage, file.FileContents);
+        Assert.Equal(notAnImage, Bytes(file));
     }
 
     [Fact]
     public async Task APageReadTheReaderCannotProduceIsNotFoundAndNotRecorded()
     {
-        _reader.Setup(r => r.GetPageAsync(It.IsAny<string>(), 1)).ReturnsAsync(((byte[] Data, string ContentType)?)null);
+        _reader.Setup(r => r.OpenPageAsync(It.IsAny<string>(), 1, It.IsAny<CancellationToken>())).ReturnsAsync(default(ComicPageStream?));
 
         Assert.Equal(StatusCodes.Status404NotFound, await StatusOf(CreateController().Page(Id, 0, default)));
         _progress.Verify(p => p.RecordPageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -204,7 +205,7 @@ public sealed class OpdsControllerTests : IDisposable
     [Fact]
     public async Task APageOverTheLimitsAnswers422AndIsNotRecorded()
     {
-        _reader.Setup(r => r.GetPageAsync(It.IsAny<string>(), 1)).ThrowsAsync(new ArchiveLimitExceededException("too big"));
+        _reader.Setup(r => r.OpenPageAsync(It.IsAny<string>(), 1, It.IsAny<CancellationToken>())).ThrowsAsync(new ArchiveLimitExceededException("too big"));
 
         Assert.Equal(StatusCodes.Status422UnprocessableEntity, await StatusOf(CreateController().Page(Id, 0, default)));
         _progress.Verify(p => p.RecordPageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -246,7 +247,7 @@ public sealed class OpdsControllerTests : IDisposable
         _progress.Setup(p => p.RecordPageAsync("reader", _comic, 1, 1, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new SqliteException("busy", 5));
 
-        Assert.IsType<FileContentResult>(await CreateController().Page(Id, 0, default));
+        Assert.IsType<FileStreamResult>(await CreateController().Page(Id, 0, default));
     }
 
     [Fact]
@@ -256,7 +257,7 @@ public sealed class OpdsControllerTests : IDisposable
         _progress.Setup(p => p.RecordPageAsync("reader", _comic, 1, 1, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new DbUpdateException("conflict"));
 
-        Assert.IsType<FileContentResult>(await CreateController().Page(Id, 0, default));
+        Assert.IsType<FileStreamResult>(await CreateController().Page(Id, 0, default));
     }
 
     [Fact]
@@ -264,36 +265,88 @@ public sealed class OpdsControllerTests : IDisposable
     {
         SetupPage([1], "image/jpeg", "p1.jpg");
 
-        Assert.IsType<FileContentResult>(await CreateController(userId: null).Page(Id, 0, default));
+        Assert.IsType<FileStreamResult>(await CreateController(userId: null).Page(Id, 0, default));
         _progress.Verify(p => p.RecordPageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public async Task CoverEdgeCases()
     {
-        _covers.Setup(c => c.GetValidator(It.IsAny<string>())).Returns(default(FileCoverValidator?));
+        _covers.Setup(c => c.GetValidator(It.IsAny<string>(), FileCoverFormat.Jpeg)).Returns(default(FileCoverValidator?));
         Assert.Equal(StatusCodes.Status404NotFound, await StatusOf(CreateController().Cover(Id, default)));
 
-        _covers.Setup(c => c.GetValidator(It.IsAny<string>())).Returns(new FileCoverValidator(4, DateTimeOffset.UtcNow, "orig"));
-        _covers.Setup(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(default(FileCoverCacheEntry?));
+        _covers.Setup(c => c.GetValidator(It.IsAny<string>(), FileCoverFormat.Jpeg)).Returns(new FileCoverValidator(4, DateTimeOffset.UtcNow, "orig"));
+        _covers.Setup(c => c.OpenAsync(It.IsAny<string>(), FileCoverFormat.Jpeg, It.IsAny<CancellationToken>())).ReturnsAsync(default(FileCoverStream?));
         Assert.Equal(StatusCodes.Status404NotFound, await StatusOf(CreateController().Cover(Id, default)));
 
-        _covers.Setup(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new ArchiveLimitExceededException("too big"));
+        _covers.Setup(c => c.OpenAsync(It.IsAny<string>(), FileCoverFormat.Jpeg, It.IsAny<CancellationToken>())).ThrowsAsync(new ArchiveLimitExceededException("too big"));
         Assert.Equal(StatusCodes.Status422UnprocessableEntity, await StatusOf(CreateController().Cover(Id, default)));
     }
 
     [Fact]
-    public async Task AWebpCoverIsServedAsJpeg()
+    public async Task ACoverIsTheJpegTheCoverCacheKeepsForOpds()
     {
-        var webp = Image(MagickFormat.WebP);
-        _covers.Setup(c => c.GetValidator(It.IsAny<string>())).Returns(new FileCoverValidator(4, DateTimeOffset.UtcNow, "webp-w480-q80"));
-        _covers.Setup(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new FileCoverCacheEntry(webp, "image/webp", DateTimeOffset.UtcNow, 4, "webp-w480-q80"));
+        // The cover cache keeps a JPEG beside the WebP thumbnail the web UI shows; the feed sends that, with its own
+        // tag, and converts nothing per request.
+        var jpeg = Image(MagickFormat.Jpeg);
+        var validator = new FileCoverValidator(4, DateTimeOffset.UtcNow, "jpeg-w480-q80");
+        _covers.Setup(c => c.GetValidator(_comic, FileCoverFormat.Jpeg)).Returns(validator);
+        _covers.Setup(c => c.OpenAsync(_comic, FileCoverFormat.Jpeg, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Cover(new FileCoverCacheEntry(jpeg, "image/jpeg", validator.SourceLastModified, 4, validator.Variant)));
+        var controller = CreateController();
 
-        var file = Assert.IsType<FileContentResult>(await CreateController().Cover(Id, default));
+        var file = Assert.IsType<FileStreamResult>(await controller.Cover(Id, default));
 
         Assert.Equal("image/jpeg", file.ContentType);
+        Assert.Equal(jpeg, Bytes(file));
+        Assert.Equal(ComicReaderController.BuildCoverETag(validator), controller.Response.Headers.ETag.ToString());
+        _covers.Verify(c => c.OpenAsync(It.IsAny<string>(), FileCoverFormat.Configured, It.IsAny<CancellationToken>()), Times.Never);
         _progress.Verify(p => p.RecordPageAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AConvertedPageIsConvertedOnceAndThenServedFromMemory()
+    {
+        var webp = Image(MagickFormat.WebP);
+        SetupPage(webp, "image/webp", "p1.webp", "p2.webp");
+        using var converter = new OpdsImageConverter();
+
+        var first = Assert.IsType<FileStreamResult>(await CreateController(converter: converter).Page(Id, 0, default));
+        var second = Assert.IsType<FileStreamResult>(await CreateController(converter: converter).Page(Id, 0, default));
+
+        Assert.Equal(1, converter.ConversionCount);
+        Assert.Equal(Bytes(first), Bytes(second));
+        Assert.Equal("image/jpeg", second.ContentType);
+        _reader.Verify(r => r.OpenPageAsync(It.IsAny<string>(), 1, It.IsAny<CancellationToken>()), Times.Once);
+        // Served from memory or not, the page counts as read.
+        _progress.Verify(p => p.RecordPageAsync("reader", _comic, 1, 2, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task AConvertedPageIsConvertedAgainOnceTheFileChanges()
+    {
+        var webp = Image(MagickFormat.WebP);
+        SetupPage(webp, "image/webp", "p1.webp", "p2.webp");
+        using var converter = new OpdsImageConverter();
+
+        await CreateController(converter: converter).Page(Id, 0, default);
+        File.SetLastWriteTimeUtc(_comic, File.GetLastWriteTimeUtc(_comic).AddMinutes(1));
+        await CreateController(converter: converter).Page(Id, 0, default);
+
+        Assert.Equal(2, converter.ConversionCount);
+    }
+
+    [Fact]
+    public async Task APageServedAsItIsIsStreamedFromTheReader()
+    {
+        var jpeg = Image(MagickFormat.Jpeg);
+        var content = new MemoryStream(jpeg);
+        _reader.Setup(r => r.GetPageNamesAsync(It.IsAny<string>())).ReturnsAsync(["p1.jpg", "p2.jpg"]);
+        _reader.Setup(r => r.OpenPageAsync(It.IsAny<string>(), 1, It.IsAny<CancellationToken>())).ReturnsAsync(new ComicPageStream(content, "image/jpeg"));
+
+        var file = Assert.IsType<FileStreamResult>(await CreateController().Page(Id, 0, default));
+
+        Assert.Same(content, file.FileStream);
     }
 
     [Fact]
@@ -609,7 +662,7 @@ public sealed class OpdsControllerTests : IDisposable
     public async Task ACoverTheClientAlreadyHasIsNotSentAgain()
     {
         var validator = new FileCoverValidator(4, DateTimeOffset.UtcNow, "orig");
-        _covers.Setup(c => c.GetValidator(_comic)).Returns(validator);
+        _covers.Setup(c => c.GetValidator(_comic, FileCoverFormat.Jpeg)).Returns(validator);
         var etag = ComicReaderController.BuildCoverETag(validator);
         var controller = CreateController();
         controller.Request.Headers.IfNoneMatch = etag;
@@ -619,7 +672,7 @@ public sealed class OpdsControllerTests : IDisposable
         Assert.Equal(StatusCodes.Status304NotModified, status);
         Assert.Equal(etag, controller.Response.Headers.ETag.ToString());
         Assert.Equal("private, max-age=3600", controller.Response.Headers.CacheControl.ToString());
-        _covers.Verify(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _covers.Verify(c => c.OpenAsync(It.IsAny<string>(), It.IsAny<FileCoverFormat>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -656,7 +709,7 @@ public sealed class OpdsControllerTests : IDisposable
 
         Assert.Equal(StatusCodes.Status304NotModified, status);
         Assert.Equal(etag, controller.Response.Headers.ETag.ToString());
-        _reader.Verify(r => r.GetPageAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+        _reader.Verify(r => r.OpenPageAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         _progress.Verify(p => p.RecordPageAsync("reader", _comic, 1, 1, It.IsAny<CancellationToken>()), Times.Once);
         _fileStore.Verify(s => s.MarkFileReadAsync(_comic, true, It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -702,7 +755,7 @@ public sealed class OpdsControllerTests : IDisposable
         Assert.Equal(StatusCodes.Status404NotFound, await StatusOf(CreateController().Cover(Id, default)));
         Assert.Equal(StatusCodes.Status404NotFound, await StatusOf(CreateController().Page(Id, 0, default)));
         Assert.Equal(StatusCodes.Status404NotFound, await StatusOf(CreateController().Download(Id, default)));
-        _covers.Verify(c => c.GetValidator(It.IsAny<string>()), Times.Never);
+        _covers.Verify(c => c.GetValidator(It.IsAny<string>(), FileCoverFormat.Jpeg), Times.Never);
         _reader.Verify(r => r.GetPageNamesAsync(It.IsAny<string>()), Times.Never);
     }
 

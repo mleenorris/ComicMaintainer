@@ -98,8 +98,13 @@ public partial class SeriesLibraryService : ISeriesLibraryService
         }
         // Image URL is rendered as a relative path so the front-end can prefix
         // it with the configured BasePath via apiUrl(), the same way every
-        // other endpoint reference is built.
-        return $"/api/series-images/{Uri.EscapeDataString(accumulator.ImageNormalizedKey)}";
+        // other endpoint reference is built. The stored file's content hash
+        // versions it, so a browser may keep the image for as long as the URL
+        // stays the same (see SeriesImagesController.Get).
+        var url = $"/api/series-images/{Uri.EscapeDataString(accumulator.ImageNormalizedKey)}";
+        return SeriesImageVariants.ContentVersionOf(accumulator.ImageFileName) is { } version
+            ? $"{url}?v={version}"
+            : url;
     }
 }
 

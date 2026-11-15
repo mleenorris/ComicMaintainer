@@ -41,8 +41,8 @@ public class ComicReaderControllerCoverTests : IDisposable
             .Setup(c => c.GetValidator(_file))
             .Returns(new FileCoverValidator(sourceLength, _mtime, variant));
         _coverCache
-            .Setup(c => c.GetOrCreateAsync(_file, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new FileCoverCacheEntry(new byte[] { 5, 6, 7 }, "image/webp", _mtime, sourceLength, variant));
+            .Setup(c => c.OpenAsync(_file, FileCoverFormat.Configured, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new FileCoverStream(new MemoryStream(new byte[] { 5, 6, 7 }), "image/webp", new FileCoverValidator(sourceLength, _mtime, variant)));
     }
 
     private ComicReaderController BuildController(string? ifNoneMatch = null)
@@ -70,7 +70,7 @@ public class ComicReaderControllerCoverTests : IDisposable
     {
         var controller = BuildController();
         var result = await controller.GetCover(_file);
-        var file = Assert.IsType<FileContentResult>(result);
+        var file = Assert.IsType<FileStreamResult>(result);
         Assert.Equal("image/webp", file.ContentType);
         return controller.Response.Headers.ETag.ToString();
     }
@@ -78,7 +78,7 @@ public class ComicReaderControllerCoverTests : IDisposable
     private static int? StatusOf(IActionResult result) => result switch
     {
         StatusCodeResult s => s.StatusCode,
-        FileContentResult => 200,
+        FileStreamResult => 200,
         ObjectResult o => o.StatusCode,
         _ => null,
     };
@@ -162,7 +162,7 @@ public class ComicReaderControllerCoverTests : IDisposable
 
         Assert.Equal(StatusCodes.Status304NotModified, StatusOf(result));
         _coverCache.Verify(c => c.GetValidator(_file), Times.Once);
-        _coverCache.Verify(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _coverCache.Verify(c => c.OpenAsync(It.IsAny<string>(), It.IsAny<FileCoverFormat>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -182,8 +182,8 @@ public class ComicReaderControllerCoverTests : IDisposable
         // old file.
         var newer = _mtime.AddMinutes(5);
         _coverCache.Setup(c => c.GetValidator(_file)).Returns(new FileCoverValidator(3, _mtime, "orig"));
-        _coverCache.Setup(c => c.GetOrCreateAsync(_file, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new FileCoverCacheEntry(new byte[] { 1 }, "image/png", newer, 10, "orig"));
+        _coverCache.Setup(c => c.OpenAsync(_file, FileCoverFormat.Configured, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileCoverStream(new MemoryStream(new byte[] { 1 }), "image/png", new FileCoverValidator(10, newer, "orig")));
         var controller = BuildController();
 
         var result = await controller.GetCover(_file);
@@ -218,13 +218,13 @@ public class ComicReaderControllerCoverTests : IDisposable
 
         var notFound = Assert.IsType<NotFoundObjectResult>(result);
         Assert.Equal("File not found", JObject.FromObject(notFound.Value!)["error"]!.ToString());
-        _coverCache.Verify(c => c.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _coverCache.Verify(c => c.OpenAsync(It.IsAny<string>(), It.IsAny<FileCoverFormat>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public async Task GetCover_ArchiveOverTheReadLimits_Returns422WithTheReason()
     {
-        _coverCache.Setup(c => c.GetOrCreateAsync(_file, It.IsAny<CancellationToken>()))
+        _coverCache.Setup(c => c.OpenAsync(_file, FileCoverFormat.Configured, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ArchiveLimitExceededException("Archive entry 'p1.png' is 2 GiB uncompressed, over the 100 MiB limit."));
 
         var result = await BuildController().GetCover(_file);

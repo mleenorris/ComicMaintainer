@@ -137,13 +137,16 @@ public class ComicReaderController : ControllerBase
     /// keep the pages a reader has seen, and an archive's sorted page list is
     /// cached by <see cref="IComicReaderService"/>, so a page costs one entry
     /// read. Revalidation is answered with 304 from the file's length and
-    /// last-write time, without opening the archive.
+    /// last-write time, without opening the archive. A page stored uncompressed
+    /// in a CBZ is streamed from the archive file; and when the browser drops the
+    /// request (a prefetch the reader no longer needs) the read stops.
     /// </remarks>
     /// <param name="filePath">Path to the comic file</param>
     /// <param name="page">Page number (1-based index)</param>
+    /// <param name="cancellationToken">Cancelled when the client goes away.</param>
     [HttpGet("page")]
     [FailureMessage("Error reading page")]
-    public async Task<IActionResult> GetPage([FromQuery] string filePath, [FromQuery] int page = 1)
+    public async Task<IActionResult> GetPage([FromQuery] string filePath, [FromQuery] int page = 1, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(filePath))
         {
@@ -180,20 +183,21 @@ public class ComicReaderController : ControllerBase
                 return StatusCode(StatusCodes.Status304NotModified);
             }
 
-            var result = await _readerService.GetPageAsync(resolvedPath, page);
+            var result = await _readerService.OpenPageAsync(resolvedPath, page, cancellationToken);
 
             if (result == null)
             {
                 return NotFound(new { error = "Page not found" });
             }
 
-            var (data, contentType) = result.Value;
+            var (content, contentType) = result.Value;
 
             Response.Headers.ETag = etag;
             Response.Headers.CacheControl = PrivateCacheControl;
             Response.Headers.LastModified = new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero).ToString("R");
 
-            return File(data, contentType);
+            // The result disposes the stream once it is sent (or the client goes away).
+            return File(content, contentType);
         }
         catch (ArchiveLimitExceededException ex)
         {
@@ -254,19 +258,19 @@ public class ComicReaderController : ControllerBase
                 return StatusCode(StatusCodes.Status304NotModified);
             }
 
-            var entry = await _coverCache.GetOrCreateAsync(resolvedPath, cancellationToken);
-            if (entry is null)
+            var cover = await _coverCache.OpenAsync(resolvedPath, FileCoverFormat.Configured, cancellationToken);
+            if (cover is null)
             {
                 return NotFound(new { error = "Cover not available" });
             }
 
             // Label the bytes with the version they were generated from, which is
             // newer than the validator above if the file changed in between.
-            var served = entry.Value.Validator;
+            var served = cover.Value.Validator;
             Response.Headers.ETag = BuildCoverETag(served);
             Response.Headers.CacheControl = PrivateCacheControl;
             Response.Headers.LastModified = served.SourceLastModified.ToString("R");
-            return File(entry.Value.Data, entry.Value.ContentType);
+            return File(cover.Value.Content, cover.Value.ContentType);
         }
         catch (ArchiveLimitExceededException ex)
         {

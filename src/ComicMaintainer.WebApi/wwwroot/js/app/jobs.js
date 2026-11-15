@@ -241,8 +241,8 @@
                 if (currentSeriesDetailId && typeof loadSeriesIssues === 'function') {
                     await loadSeriesIssues(currentSeriesDetailId, true, { immediate: true });
                 }
-                if (typeof loadActiveLibraryView === 'function') {
-                    await loadActiveLibraryView({ refresh: true, keepLoaded: true });
+                if (typeof refreshActiveLibraryView === 'function') {
+                    await refreshActiveLibraryView();
                 }
             } catch (err) {
                 console.error('clearSelectedProcessedStatus failed', err);
@@ -502,7 +502,7 @@
                     showMessage(`Batch processing completed: ${successCount} of ${total} files processed successfully${errorCount > 0 ? `, ${errorCount} failed` : ''}`, successCount > 0 ? 'success' : 'warning');
                     
                     // Refresh file list to show updated status
-                    await loadActiveLibraryView({ refresh: true });
+                    await refreshActiveLibraryView();
                 } else if (status.status === 'failed') {
                     // Job failed while we were away
                     console.error(`[JOB RESUME] Job ${activeJobId} already failed`);
@@ -520,7 +520,7 @@
                     showMessage(
                         `Batch processing was interrupted by a server restart after ${processed} of ${total} files. Re-run it to process the rest.`,
                         'warning');
-                    await loadActiveLibraryView({ refresh: true });
+                    await refreshActiveLibraryView();
                 }
             } catch (error) {
                 if (error.authHandled) return;
@@ -949,7 +949,7 @@
                 // A deleted file must not stay selected for the next batch
                 // action.
                 toggleFileSelection(filepath, false);
-                await loadActiveLibraryView({ refresh: true });
+                await refreshActiveLibraryView();
             } catch (error) {
                 showMessage('Failed to delete file: ' + error.message, 'error');
             }
@@ -967,7 +967,7 @@
                 await apiFetch(`/api/files/${encodedPath}/metadata`, { method: 'DELETE' });
 
                 showMessage('Metadata removed and file marked unprocessed.', 'success');
-                await loadActiveLibraryView({ refresh: true });
+                await refreshActiveLibraryView();
             } catch (error) {
                 showMessage('Failed to remove metadata: ' + error.message, 'error');
             }
@@ -981,7 +981,7 @@
             if (currentSeriesDetailId) {
                 await loadSeriesIssues(currentSeriesDetailId, true, { immediate: true });
             } else {
-                await loadActiveLibraryView({ refresh: true });
+                await refreshActiveLibraryView();
             }
         }
 

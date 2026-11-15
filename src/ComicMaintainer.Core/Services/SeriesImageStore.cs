@@ -54,6 +54,9 @@ public class SeriesImageStore : ISeriesImageStore
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesImageStore> _logger;
 
+    // Downscaled copies made at once, across all series.
+    private readonly SemaphoreSlim _resizeSlots = new(Math.Max(2, Environment.ProcessorCount), Math.Max(2, Environment.ProcessorCount));
+
     public SeriesImageStore(
         IHttpClientFactory httpClientFactory,
         IOptionsMonitor<AppSettings> settings,
@@ -208,6 +211,15 @@ public class SeriesImageStore : ISeriesImageStore
     public void Delete(string? fileName)
     {
         if (string.IsNullOrWhiteSpace(fileName)) return;
+        DeleteFile(fileName);
+        foreach (var width in SeriesImageVariants.Widths)
+        {
+            DeleteFile(SeriesImageVariants.ResizedFileName(fileName, width));
+        }
+    }
+
+    private void DeleteFile(string fileName)
+    {
         var path = ResolveAbsolutePath(fileName);
         if (path is null) return;
         try
@@ -218,6 +230,88 @@ public class SeriesImageStore : ISeriesImageStore
         {
             _logger.LogDebug(ex, "Failed to delete cached series image {File}",
                 LoggingHelper.SanitizeForLog(fileName));
+        }
+    }
+
+    public async Task<SeriesImageFile?> GetResizedAsync(string fileName, string contentType, int width, CancellationToken cancellationToken = default)
+    {
+        if (!SeriesImageVariants.IsAllowedWidth(width))
+        {
+            throw new ArgumentOutOfRangeException(nameof(width), width, "Not one of the widths a series image is served at.");
+        }
+
+        var original = ResolveAbsolutePath(fileName);
+        if (original is null)
+        {
+            return null;
+        }
+
+        var resizedName = SeriesImageVariants.ResizedFileName(fileName, width);
+        if (ResolveAbsolutePath(resizedName) is { } existing)
+        {
+            return new SeriesImageFile(existing, SeriesImageVariants.ContentType);
+        }
+
+        // A library page asks for dozens of cards at once; decoding every full-size image at the
+        // same time would compete with serving the ones already made.
+        await _resizeSlots.WaitAsync(cancellationToken);
+        try
+        {
+            if (ResolveAbsolutePath(resizedName) is { } madeMeanwhile)
+            {
+                return new SeriesImageFile(madeMeanwhile, SeriesImageVariants.ContentType);
+            }
+
+            return await Task.Run(() => CreateResized(original, contentType, resizedName, width), CancellationToken.None);
+        }
+        finally
+        {
+            _resizeSlots.Release();
+        }
+    }
+
+    /// <summary>
+    /// Makes the downscaled copy of <paramref name="original"/>, or returns the original when it is
+    /// no wider than <paramref name="width"/> or cannot be decoded.
+    /// </summary>
+    private SeriesImageFile CreateResized(string original, string contentType, string resizedName, int width)
+    {
+        var unchanged = new SeriesImageFile(original, contentType);
+        byte[] source;
+        try
+        {
+            if (new ImageMagick.MagickImageInfo(original).Width <= (uint)width)
+            {
+                return unchanged;
+            }
+
+            source = File.ReadAllBytes(original);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogDebug(ex, "Could not read cached series image {File} for resizing", LoggingHelper.SanitizeForLog(Path.GetFileName(original)));
+            return unchanged;
+        }
+
+        var resized = CoverThumbnailEncoder.TryCreateThumbnail(source, width, "webp", SeriesImageVariants.Quality);
+        if (resized is null)
+        {
+            return unchanged;
+        }
+
+        var target = Path.Join(Path.GetDirectoryName(original), resizedName);
+        var tempPath = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllBytes(tempPath, resized.Value.Data);
+            File.Move(tempPath, target, overwrite: true);
+            return new SeriesImageFile(target, resized.Value.ContentType);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException) { /* ignore */ }
+            _logger.LogDebug(ex, "Could not store resized series image {File}", LoggingHelper.SanitizeForLog(resizedName));
+            return unchanged;
         }
     }
 

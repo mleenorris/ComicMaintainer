@@ -280,6 +280,24 @@ public static class ArchiveEntryReader
     }
 
     /// <summary>
+    /// The decompression window a RAR entry's header asks for, which SharpCompress allocates when
+    /// the entry is unpacked: 0 for a stored entry or a folder. Used to estimate what an open pass
+    /// over a solid archive holds; the limit on it is checked by <see cref="EnsureRarHeadersWithinLimits"/>.
+    /// </summary>
+    internal static long RarWindowBytes(IArchiveEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        var header = RarFileHeader.Of(entry);
+        if (RarFileHeader.IsDirectory(header) || RarFileHeader.IsStored(header))
+        {
+            return 0;
+        }
+
+        var windowBytes = RarFileHeader.WindowSize(header);
+        return windowBytes == 0 ? RarLargestDictionaryBytes : windowBytes;
+    }
+
+    /// <summary>
     /// The CRC32 a RAR entry's header carries, or null when there is none to check the data
     /// against: no checksum at all, a BLAKE2 hash instead, or an entry split over volumes.
     /// </summary>
@@ -665,8 +683,44 @@ public static class ArchiveEntryReader
     /// <paramref name="declaredLength"/> (when known) or <paramref name="maxBytes"/>.
     /// A stream that ends early (a truncated entry) returns what was read.
     /// </summary>
+    /// <remarks>
+    /// The data is read a chunk at a time and <paramref name="cancellationToken"/> is checked
+    /// between chunks, so a page nobody is waiting for any more stops being decompressed.
+    /// </remarks>
     /// <exception cref="ArchiveLimitExceededException">The stream holds more data than allowed.</exception>
-    public static byte[] ReadBounded(Stream source, string entryName, long declaredLength, long maxBytes)
+    /// <exception cref="OperationCanceledException">The read was cancelled.</exception>
+    public static byte[] ReadBounded(Stream source, string entryName, long declaredLength, long maxBytes, CancellationToken cancellationToken = default)
+    {
+        var (buffer, length) = ReadBoundedCore(source, entryName, declaredLength, maxBytes, pooled: false, cancellationToken);
+        if (length < buffer.Length)
+        {
+            Array.Resize(ref buffer, length);
+        }
+
+        return buffer;
+    }
+
+    /// <summary>
+    /// <see cref="ReadBounded"/> into a buffer rented from <see cref="ArrayPool{T}.Shared"/>, returned
+    /// as a read-only stream that gives the buffer back when it is disposed. For pages that are
+    /// sent and dropped: a page of a few megabytes is otherwise a fresh large-object-heap array
+    /// on every request.
+    /// </summary>
+    /// <exception cref="ArchiveLimitExceededException">The stream holds more data than allowed.</exception>
+    /// <exception cref="OperationCanceledException">The read was cancelled.</exception>
+    internal static RentedBufferStream ReadBoundedPooled(Stream source, string entryName, long declaredLength, long maxBytes, CancellationToken cancellationToken)
+    {
+        var (buffer, length) = ReadBoundedCore(source, entryName, declaredLength, maxBytes, pooled: true, cancellationToken);
+        return new RentedBufferStream(buffer, length);
+    }
+
+    private static (byte[] Buffer, int Length) ReadBoundedCore(
+        Stream source,
+        string entryName,
+        long declaredLength,
+        long maxBytes,
+        bool pooled,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
@@ -675,44 +729,133 @@ public static class ArchiveEntryReader
         {
             // The size is known, so read straight into the result: one copy of
             // the page instead of a growing MemoryStream plus ToArray.
-            var buffer = new byte[declaredLength];
-            var read = source.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
-            if (read < buffer.Length)
+            var buffer = Allocate((int)declaredLength, pooled);
+            try
             {
-                Array.Resize(ref buffer, read);
-                return buffer;
-            }
+                var read = ReadChunked(source, buffer.AsSpan(0, (int)declaredLength), cancellationToken);
+                if (read < declaredLength)
+                {
+                    return (buffer, read);
+                }
 
-            Span<byte> probe = stackalloc byte[1];
-            if (source.Read(probe) > 0)
+                Span<byte> probe = stackalloc byte[1];
+                if (source.Read(probe) > 0)
+                {
+                    throw new ArchiveLimitExceededException(string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"Archive entry '{entryName}' holds more data than the {FormatBytes(declaredLength)} its header declares; the archive is corrupt or crafted."));
+                }
+
+                return (buffer, read);
+            }
+            catch
             {
-                throw new ArchiveLimitExceededException(string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"Archive entry '{entryName}' holds more data than the {FormatBytes(declaredLength)} its header declares; the archive is corrupt or crafted."));
+                Release(buffer, pooled);
+                throw;
             }
-
-            return buffer;
         }
 
         EnsureWithinLimits(entryName, declaredLength, -1, maxBytes);
 
-        // Unknown size: copy in chunks, never buffering more than the cap.
-        using var output = new MemoryStream();
-        var chunk = new byte[CopyBufferBytes];
-        int count;
-        while ((count = source.Read(chunk, 0, chunk.Length)) > 0)
+        // Unknown size: copy in chunks into a buffer that doubles as it fills, never
+        // holding more than the cap.
+        var output = Allocate(CopyBufferBytes, pooled);
+        var length = 0;
+        try
         {
-            if (output.Length + count > maxBytes)
+            while (true)
             {
-                throw new ArchiveLimitExceededException(string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"Archive entry '{entryName}' expands past the {FormatBytes(maxBytes)} limit."));
+                cancellationToken.ThrowIfCancellationRequested();
+                if (length == output.Length)
+                {
+                    var grown = Allocate((int)Math.Min((long)output.Length * 2, Math.Max(maxBytes + 1, output.Length + 1)), pooled);
+                    output.AsSpan(0, length).CopyTo(grown);
+                    Release(output, pooled);
+                    output = grown;
+                }
+
+                var count = source.Read(output, length, Math.Min(output.Length - length, CopyBufferBytes));
+                if (count == 0)
+                {
+                    break;
+                }
+
+                if (length + (long)count > maxBytes)
+                {
+                    throw new ArchiveLimitExceededException(string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"Archive entry '{entryName}' expands past the {FormatBytes(maxBytes)} limit."));
+                }
+
+                length += count;
             }
 
-            output.Write(chunk, 0, count);
+            return (output, length);
+        }
+        catch
+        {
+            Release(output, pooled);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Fills <paramref name="destination"/> from <paramref name="source"/> a chunk at a time,
+    /// checking for cancellation between chunks. Returns how much was read, less than asked
+    /// for only when the stream ended.
+    /// </summary>
+    private static int ReadChunked(Stream source, Span<byte> destination, CancellationToken cancellationToken)
+    {
+        var read = 0;
+        while (read < destination.Length)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var count = source.Read(destination.Slice(read, Math.Min(destination.Length - read, CopyBufferBytes)));
+            if (count == 0)
+            {
+                break;
+            }
+
+            read += count;
         }
 
-        return output.ToArray();
+        return read;
+    }
+
+    /// <summary>
+    /// Reads <paramref name="source"/> to its end and drops what it reads, checking for
+    /// cancellation between chunks. For an entry of a solid archive that only has to be
+    /// decompressed because the entries after it depend on it.
+    /// </summary>
+    internal static void Discard(Stream source, CancellationToken cancellationToken)
+    {
+        var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferBytes);
+        try
+        {
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (source.Read(buffer, 0, CopyBufferBytes) == 0)
+                {
+                    return;
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static byte[] Allocate(int length, bool pooled) =>
+        pooled ? ArrayPool<byte>.Shared.Rent(length) : new byte[length];
+
+    private static void Release(byte[] buffer, bool pooled)
+    {
+        if (pooled)
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     /// <summary>Formats a byte count as B, KiB, MiB or GiB for error messages.</summary>

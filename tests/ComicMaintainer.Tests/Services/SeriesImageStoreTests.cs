@@ -170,6 +170,97 @@ public class SeriesImageStoreTests : IDisposable
             store.DownloadAsync("series-a", "http://192.168.1.1/x.png", previousFile: null));
     }
 
+    // ---- Downscaled copies for cards -----------------------------------------------------
+
+    private static byte[] Jpeg(uint width, uint height)
+    {
+        using var image = new ImageMagick.MagickImage(ImageMagick.MagickColors.DarkOrange, width, height) { Format = ImageMagick.MagickFormat.Jpeg };
+        return image.ToByteArray();
+    }
+
+    private static async Task<string> SaveAsync(SeriesImageStore store, byte[] image, string? previous = null)
+    {
+        await using var stream = new MemoryStream(image);
+        return (await store.SaveUserImageAsync("saga", stream, "image/jpeg", previous)).FileName;
+    }
+
+    [Fact]
+    public async Task GetResizedAsync_WideImage_IsDownscaledOnceAndKeptBesideTheOriginal()
+    {
+        var store = CreateStore();
+        var original = await SaveAsync(store, Jpeg(1200, 1800));
+
+        var resized = await store.GetResizedAsync(original, "image/jpeg", 320);
+        var info = new ImageMagick.MagickImageInfo(resized!.Path);
+        var madeAt = File.GetLastWriteTimeUtc(resized.Path);
+        var again = await store.GetResizedAsync(original, "image/jpeg", 320);
+
+        Assert.Equal("image/webp", resized.ContentType);
+        Assert.Equal(ImageMagick.MagickFormat.WebP, info.Format);
+        Assert.Equal(320u, info.Width);
+        Assert.Equal(480u, info.Height);
+        Assert.Equal(Path.GetDirectoryName(store.ResolveAbsolutePath(original)), Path.GetDirectoryName(resized.Path));
+        Assert.Equal(resized.Path, again!.Path);
+        Assert.Equal(madeAt, File.GetLastWriteTimeUtc(again.Path));
+    }
+
+    [Fact]
+    public async Task GetResizedAsync_ImageNoWiderThanAsked_IsTheOriginalNeverUpscaled()
+    {
+        var store = CreateStore();
+        var original = await SaveAsync(store, Jpeg(300, 450));
+
+        var resized = await store.GetResizedAsync(original, "image/jpeg", 640);
+
+        Assert.Equal(store.ResolveAbsolutePath(original), resized!.Path);
+        Assert.Equal("image/jpeg", resized.ContentType);
+        Assert.Single(Directory.EnumerateFiles(_cacheDir));
+    }
+
+    [Fact]
+    public async Task GetResizedAsync_ImageThatCannotBeDecoded_IsTheOriginal()
+    {
+        var store = CreateStore();
+        await using var stream = new MemoryStream(PngBytes);
+        var original = (await store.SaveUserImageAsync("saga", stream, "image/png", previousFile: null)).FileName;
+
+        var resized = await store.GetResizedAsync(original, "image/png", 160);
+
+        Assert.Equal(store.ResolveAbsolutePath(original), resized!.Path);
+        Assert.Equal("image/png", resized.ContentType);
+    }
+
+    [Fact]
+    public async Task GetResizedAsync_MissingImage_IsNull()
+    {
+        Assert.Null(await CreateStore().GetResizedAsync("saga-0123456789abcdef.jpg", "image/jpeg", 160));
+    }
+
+    [Fact]
+    public async Task GetResizedAsync_WidthThatIsNotOffered_IsRefused()
+    {
+        var store = CreateStore();
+        var original = await SaveAsync(store, Jpeg(1200, 1800));
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => store.GetResizedAsync(original, "image/jpeg", 333));
+    }
+
+    [Fact]
+    public async Task ReplacingOrDeletingAnImage_RemovesItsDownscaledCopies()
+    {
+        var store = CreateStore();
+        var first = await SaveAsync(store, Jpeg(1200, 1800));
+        await store.GetResizedAsync(first, "image/jpeg", 160);
+        await store.GetResizedAsync(first, "image/jpeg", 640);
+
+        var second = await SaveAsync(store, Jpeg(1000, 1500), previous: first);
+        Assert.Equal(new[] { second }, Directory.EnumerateFiles(_cacheDir).Select(Path.GetFileName));
+
+        await store.GetResizedAsync(second, "image/jpeg", 480);
+        store.Delete(second);
+        Assert.Empty(Directory.EnumerateFiles(_cacheDir));
+    }
+
     private SeriesImageStore CreateStore(int maxBytes = 1024 * 1024)
     {
         var settings = new Mock<IOptionsMonitor<AppSettings>>();

@@ -1067,7 +1067,7 @@ public sealed class ComicArchiveReaderTests : IDisposable
     private string StoredSolidRar5(string fileName, string? badCrc, params (string Name, byte[] Data)[] entries) =>
         StoredSolidRar5(fileName, badCrc, Rar5Checksum.Crc32, entries);
 
-    private enum Rar5Checksum
+    internal enum Rar5Checksum
     {
         Crc32,
         None,
@@ -1075,6 +1075,17 @@ public sealed class ComicArchiveReaderTests : IDisposable
     }
 
     private string StoredSolidRar5(string fileName, string? badCrc, Rar5Checksum checksum, (string Name, byte[] Data)[] entries)
+    {
+        var path = Path.Join(_dir, fileName);
+        File.WriteAllBytes(path, StoredSolidRar5Bytes(badCrc, checksum, entries));
+        return path;
+    }
+
+    /// <summary>
+    /// The bytes of a solid RAR 5 of stored entries, every one after the first flagged solid, so it
+    /// can only be read in order. The entry named <paramref name="badCrc"/> carries a wrong CRC32.
+    /// </summary>
+    internal static byte[] StoredSolidRar5Bytes(string? badCrc, Rar5Checksum checksum, params (string Name, byte[] Data)[] entries)
     {
         using var output = new MemoryStream();
         output.Write(new byte[] { 0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00 });
@@ -1134,9 +1145,7 @@ public sealed class ComicArchiveReaderTests : IDisposable
             WriteBlock(output, end.ToArray());
         }
 
-        var path = Path.Join(_dir, fileName);
-        File.WriteAllBytes(path, output.ToArray());
-        return path;
+        return output.ToArray();
     }
 
     private string SolidBook(string? badCrc = null) => StoredSolidRar5(
@@ -1244,6 +1253,226 @@ public sealed class ComicArchiveReaderTests : IDisposable
 
         Assert.Contains("budget.cbr", ex.Message);
         Assert.Equal(new byte[16], archive.ReadSolidEntry(1, "b.bin", 16, 1024));
+    }
+
+    [Fact]
+    public void SolidCursor_ReadsPagesForwardWithoutGoingBackOverWhatItPassed()
+    {
+        using var cursor = ComicArchiveReader.OpenSolidCursor(SolidBook());
+
+        Assert.Equal(Bytes("one"), RentedBytes(cursor.ReadPage(0, "p1.jpg", 1024, default)));
+        Assert.Equal(Bytes("three"), RentedBytes(cursor.ReadPage(2, "p3.jpg", 1024, default)));
+        Assert.Equal(2, cursor.Position);
+        Assert.Equal(3, cursor.EntriesDecompressed);
+        Assert.Throws<InvalidOperationException>(() => cursor.ReadPage(1, "p2.jpg", 1024, default));
+    }
+
+    [Fact]
+    public void SolidCursor_AnotherEntryWhereThePageShouldBe_IsNoPage()
+    {
+        // The file changed since its pages were listed: the caller lists it again.
+        using var cursor = ComicArchiveReader.OpenSolidCursor(SolidBook());
+
+        Assert.Null(cursor.ReadPage(1, "p9.jpg", 1024, default));
+    }
+
+    [Fact]
+    public void SolidCursor_PageOverTheCap_IsRefused()
+    {
+        using var cursor = ComicArchiveReader.OpenSolidCursor(SolidBook());
+
+        var ex = Assert.Throws<ArchiveLimitExceededException>(() => cursor.ReadPage(2, "p3.jpg", 2, default));
+
+        Assert.Contains("p3.jpg", ex.Message);
+    }
+
+    [Fact]
+    public void SolidCursor_DamagedEntryBeforeThePage_IsReportedAsDamage()
+    {
+        using var cursor = ComicArchiveReader.OpenSolidCursor(SolidBook(badCrc: "p2.jpg"));
+
+        var ex = Assert.Throws<ComicArchiveFormatException>(() => cursor.ReadPage(2, "p3.jpg", 1024, default));
+
+        Assert.Contains("p2.jpg", ex.Message);
+    }
+
+    [Fact]
+    public void SolidCursor_Cancelled_StopsBeforeDecompressingAnything()
+    {
+        using var cursor = ComicArchiveReader.OpenSolidCursor(SolidBook());
+
+        Assert.ThrowsAny<OperationCanceledException>(() => cursor.ReadPage(2, "p3.jpg", 1024, new CancellationToken(canceled: true)));
+        Assert.Equal(0, cursor.EntriesDecompressed);
+    }
+
+    [Fact]
+    public void SolidCursor_DisposingReleasesTheFile()
+    {
+        var path = SolidBook();
+        using (var cursor = ComicArchiveReader.OpenSolidCursor(path))
+        {
+            RentedBytes(cursor.ReadPage(1, "p2.jpg", 1024, default));
+        }
+
+        File.Delete(path);
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void SolidCursor_FileStaysRenameableWhileItIsOpen()
+    {
+        // A pass may stay open between page turns; the app renaming or replacing the comic meanwhile must not fail.
+        var path = SolidBook();
+        using var cursor = ComicArchiveReader.OpenSolidCursor(path);
+
+        File.Move(path, path + ".renamed");
+
+        Assert.Equal(Bytes("two"), RentedBytes(cursor.ReadPage(1, "p2.jpg", 1024, default)));
+    }
+
+    [Fact]
+    public void SolidCursor_OfAZip_IsRefused()
+    {
+        var path = Zip("plain.cbz", ("p1.jpg", Bytes("one")));
+
+        Assert.Throws<ComicArchiveFormatException>(() => ComicArchiveReader.OpenSolidCursor(path).Dispose());
+    }
+
+    private static byte[] RentedBytes(RentedBufferStream? stream)
+    {
+        Assert.NotNull(stream);
+        using (stream)
+        {
+            return stream.ToExactArray();
+        }
+    }
+
+    // ---- Stored ZIP entries sent from the file -------------------------------------------
+
+    private string StoredZip(string name, params (string Name, byte[] Data)[] entries)
+    {
+        var path = Path.Join(_dir, name);
+        using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
+        foreach (var (entryName, data) in entries)
+        {
+            using var stream = zip.CreateEntry(entryName, CompressionLevel.NoCompression).Open();
+            stream.Write(data);
+        }
+
+        return path;
+    }
+
+    [Fact]
+    public void TryOpenStoredRange_StoredEntry_IsItsBytesWhereTheyLieInTheFile()
+    {
+        // If this fails after a runtime upgrade, ZipArchiveEntry's local header field was renamed: pages are then
+        // read into memory instead, which works but loses the streaming.
+        var page = Enumerable.Range(0, 70_000).Select(i => (byte)i).ToArray();
+        var path = StoredZip("stored.cbz", ("p1.jpg", Bytes("first")), ("p2.jpg", page));
+        var archive = ComicArchiveReader.Open(path);
+
+        using var range = archive.TryOpenStoredRange(archive.GetEntryAt(1)!, ArchiveEntryReader.MaxPageBytes);
+
+        Assert.IsType<ComicArchiveReader.ArchiveRangeStream>(range);
+        Assert.Equal(page.Length, range!.Length);
+        using var copy = new MemoryStream();
+        range.CopyTo(copy);
+        Assert.Equal(page, copy.ToArray());
+    }
+
+    [Fact]
+    public async Task TryOpenStoredRange_ReadsAsynchronouslyAndSeeksWithinTheEntry()
+    {
+        var path = StoredZip("seek.cbz", ("p1.jpg", Bytes("0123456789")));
+        var archive = ComicArchiveReader.Open(path);
+        await using var range = archive.TryOpenStoredRange(archive.GetEntryAt(0)!, 1024)!;
+
+        range.Seek(-4, SeekOrigin.End);
+        var buffer = new byte[16];
+        var read = await range.ReadAsync(buffer);
+
+        Assert.Equal("6789", Encoding.ASCII.GetString(buffer, 0, read));
+        Assert.Equal(0, await range.ReadAsync(buffer));
+    }
+
+    [Fact]
+    public void TryOpenStoredRange_DisposingItClosesTheArchive()
+    {
+        var path = StoredZip("owned.cbz", ("p1.jpg", Bytes("one")));
+        var archive = ComicArchiveReader.Open(path);
+        var range = archive.TryOpenStoredRange(archive.GetEntryAt(0)!, 1024)!;
+
+        range.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => archive.EnumerateEntries());
+        File.Delete(path);
+    }
+
+    [Fact]
+    public void TryOpenStoredRange_CompressedEntry_IsReadTheOrdinaryWay()
+    {
+        using var archive = ComicArchiveReader.Open(Zip("deflated.cbz", ("p1.jpg", new byte[4096])));
+
+        Assert.Null(archive.TryOpenStoredRange(archive.GetEntryAt(0)!, 1024 * 1024));
+    }
+
+    [Fact]
+    public void TryOpenStoredRange_RarEntry_IsReadTheOrdinaryWay()
+    {
+        using var archive = ComicArchiveReader.Open(Rar("stored.cbr", ("p1.jpg", Bytes("one"))));
+
+        Assert.Null(archive.TryOpenStoredRange(archive.GetEntryAt(0)!, 1024));
+    }
+
+    [Fact]
+    public void TryOpenStoredRange_StoredEntryOverTheCap_IsRefused()
+    {
+        using var archive = ComicArchiveReader.Open(StoredZip("big.cbz", ("p1.jpg", new byte[64])));
+
+        var ex = Assert.Throws<ArchiveLimitExceededException>(() => archive.TryOpenStoredRange(archive.GetEntryAt(0)!, 32));
+
+        Assert.Contains("p1.jpg", ex.Message);
+    }
+
+    [Fact]
+    public void TryOpenStoredRange_EntryWhoseLocalHeaderSaysItIsCompressed_IsReadTheOrdinaryWay()
+    {
+        // Central directory and local header disagree: only the ordinary read, which decompresses as the
+        // central directory says, is trusted with it.
+        var path = StoredZip("disagree.cbz", ("p1.jpg", Bytes("one")));
+        var bytes = File.ReadAllBytes(path);
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(8), 8); // the first local header's method: deflate
+        File.WriteAllBytes(path, bytes);
+        using var archive = ComicArchiveReader.Open(path);
+
+        Assert.Null(archive.TryOpenStoredRange(archive.GetEntryAt(0)!, 1024));
+    }
+
+    [Fact]
+    public void ReadPooled_ZipEntry_IsTheEntryInARentedBuffer()
+    {
+        using var archive = ComicArchiveReader.Open(Zip("pooled.cbz", ("p1.jpg", Bytes("one"))));
+
+        Assert.Equal(Bytes("one"), RentedBytes(archive.GetEntryAt(0)!.ReadPooled(1024, default)));
+    }
+
+    [Fact]
+    public void ReadPooled_SolidEntry_IsReadInOrder()
+    {
+        using var archive = ComicArchiveReader.Open(SolidBook());
+
+        Assert.Equal(Bytes("three"), RentedBytes(archive.GetEntryAt(2)!.ReadPooled(1024, default)));
+    }
+
+    [Fact]
+    public void ListPagesForReading_TellsWhichPagesNeedASolidPass()
+    {
+        using var solid = ComicArchiveReader.Open(SolidBook());
+        using var plain = ComicArchiveReader.Open(Rar("plain.cbr", ("p1.jpg", Bytes("one")), ("p2.jpg", Bytes("two"))));
+
+        // The first entry of a solid archive depends on nothing before it.
+        Assert.Equal(new[] { false, true, true }, solid.ListPagesForReading().Select(p => p.NeedsSolidPass));
+        Assert.Equal(new[] { false, false }, plain.ListPagesForReading().Select(p => p.NeedsSolidPass));
     }
 
     /// <summary>Concatenates the file blocks of two single-file RAR 5 archives.</summary>

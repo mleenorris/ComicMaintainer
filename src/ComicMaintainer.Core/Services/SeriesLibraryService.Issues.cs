@@ -135,6 +135,7 @@ public partial class SeriesLibraryService
                     Aliases = new List<string>(unfilteredAccumulator.Aliases),
                     HasExternalImage = unfilteredAccumulator.HasExternalImage,
                     ImageNormalizedKey = unfilteredAccumulator.ImageNormalizedKey,
+                    ImageFileName = unfilteredAccumulator.ImageFileName,
                     Synopsis = unfilteredAccumulator.Synopsis,
                     Genres = unfilteredAccumulator.Genres,
                     PublicationStatus = unfilteredAccumulator.PublicationStatus,

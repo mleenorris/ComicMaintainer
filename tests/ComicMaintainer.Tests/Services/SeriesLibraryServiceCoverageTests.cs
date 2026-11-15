@@ -384,6 +384,52 @@ public class SeriesLibraryServiceCoverageTests
     }
 
     [Fact]
+    public async Task ImageUrl_CarriesTheContentHashOfTheStoredImage()
+    {
+        // A stored image is named after its content hash, so a URL carrying the hash only ever names those bytes,
+        // and the image endpoint lets browsers keep it for a year.
+        _records = new List<SeriesMetadataCacheRecord>
+        {
+            new()
+            {
+                NormalizedKey = "saga", CanonicalTitle = "Saga", LookupStatus = "success",
+                LocalImageFile = "saga-0123456789abcdef.jpg", ImageStatus = "downloaded", ImageDownloadedUtc = BaseTime
+            },
+        };
+        _files = new List<ComicFile> { File("/lib/Saga/Saga 001.cbz", series: "Saga", issue: "1") };
+
+        var summaries = await CreateService().GetSeriesSummariesAsync();
+        var library = await CreateService().GetSeriesAsync(perPage: -1);
+
+        Assert.Equal("/api/series-images/saga?v=0123456789abcdef", Assert.Single(summaries.Series).ExternalImageUrl);
+        Assert.Equal("/api/series-images/saga?v=0123456789abcdef", Assert.Single(library.Series).ExternalImageUrl);
+    }
+
+    [Fact]
+    public async Task ImageUrl_CollapsedDuplicate_CarriesTheHashOfTheImageItPromoted()
+    {
+        _records = new List<SeriesMetadataCacheRecord>
+        {
+            new() { NormalizedKey = "saga-one", CanonicalTitle = "Saga", LookupStatus = "not_found" },
+            new() { NormalizedKey = "saga-two", CanonicalTitle = "Saga", LookupStatus = "success", Source = "ComicVine", LastLookupUtc = BaseTime },
+            new()
+            {
+                NormalizedKey = "sg-cover", CanonicalTitle = "SG Cover",
+                LocalImageFile = "sg-cover-fedcba9876543210.png", ImageStatus = "downloaded", ImageDownloadedUtc = BaseTime
+            },
+        };
+        _files = new List<ComicFile>
+        {
+            File("/lib/Saga/Saga 001.cbz", series: "Saga", issue: "1", size: 10),
+            File("/lib/Saga Two/Saga Two 003.cbz", series: "SG Cover", issue: "3", size: 5, modified: BaseTime.AddMonths(5)),
+        };
+
+        var result = await CreateService().GetSeriesSummariesAsync();
+
+        Assert.Equal("/api/series-images/sg-cover?v=fedcba9876543210", Assert.Single(result.Series).ExternalImageUrl);
+    }
+
+    [Fact]
     public async Task Grouping_ResolverReturningNoTitle_FallsBackToCanonicalTitle()
     {
         _records = new List<SeriesMetadataCacheRecord>

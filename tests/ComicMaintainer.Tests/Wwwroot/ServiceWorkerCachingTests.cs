@@ -54,11 +54,11 @@ public class ServiceWorkerCachingTests
     {
         var contents = ReadServiceWorker();
 
-        // Covers/pages live in their own cache so they survive version bumps,
-        // and it must be bounded so a large library cannot fill up storage.
-        Assert.Contains("IMAGE_CACHE_NAME", contents);
-        Assert.Contains("MAX_IMAGE_CACHE_ENTRIES", contents);
-        Assert.Matches(new Regex(@"trimCache\(\s*IMAGE_CACHE_NAME\s*,\s*MAX_IMAGE_CACHE_ENTRIES\s*\)"), contents);
+        // Covers and pages live in caches of their own so they survive version bumps,
+        // and each must be bounded so a large library cannot fill up storage.
+        Assert.Matches(new Regex(@"cacheName:\s*IMAGE_CACHE_NAME,\s*maxEntries:\s*MAX_IMAGE_CACHE_ENTRIES"), contents);
+        Assert.Matches(new Regex(@"cacheName:\s*PAGE_CACHE_NAME,\s*maxEntries:\s*MAX_PAGE_CACHE_ENTRIES"), contents);
+        Assert.Matches(new Regex(@"trimCache\(\s*cacheName\s*,\s*maxEntries\s*\)"), contents);
     }
 
     [Fact]
@@ -70,6 +70,7 @@ public class ServiceWorkerCachingTests
         // image cache uses that same prefix, so it must be explicitly excluded
         // or every release would throw away the whole cover cache.
         Assert.Contains("cacheName !== IMAGE_CACHE_NAME", contents);
+        Assert.Contains("cacheName !== PAGE_CACHE_NAME", contents);
     }
 
     [Fact]

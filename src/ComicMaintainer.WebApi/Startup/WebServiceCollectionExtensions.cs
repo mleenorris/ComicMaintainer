@@ -88,7 +88,7 @@ public static class WebServiceCollectionExtensions
         var forwardedHopLimit = LoadRateLimiterForwardedHopLimit(configuration);
         services.AddSingleton(new ClientAddressResolver(trustedProxies, forwardedHopLimit));
         services.AddSingleton<AuthenticationAttemptLimiter>();
-        services.AddSingleton(new ComicMaintainer.WebApi.Opds.OpdsImageConverter());
+        services.AddSingleton(_ => new ComicMaintainer.WebApi.Opds.OpdsImageConverter());
         if (trustedProxies.Networks.Count > 0)
         {
             services.AddSingleton<IStartupFilter>(serviceProvider =>

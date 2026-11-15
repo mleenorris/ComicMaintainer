@@ -40,6 +40,28 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
     /// <summary>Series key of a title to the key of the record that owns it, as of <paramref name="Version"/>.</summary>
     private sealed record TitleIndex(long Version, DateTime BuiltUtc, IReadOnlyDictionary<string, string> OwnerKeyByTitleKey);
 
+    /// <summary>Longest time a remembered image lookup is reused, as for the title index.</summary>
+    internal static readonly TimeSpan ImageLookupMaxAge = TitleIndexMaxAge;
+
+    /// <summary>Most series keys whose image lookup is remembered at once.</summary>
+    internal const int MaxRememberedImageLookups = 10_000;
+
+    private ImageLookups? _imageLookups;
+    private int _imageLookupQueries;
+
+    /// <summary>How many image lookups went to the database (diagnostics and tests).</summary>
+    internal int ImageLookupQueryCount => Volatile.Read(ref _imageLookupQueries);
+
+    /// <summary>The image lookups remembered as of <paramref name="Version"/>.</summary>
+    private sealed class ImageLookups(long version, DateTime startedUtc)
+    {
+        public long Version { get; } = version;
+
+        public DateTime StartedUtc { get; } = startedUtc;
+
+        public System.Collections.Concurrent.ConcurrentDictionary<string, SeriesImageRecord?> ByKey { get; } = new(StringComparer.Ordinal);
+    }
+
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IExternalSeriesMetadataService _externalMetadata;
     private readonly ISeriesImageStore _imageStore;
@@ -85,6 +107,52 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         var entity = await db.SeriesMetadataCache.AsNoTracking()
             .FirstOrDefaultAsync(e => e.NormalizedKey == normalizedKey, cancellationToken);
         return entity is null ? null : ToRecord(entity);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Remembered per key (absent records too) for as long as <see cref="ChangeVersion"/> stays
+    /// the same, which every write to the cache bumps, and at most <see cref="ImageLookupMaxAge"/>
+    /// as a safety net for changes made to the table outside this service; up to
+    /// <see cref="MaxRememberedImageLookups"/> keys.
+    /// </remarks>
+    public async Task<SeriesImageRecord?> GetImageAsync(string normalizedKey, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            return null;
+        }
+
+        // Read the version before the row: a change committed meanwhile leaves
+        // what is remembered under an old version, which the next lookup drops.
+        var version = ChangeVersion;
+        var lookups = Volatile.Read(ref _imageLookups);
+        if (lookups is null || lookups.Version != version || DateTime.UtcNow - lookups.StartedUtc >= ImageLookupMaxAge)
+        {
+            var fresh = new ImageLookups(version, DateTime.UtcNow);
+            lookups = ReferenceEquals(Interlocked.CompareExchange(ref _imageLookups, fresh, lookups), lookups)
+                ? fresh
+                : Volatile.Read(ref _imageLookups)!;
+        }
+
+        if (lookups.Version == version && lookups.ByKey.TryGetValue(normalizedKey, out var remembered))
+        {
+            return remembered;
+        }
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var image = await db.SeriesMetadataCache.AsNoTracking()
+            .Where(e => e.NormalizedKey == normalizedKey)
+            .Select(e => new SeriesImageRecord(e.LocalImageFile, e.ImageContentType, e.ImageStatus))
+            .FirstOrDefaultAsync(cancellationToken);
+        Interlocked.Increment(ref _imageLookupQueries);
+
+        if (lookups.Version == version && lookups.ByKey.Count < MaxRememberedImageLookups)
+        {
+            lookups.ByKey[normalizedKey] = image;
+        }
+
+        return image;
     }
 
     public async Task<SeriesMetadataCacheRecord?> GetByTitleAsync(string seriesTitle, CancellationToken cancellationToken = default)

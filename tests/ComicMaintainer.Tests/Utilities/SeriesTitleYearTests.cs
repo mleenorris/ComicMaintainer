@@ -28,14 +28,19 @@ public class SeriesTitleYearTests
     [InlineData("Lantern (12345)")]
     public void Parse_LeavesNamesWithoutAVolumeYearAlone(string name)
     {
-        Assert.Equal((name.Trim(), (int?)null), SeriesTitleYear.Parse(name));
+        var (title, year) = SeriesTitleYear.Parse(name);
+        Assert.Equal(name.Trim(), title);
+        Assert.Null(year);
     }
 
-    [Fact]
-    public void Parse_BlankName_HasNoYear()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public void Parse_BlankName_HasNoYear(string? name)
     {
-        Assert.Equal((string.Empty, (int?)null), SeriesTitleYear.Parse(null));
-        Assert.Equal((string.Empty, (int?)null), SeriesTitleYear.Parse("   "));
+        var (title, year) = SeriesTitleYear.Parse(name);
+        Assert.Equal(string.Empty, title);
+        Assert.Null(year);
     }
 
     [Fact]

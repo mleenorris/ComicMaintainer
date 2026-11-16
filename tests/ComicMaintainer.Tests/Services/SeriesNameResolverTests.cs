@@ -75,7 +75,7 @@ public class SeriesNameResolverTests
         _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
               .ReturnsAsync((SeriesMetadataCacheRecord?)null);
         _external.Setup(e => e.LookupSeriesAsync("Green Lantern (2023)", It.IsAny<CancellationToken>()))
-                 .ReturnsAsync((ExternalSeriesMetadata?)null);
+                 .Returns(Task.FromResult<ExternalSeriesMetadata?>(null));
         _external.Setup(e => e.LookupSeriesAsync("Green Lantern", It.IsAny<CancellationToken>()))
                  .ReturnsAsync(new ExternalSeriesMetadata { CanonicalTitle = "Green Lantern", StartYear = 1960 });
 

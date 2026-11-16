@@ -95,9 +95,9 @@ public static class VolumeNumbering
         }
 
         return groups
-            .OrderBy(group => group.Volume is null)
-            .ThenBy(group => group.Volume?.IsYear)
-            .ThenBy(group => group.Volume?.Value)
+            .OrderBy(group => !group.Volume.HasValue)
+            .ThenBy(group => group.Volume.GetValueOrDefault().IsYear)
+            .ThenBy(group => group.Volume.GetValueOrDefault().Value)
             .ToList();
     }
 

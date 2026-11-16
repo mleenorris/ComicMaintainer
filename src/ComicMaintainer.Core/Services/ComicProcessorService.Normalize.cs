@@ -473,7 +473,12 @@ public partial class ComicProcessorService
         var volume = ComicVolume.FromSeriesName(metadata.Series)
                      ?? ComicVolume.FromFileName(Path.GetFileName(filePath))
                      ?? ComicVolume.FromSeriesName(Path.GetFileName(Path.GetDirectoryName(filePath)));
-        return volume?.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (volume is not { } found)
+        {
+            return null;
+        }
+
+        return found.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <summary>

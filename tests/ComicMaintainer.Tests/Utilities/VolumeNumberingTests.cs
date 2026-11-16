@@ -20,7 +20,7 @@ public class VolumeNumberingTests
             new Issue("2005", "2"));
 
         Assert.NotNull(groups);
-        Assert.Equal(new int?[] { 1990, 2005, null }, groups!.Select(g => g.Volume?.Value).ToArray());
+        Assert.Equal(new int?[] { 1990, 2005, null }, groups!.Select(g => g.Volume.HasValue ? g.Volume.Value.Value : (int?)null).ToArray());
         Assert.Equal(new[] { "1", "2" }, groups[0].Items.Select(i => i.Number));
     }
 
@@ -29,7 +29,7 @@ public class VolumeNumberingTests
     {
         var groups = Groups(new Issue("1990", "1"), new Issue("2", "1"), new Issue("1", "1"));
 
-        Assert.Equal(new[] { "v1", "v2", "y1990" }, groups!.Select(g => g.Volume!.Value.Key));
+        Assert.Equal(new[] { "v1", "v2", "y1990" }, groups!.Select(g => g.Volume.GetValueOrDefault().Key));
     }
 
     [Fact]
@@ -78,7 +78,7 @@ public class VolumeNumberingTests
 
         Assert.Equal(
             new[] { ("y1990", false), ("y2005", false), ("y1990", true), ("y2005", true) },
-            groups!.Select(g => (g.Volume!.Value.Key, g.IsAnnual)).ToArray());
+            groups!.Select(g => (g.Volume.GetValueOrDefault().Key, g.IsAnnual)).ToArray());
     }
 
     [Fact]

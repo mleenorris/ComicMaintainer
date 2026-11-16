@@ -95,10 +95,11 @@ public class MissingIssuesCheckJobHandler : IScheduledJobFindingsHandler
             var volumes = VolumeNumbering.SeparateRuns(issues.Issues, i => i.VolumeInfo, i => i.Issue, i => i.Annual);
             var splitByVolume = volumes?.Any(run => run.Volume is not null) == true;
             var runs = volumes is null
-                ? new[] { (Title: title, Issues: (IEnumerable<SeriesIssueDto>)issues.Issues, CanDownload: true) }
+                ? new (string Title, IEnumerable<SeriesIssueDto> Issues, bool CanDownload)[]
+                    { (title, issues.Issues, true) }
                 : volumes.Select(run => (
                     Title: RunTitle(title, run.Volume, run.IsAnnual, splitByVolume),
-                    Issues: (IEnumerable<SeriesIssueDto>)run.Items,
+                    Issues: run.Items.AsEnumerable(),
                     // Suwayomi has no notion of comic volumes or Annuals: "#3" would be any run's #3.
                     CanDownload: false)).ToArray();
 

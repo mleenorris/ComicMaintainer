@@ -142,7 +142,8 @@ public class SettingsControllerTests
         var settings = objectResult.Value;
         var filenameFormatProp = settings.GetType().GetProperty("filename_format");
         Assert.NotNull(filenameFormatProp);
-        Assert.Equal("{series} - Chapter {issue}", filenameFormatProp.GetValue(settings));
+        // The legacy default reads as the current default (see AppSettings.FilenameFormat).
+        Assert.Equal(AppSettings.DefaultFilenameFormat, filenameFormatProp.GetValue(settings));
     }
 
     [Fact]

@@ -262,7 +262,7 @@ test('unset optional settings fall back to defaults and first-time hints', async
 
     const values = formValues(page);
     assert.equal(values.filenameFormat, '');
-    assert.equal(values.currentFormat, '{series} - Chapter {issue}', 'the built-in default format is shown');
+    assert.equal(values.currentFormat, '{series} {annual} {volume_label} - Chapter {issue}', 'the built-in default format is shown');
     assert.equal(values.comicVineApiKey, '');
     assert.equal(values.comicVineApiKeyHint,
         'Leave blank to disable ComicVine lookups. The key is stored in user settings on this instance.');

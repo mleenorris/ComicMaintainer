@@ -47,6 +47,31 @@ public class SeriesIssueDto
     public bool Read { get; set; }
 
     /// <summary>
+    /// True when the issue is an Annual (see <see cref="Utilities.AnnualIssue.IsAnnual"/>):
+    /// Annual #1 is not issue #1, so Annuals are listed, and checked for missing issues, apart.
+    /// </summary>
+    [JsonPropertyName("annual")]
+    public bool Annual { get; set; }
+
+    /// <summary>
+    /// The issue's volume, from its <see cref="Volume"/> tag or else its file name (see
+    /// <see cref="Utilities.ComicVolume.Resolve"/>); null when neither names one.
+    /// </summary>
+    [JsonIgnore]
+    public Utilities.ComicVolume? VolumeInfo => Utilities.ComicVolume.Resolve(Volume, seriesName: null, FileName);
+
+    /// <summary>
+    /// Identity of the issue's volume (<c>y1990</c>, <c>v2</c>), so the series page can show
+    /// the issues of each volume apart; null when the volume is unknown.
+    /// </summary>
+    [JsonPropertyName("volume_key")]
+    public string? VolumeKey => VolumeInfo?.Key;
+
+    /// <summary>The issue's volume as the series page names it (<c>1990</c>, <c>Vol. 2</c>); null when unknown.</summary>
+    [JsonPropertyName("volume_label")]
+    public string? VolumeLabel => VolumeInfo?.DisplayName;
+
+    /// <summary>
     /// A field-for-field copy. The series library shares one instance per issue between
     /// every user's requests, so per-user values such as <see cref="Read"/> are set on a copy.
     /// </summary>

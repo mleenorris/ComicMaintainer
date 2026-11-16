@@ -103,10 +103,13 @@ public partial class ComicProcessorService
             // Extract metadata from the archive
             var metadataRead = await ReadMetadataAtResolvedPathAsync(resolvedPath, filePath, cancellationToken);
             var metadata = metadataRead.Metadata;
+            // Normalize may replace a "Green Lantern (1990)" series with the resolved name; the
+            // rename still reads the volume year from it (see GenerateFileName).
+            var originalSeries = metadata?.Series;
 
             if (metadata != null)
             {
-                _logger.LogDebug("ProcessFileAsync: Metadata extracted - Series: {Series}, Issue: {Issue}, Title: {Title}", 
+                _logger.LogDebug("ProcessFileAsync: Metadata extracted - Series: {Series}, Issue: {Issue}, Title: {Title}",
                     LoggingHelper.SanitizeForLog(metadata.Series),
                     LoggingHelper.SanitizeForLog(metadata.Issue),
                     LoggingHelper.SanitizeForLog(metadata.Title));
@@ -162,7 +165,7 @@ public partial class ComicProcessorService
                     // Only the fields normalize owns are written, plus any provider details that
                     // fill an empty element; a CBR/RAR may come back as a new CBZ.
                     var providerFill = await ResolveProviderFillAsync(filePath, normalizedMetadata.Series, cancellationToken);
-                    var normalizeWrite = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, NormalizedFields, cancellationToken, providerFill: providerFill);
+                    var normalizeWrite = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, NormalizeWriteFields(beforeMetadata, normalizedMetadata), cancellationToken, providerFill: providerFill);
                     normalizeSuccess = normalizeWrite.Succeeded;
                     var beforeFilename = Path.GetFileName(filePath);
                     if (!FollowMovedFile(normalizeWrite.FilePath, ref filePath, ref resolvedPath))
@@ -241,7 +244,7 @@ public partial class ComicProcessorService
                 FollowMovedFile(preservedPath, ref filePath, ref resolvedPath);
 
                 _logger.LogDebug("ProcessFileAsync: Attempting to rename file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                var newResolvedPath = GenerateFileName(metadata, resolvedPath);
+                var newResolvedPath = GenerateFileName(metadata, resolvedPath, originalSeries);
                 if (newResolvedPath != null)
                 {
                     _logger.LogInformation(

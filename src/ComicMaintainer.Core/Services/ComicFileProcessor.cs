@@ -44,12 +44,17 @@ public class ComicFileProcessor
     /// <param name="issueNumber">Issue number</param>
     /// <param name="originalExtension">Original file extension (.cbz or .cbr)</param>
     /// <param name="padding">Issue number padding (default: 4), clamped by <see cref="ClampIssueNumberPadding"/></param>
+    /// <param name="sourceFileName">
+    /// The file's current name, the last place its volume is looked for (see
+    /// <see cref="SeriesWithVolume"/>).
+    /// </param>
     public static string FormatFilename(
-        string template, 
-        ComicInfo tags, 
-        string issueNumber, 
+        string template,
+        ComicInfo tags,
+        string issueNumber,
         string originalExtension = ".cbz",
-        int padding = 4)
+        int padding = 4,
+        string? sourceFileName = null)
     {
         // Parse issue number into integer and decimal parts
         string issueFormatted;
@@ -103,7 +108,7 @@ public class ComicFileProcessor
         // Build replacement dictionary
         var replacements = new Dictionary<string, string>
         {
-            ["series"] = tags.Series ?? "",
+            ["series"] = SeriesWithVolume(template, tags, sourceFileName),
             ["issue"] = issueFormatted,
             ["issue_no_pad"] = issueNoPad,
             ["title"] = tags.Title ?? "",
@@ -133,6 +138,31 @@ public class ComicFileProcessor
         }
 
         return SanitizeFileName(result);
+    }
+
+    /// <summary>
+    /// The series name as the <c>{series}</c> placeholder renders it: followed by the issue's
+    /// volume (<c>Green Lantern (1990)</c>, <c>Saga Vol. 2</c>) whenever the volume is known.
+    /// American comics restart their numbering with each volume, so without it #1 of one
+    /// volume and #1 of the next render to the same name and the second is flagged as a
+    /// duplicate. The volume comes from the ComicInfo <c>&lt;Volume&gt;</c>, the series name or
+    /// <paramref name="sourceFileName"/> (see <see cref="ComicVolume.Resolve"/>). Nothing is
+    /// added when the template places <c>{volume}</c> itself or the series name already ends in
+    /// a volume.
+    /// </summary>
+    internal static string SeriesWithVolume(string template, ComicInfo tags, string? sourceFileName)
+    {
+        var series = tags.Series ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(series)
+            || template.Contains("{volume}", StringComparison.OrdinalIgnoreCase)
+            || ComicVolume.FromSeriesName(series) is not null)
+        {
+            return series;
+        }
+
+        return ComicVolume.Resolve(tags.Volume, seriesName: null, sourceFileName) is { } volume
+            ? $"{series.TrimEnd()} {volume.Label}"
+            : series;
     }
 
     public static string SanitizeFileName(string fileName)
@@ -238,7 +268,7 @@ public class ComicFileProcessor
                 }
 
                 var originalExt = Path.GetExtension(filepath).ToLowerInvariant();
-                var expectedFilename = FormatFilename(filenameTemplate, tags, tags.Number, originalExt, issuePadding);
+                var expectedFilename = FormatFilename(filenameTemplate, tags, tags.Number, originalExt, issuePadding, Path.GetFileName(filepath));
                 var currentFilename = Path.GetFileName(filepath);
 
                 if (currentFilename != expectedFilename)

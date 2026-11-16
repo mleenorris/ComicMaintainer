@@ -47,8 +47,9 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     }
 
     [Theory]
-    [InlineData("Batman", "Batman (2016) 005.cbz", "5", "Batman - Chapter 0005.cbz")]
-    [InlineData("Series", "Vol.1 Ch.12.cbz", "12", "Series - Chapter 0012.cbz")]
+    // A year before the issue number is the volume's start year; a volume token is kept too.
+    [InlineData("Batman", "Batman (2016) 005.cbz", "5", "Batman (2016) - Chapter 0005.cbz")]
+    [InlineData("Series", "Vol.1 Ch.12.cbz", "12", "Series Vol. 1 - Chapter 0012.cbz")]
     [InlineData("Spider-Man 2099", "Spider-Man 2099 012.cbz", "12", "Spider-Man 2099 - Chapter 0012.cbz")]
     // "(c2c)", "c2c" and a CRC tag are not chapter 2.
     [InlineData("Amazing Spider-Man", "Amazing Spider-Man 001 (1963) (c2c) (Digital).cbz", "1", "Amazing Spider-Man - Chapter 0001.cbz")]
@@ -126,6 +127,167 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
             Assert.Null(info.Element("Number"));
         }
     }
+
+    [Fact]
+    public async Task ProcessFileAsync_SameIssueOfTwoVolumesInOneFolder_RenamesBothAndFlagsNeither()
+    {
+        // American comics restart their numbering with each volume: Green Lantern #1 of 1990
+        // and #1 of 2005 are different issues, not duplicates.
+        var first = WriteArchive("Green Lantern", "GL v3 001.cbz", VolumeInfo("1990", "1"));
+        var second = WriteArchive("Green Lantern", "GL v4 001.cbz", VolumeInfo("2005", "1"));
+
+        Assert.True(await _service.ProcessFileAsync(first));
+        Assert.True(await _service.ProcessFileAsync(second));
+
+        Assert.Equal(
+            new[] { "Green Lantern (1990) - Chapter 0001.cbz", "Green Lantern (2005) - Chapter 0001.cbz" },
+            Directory.GetFiles(Path.Join(_root, "Green Lantern")).Select(Path.GetFileName).Order().ToArray());
+        _fileStore.Verify(
+            f => f.MarkFileDuplicateAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_SameIssueOfTheSameVolume_IsStillADuplicate()
+    {
+        var first = WriteArchive("Green Lantern", "a.cbz", VolumeInfo("1990", "1"));
+        var second = WriteArchive("Green Lantern", "b.cbz", VolumeInfo("1990", "1"));
+
+        Assert.True(await _service.ProcessFileAsync(first));
+        await _service.ProcessFileAsync(second);
+
+        Assert.True(File.Exists(Path.Join(_root, "Green Lantern", "Green Lantern (1990) - Chapter 0001.cbz")));
+        _fileStore.Verify(f => f.MarkFileDuplicateAsync(second, true, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_TemplateWithItsOwnVolumePlaceholder_IsNotGivenASecondOne()
+    {
+        _settings.FilenameFormat = "{series} v{volume} #{issue}";
+        var path = WriteArchive("Green Lantern", "x.cbz", VolumeInfo("1990", "1"));
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        Assert.True(File.Exists(Path.Join(_root, "Green Lantern", "Green Lantern v1990 #0001.cbz")));
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_SeriesNamedForItsVolume_WritesTheStartYearIntoVolume()
+    {
+        // "The Astonishing X-Men (1995)": 1995 is when volume 1 started, not issue #12's date.
+        var path = WriteArchive("The Astonishing X-Men (1995)", "The Astonishing X-Men 012.cbz",
+            "<ComicInfo><Series>The Astonishing X-Men (1995)</Series><Number>12</Number></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var archive = Directory.GetFiles(Path.Join(_root, "The Astonishing X-Men (1995)")).Single();
+        Assert.Equal("The Astonishing X-Men (1995) - Chapter 0012.cbz", Path.GetFileName(archive));
+        var info = ReadComicInfo(archive);
+        Assert.Equal("1995", info.Element("Volume")?.Value);
+        Assert.Null(info.Element("Year"));
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_VolumesNamedByTheirStartYears_EachGetTheirOwnVolume()
+    {
+        // Volume 1 started in 1995, volume 2 in 1999; both have a #1.
+        var first = WriteArchive("The Astonishing X-Men", "The Astonishing X-Men (1995) 001.cbz");
+        var second = WriteArchive("The Astonishing X-Men", "The Astonishing X-Men (1999) 001.cbz");
+
+        Assert.True(await _service.ProcessFileAsync(first));
+        Assert.True(await _service.ProcessFileAsync(second));
+
+        var folder = Path.Join(_root, "The Astonishing X-Men");
+        Assert.Equal("1995", ReadComicInfo(Path.Join(folder, "The Astonishing X-Men (1995) - Chapter 0001.cbz")).Element("Volume")?.Value);
+        Assert.Equal("1999", ReadComicInfo(Path.Join(folder, "The Astonishing X-Men (1999) - Chapter 0001.cbz")).Element("Volume")?.Value);
+        _fileStore.Verify(
+            f => f.MarkFileDuplicateAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData("<Volume>2</Volume>", "2")]
+    [InlineData("<Volume>Annual</Volume>", "Annual")]
+    [InlineData("<Volume>-1</Volume>", "1995")]
+    public async Task ProcessFileAsync_KeepsAVolumeAlreadySet_AndFillsOnlyAnUnsetOne(string volumeElement, string expected)
+    {
+        var path = WriteArchive("The Astonishing X-Men (1995)", "x.cbz",
+            $"<ComicInfo><Series>The Astonishing X-Men (1995)</Series><Number>1</Number>{volumeElement}<Year>1995</Year></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var info = ReadComicInfo(Directory.GetFiles(Path.Join(_root, "The Astonishing X-Men (1995)")).Single());
+        Assert.Equal(expected, info.Element("Volume")?.Value);
+        Assert.Equal("1995", info.Element("Year")?.Value);
+    }
+
+    [Fact]
+    public async Task Normalize_OtherwiseNormalizedFileMissingItsVolume_IsWrittenWithIt()
+    {
+        // Series, number and title are already normalized: only the volume is missing.
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("The Astonishing X-Men (1995)", "The Astonishing X-Men (1995) - Chapter 0001.cbz",
+            "<ComicInfo><Series>The Astonishing X-Men (1995)</Series><Number>1</Number><Title>Chapter 1</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        Assert.Equal("1995", ReadComicInfo(path).Element("Volume")?.Value);
+    }
+
+    [Fact]
+    public async Task Normalize_NoVolumeToFill_LeavesVolumeOut()
+    {
+        // The year after the issue number is the cover date, not a volume.
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("Saga", "Saga 001 (2012).cbz",
+            "<ComicInfo><Series>Saga</Series><Number>1</Number></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var info = ReadComicInfo(path);
+        Assert.Equal("Chapter 1", info.Element("Title")?.Value);
+        Assert.Null(info.Element("Volume"));
+    }
+
+    [Theory]
+    // Tagged the ComicVine way, written as an issue label, or only named by the file.
+    [InlineData("<ComicInfo><Series>Green Lantern Annual</Series><Number>1</Number></ComicInfo>", "a.cbz")]
+    [InlineData("<ComicInfo><Series>Green Lantern</Series><Number>Annual 1</Number></ComicInfo>", "b.cbz")]
+    [InlineData(null, "Green Lantern Annual 001 (1992).cbz")]
+    public async Task ProcessFileAsync_AnnualAndIssueOfTheSameNumber_AreKeptApart(string? annualInfo, string annualFileName)
+    {
+        var issue = WriteArchive("Green Lantern", "GL 001.cbz", "<ComicInfo><Series>Green Lantern</Series><Number>1</Number></ComicInfo>");
+        var annual = WriteArchive("Green Lantern", annualFileName, annualInfo);
+
+        Assert.True(await _service.ProcessFileAsync(issue));
+        Assert.True(await _service.ProcessFileAsync(annual));
+
+        var folder = Path.Join(_root, "Green Lantern");
+        Assert.True(File.Exists(Path.Join(folder, "Green Lantern - Chapter 0001.cbz")));
+        var annualInfoAfter = ReadComicInfo(Path.Join(folder, "Green Lantern Annual - Chapter 0001.cbz"));
+        Assert.Equal("Green Lantern Annual", annualInfoAfter.Element("Series")?.Value);
+        Assert.Equal("1", annualInfoAfter.Element("Number")?.Value);
+        _fileStore.Verify(
+            f => f.MarkFileDuplicateAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AnnualOfAVolume_KeepsAnnualBeforeTheVolume()
+    {
+        var path = WriteArchive("Green Lantern (1990)", "Green Lantern (1990) Annual 003.cbz");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var archive = Directory.GetFiles(Path.Join(_root, "Green Lantern (1990)")).Single();
+        Assert.Equal("Green Lantern Annual (1990) - Chapter 0003.cbz", Path.GetFileName(archive));
+        var info = ReadComicInfo(archive);
+        Assert.Equal("Green Lantern Annual (1990)", info.Element("Series")?.Value);
+        Assert.Equal("1990", info.Element("Volume")?.Value);
+    }
+
+    private static string VolumeInfo(string volume, string number)
+        => $"<ComicInfo><Series>Green Lantern</Series><Number>{number}</Number><Volume>{volume}</Volume></ComicInfo>";
 
     private string WriteArchive(string folder, string fileName, string? comicInfo = null)
     {

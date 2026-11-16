@@ -109,6 +109,58 @@ public class MissingIssuesCheckJobHandlerTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_NumberingRestartingByVolume_ReportsEachVolumesGapsWithoutDownloading()
+    {
+        // Green Lantern 1990 has #1 and #3, 2005 has #1 and #2: only 1990 lacks an issue (#2),
+        // which 2005's #2 must not hide.
+        SetupCandidates(("gl", "Green Lantern"));
+        _issuesById["gl"] = new SeriesIssuesResult
+        {
+            Id = "gl",
+            Title = "Green Lantern",
+            CanonicalTitle = "Green Lantern",
+            Issues = new List<SeriesIssueDto>
+            {
+                new() { Issue = "1", Volume = "1990" },
+                new() { Issue = "3", Volume = "1990" },
+                new() { Issue = "1", Volume = "2005" },
+                new() { Issue = "2", Volume = "2005" },
+            }
+        };
+        _suwayomi.SetupGet(s => s.IsConfigured).Returns(true);
+
+        var summary = await BuildHandler().ExecuteAsync("""{"autoDownload":true}""", CancellationToken.None);
+
+        Assert.Contains("1 series missing 1 issue(s): Green Lantern (1990) (1)", summary);
+        // Suwayomi cannot tell volumes apart, so nothing is asked of it.
+        _suwayomi.Verify(s => s.GetLibrarySeriesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Annuals_AreCheckedApartFromTheSeries()
+    {
+        // The series has #1-#2; its Annuals #1 and #3 (Annual #2 missing).
+        SetupCandidates(("gl", "Green Lantern"));
+        _issuesById["gl"] = new SeriesIssuesResult
+        {
+            Id = "gl",
+            Title = "Green Lantern",
+            CanonicalTitle = "Green Lantern",
+            Issues = new List<SeriesIssueDto>
+            {
+                new() { Issue = "1" },
+                new() { Issue = "2" },
+                new() { Issue = "1", Annual = true },
+                new() { Issue = "3", Annual = true },
+            }
+        };
+
+        var summary = await BuildHandler().ExecuteAsync(null, CancellationToken.None);
+
+        Assert.Contains("1 series missing 1 issue(s): Green Lantern Annual (1)", summary);
+    }
+
+    [Fact]
     public async Task ExecuteWithFindingsAsync_ReportsHowManySeriesHaveGaps()
     {
         SetupCandidates(("a", "Alpha"), ("b", "Beta"));

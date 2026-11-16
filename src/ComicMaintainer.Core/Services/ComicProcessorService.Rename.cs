@@ -95,6 +95,7 @@ public partial class ComicProcessorService
                 // file. The resolved name is applied in-memory for filename
                 // generation only; rewriting ComicInfo.xml remains the normalize
                 // operation's responsibility.
+                var originalSeries = metadata.Series;
                 var resolvedSeries = await ResolveNormalizedSeriesAsync(metadata, filePath, cancellationToken);
                 if (!string.IsNullOrEmpty(resolvedSeries) && metadata.Series != resolvedSeries)
                 {
@@ -105,7 +106,7 @@ public partial class ComicProcessorService
                 }
 
                 _logger.LogDebug("RenameFileAsync: Generating new filename for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                var newResolvedPath = GenerateFileName(metadata, resolvedPath);
+                var newResolvedPath = GenerateFileName(metadata, resolvedPath, originalSeries);
                 if (newResolvedPath == null)
                 {
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
@@ -382,23 +383,41 @@ public partial class ComicProcessorService
     /// Returns null (after logging the error) when the filename cannot be generated; callers must
     /// treat that as a rename failure, never as "already correctly named".
     /// </summary>
-    private string? GenerateFileName(ComicMetadata metadata, string originalPath)
+    /// <param name="originalSeries">
+    /// The series as the file named it before the resolved name replaced it. Without a
+    /// <c>&lt;Volume&gt;</c> tag, the volume comes from it ("Green Lantern (1990)"), then the file
+    /// name, then the folder name: the sources, in the order, normalize fills
+    /// <c>&lt;Volume&gt;</c> from (see VolumeToFill), so the name and the tag agree.
+    /// </param>
+    private string? GenerateFileName(ComicMetadata metadata, string originalPath, string? originalSeries = null)
     {
         try
         {
             var directory = Path.GetDirectoryName(originalPath) ?? _settings.WatchedDirectory;
             var extension = Path.GetExtension(originalPath);
-            
+
             // Convert ComicMetadata to ComicInfo for use with ComicFileProcessor
             var comicInfo = ComicInfo.FromMetadata(metadata);
-            
+            if (ComicVolume.FromTag(comicInfo.Volume) is null
+                && (ComicVolume.FromSeriesName(originalSeries)
+                    ?? ComicVolume.FromFileName(Path.GetFileName(originalPath))
+                    ?? ComicVolume.FromSeriesName(Path.GetFileName(directory))) is { } volume)
+            {
+                // In-memory only: the copy renders the name, the file's tags are untouched.
+                comicInfo.Volume = volume.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            // An issue written as "Annual 1" is named by its number: the series names the Annual.
+            var issue = AnnualIssue.IssueNumber(metadata.Issue);
+
             // Use ComicFileProcessor.FormatFilename to properly handle decimal issue numbers
             var filename = ComicFileProcessor.FormatFilename(
                 _settings.FilenameFormat,
                 comicInfo,
-                metadata.Issue ?? "",
+                issue ?? "",
                 extension,
-                _settings.IssueNumberPadding);
+                _settings.IssueNumberPadding,
+                Path.GetFileName(originalPath));
             
             // Remove extension as FormatFilename adds it
             if (filename.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
@@ -417,7 +436,7 @@ public partial class ComicProcessorService
             // One-shots / volume-only files (no chapter in metadata and no
             // explicit "Ch/Chapter" keyword in the original filename) are
             // intentionally left untouched.
-            filename = EnsureChapterNumberPreserved(filename, metadata.Issue, originalPath);
+            filename = EnsureChapterNumberPreserved(filename, issue, originalPath);
 
             filename = ComicFileProcessor.SanitizeFileName(filename);
             

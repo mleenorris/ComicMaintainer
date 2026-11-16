@@ -161,3 +161,85 @@ test('issue numbers above 100000, such as dates, leave no gap before them', asyn
     assert.deepEqual(layout(page), ['/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz', '/comics/Saga/Saga 20240115.cbz']);
     assert.equal(banner(page), null);
 });
+
+// An issue of one volume of Green Lantern: volume_key/volume_label as the server sends them.
+const volumeIssue = (number, year) => issue(number, {
+    file_path: `/comics/Green Lantern/Green Lantern (${year}) - Chapter ${String(number).padStart(4, '0')}.cbz`,
+    file_name: `Green Lantern (${year}) - Chapter ${String(number).padStart(4, '0')}.cbz`,
+    volume_key: year ? `y${year}` : null,
+    volume_label: year ? String(year) : null
+});
+const volumeLayout = page => page.$$('#seriesDetailPanel .series-issues-grid > *').map(element => {
+    if (element.matches('.series-issues-volume-heading')) return `== ${text(element)}`;
+    if (element.classList.contains('series-issue-card--missing')) return `${element.querySelector('.series-issue-badge').textContent} missing`;
+    return `${element.dataset.volume || ''}#${text(element.querySelector('.series-issue-badge')).replace('#', '')}`;
+});
+
+test('a series whose numbering restarts with each volume shows each volume with its own missing issues', async () => {
+    // As the server orders them: 1990 #1, #3, then 2005 #1, #2, then an issue of no known volume.
+    const page = await bootSeries({
+        issues: [volumeIssue(1, 1990), volumeIssue(3, 1990), volumeIssue(1, 2005), volumeIssue(2, 2005), volumeIssue(4, null)]
+    });
+
+    assert.deepEqual(volumeLayout(page), [
+        '== 1990 2 issues', '#1', '#2 missing', '#3',
+        '== 2005 2 issues', '#1', '#2',
+        '== No volume 1 issue', '#1 missing', '#2 missing', '#3 missing', '#4'
+    ]);
+    assert.equal(bannerText(page), 'Missing 4 issues: 1990: #2; No volume: #1-3');
+});
+
+test('volumes that continue one numbering, like a manga\'s, stay one run', async () => {
+    const page = await bootSeries({ issues: [volumeIssue(1, 1990), volumeIssue(2, 2005), volumeIssue(4, 2005)] });
+
+    assert.equal(page.$('#seriesDetailPanel .series-issues-volume-heading'), null);
+    assert.equal(bannerText(page), 'Missing 1 issue: #3');
+});
+
+test('one known volume is one run', async () => {
+    const page = await bootSeries({ issues: [volumeIssue(1, 1990), volumeIssue(1, null), volumeIssue('Annual', 1990)] });
+
+    assert.equal(page.$('#seriesDetailPanel .series-issues-volume-heading'), null);
+});
+
+test('Annuals get a section of their own, with their own missing issues', async () => {
+    const annual = number => issue(number, {
+        file_path: `/comics/Saga/Saga Annual - Chapter ${number}.cbz`,
+        file_name: `Saga Annual - Chapter ${number}.cbz`,
+        annual: true
+    });
+    // As the server orders them: the series' issues, then the Annuals.
+    const page = await bootSeries({ issues: [issue(1), issue(3), annual(1), annual(3)] });
+
+    assert.deepEqual(volumeLayout(page), [
+        '== Issues 2 issues', '#1', '#2 missing', '#3',
+        '== Annual 2 issues', '#1', '#2 missing', '#3'
+    ]);
+    assert.equal(bannerText(page), 'Missing 2 issues: Issues: #2; Annual: #2');
+});
+
+test('the Annuals of a volume series are named after their volume', async () => {
+    const annualOf = (number, year) => ({ ...volumeIssue(number, year), file_path: `/comics/Green Lantern/Annual ${year} ${number}.cbz`, annual: true });
+    const page = await bootSeries({
+        issues: [volumeIssue(1, 1990), volumeIssue(1, 2005), annualOf(1, 1990), annualOf(1, 2005)]
+    });
+
+    assert.deepEqual(page.$$('#seriesDetailPanel .series-issues-volume-heading').map(text),
+        ['1990 1 issue', '2005 1 issue', '1990 Annual 1 issue', '2005 Annual 1 issue']);
+});
+
+test('only Annuals of one volume make one section named after it', async () => {
+    const annual = number => ({ ...volumeIssue(number, 1990), file_path: `/comics/Green Lantern/A${number}.cbz`, annual: true });
+    const page = await bootSeries({ issues: [annual(1), annual(2)] });
+
+    assert.deepEqual(page.$$('#seriesDetailPanel .series-issues-volume-heading').map(text), ['1990 Annual 2 issues']);
+});
+
+test('the series issues of mixed volumes, beside Annuals, are named "Issues"', async () => {
+    // 1990 #1 and 2005 #2 continue one numbering, so they stay one run.
+    const page = await bootSeries({
+        issues: [volumeIssue(1, 1990), volumeIssue(2, 2005), { ...volumeIssue(1, null), file_path: '/comics/Green Lantern/A1.cbz', annual: true }]
+    });
+
+    assert.deepEqual(page.$$('#seriesDetailPanel .series-issues-volume-heading').map(text), ['Issues 2 issues', 'Annual 1 issue']);
+});

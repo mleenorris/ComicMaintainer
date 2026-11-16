@@ -220,7 +220,8 @@ public partial class SeriesLibraryService
                 Renamed = issue.Renamed,
                 Normalized = issue.Normalized,
                 Duplicate = issue.Duplicate,
-                Read = issue.Read
+                Read = issue.Read,
+                Annual = issue.Annual
             };
         }
 
@@ -253,13 +254,37 @@ public partial class SeriesLibraryService
         };
     }
 
+    /// <summary>
+    /// Orders a series' issues by issue number. A series split into runs (see
+    /// <see cref="VolumeNumbering"/>) lists each run in turn: each volume of a numbering that
+    /// restarts by volume, oldest first, then the Annuals, instead of #1 of every volume and
+    /// Annual #1 together.
+    /// </summary>
     private static List<SeriesIssueDto> SortIssues(IEnumerable<SeriesIssueDto> issues)
+    {
+        var list = issues as IReadOnlyCollection<SeriesIssueDto> ?? issues.ToList();
+        var volumes = RestartingVolumes(list);
+        return volumes is null
+            ? SortByIssueNumber(list)
+            : volumes.SelectMany(volume => SortByIssueNumber(volume.Items)).ToList();
+    }
+
+    private static List<SeriesIssueDto> SortByIssueNumber(IEnumerable<SeriesIssueDto> issues)
     {
         return issues
             .OrderBy(issue => ExtractIssueSortKey(ResolveIssueNumber(issue)), new NaturalStringComparer())
             .ThenBy(issue => issue.FileName, new NaturalStringComparer())
             .ToList();
     }
+
+    /// <summary>
+    /// The series' issues split into runs numbered on their own (Annuals, and volumes of a
+    /// numbering that restarts by volume); null when it is one run. An issue's number falls
+    /// back to its file name, as for ordering.
+    /// </summary>
+    internal static IReadOnlyList<VolumeNumbering.VolumeGroup<SeriesIssueDto>>? RestartingVolumes(
+        IEnumerable<SeriesIssueDto> issues)
+        => VolumeNumbering.SeparateRuns(issues, issue => issue.VolumeInfo, ResolveIssueNumber, issue => issue.Annual);
 
     private static string ExtractIssueSortKey(string? issue)
         => string.IsNullOrWhiteSpace(issue) ? "~" : issue;

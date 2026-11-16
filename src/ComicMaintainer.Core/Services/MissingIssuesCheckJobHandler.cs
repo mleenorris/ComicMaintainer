@@ -69,7 +69,7 @@ public class MissingIssuesCheckJobHandler : IScheduledJobFindingsHandler
             : await _seriesLibrary.GetSeriesIssuesForIdsAsync(
                 candidates.Series.Select(series => series.Id),
                 cancellationToken);
-        var seriesWithGaps = new List<(string Title, List<int> Missing, List<string> AlternateTitles)>();
+        var seriesWithGaps = new List<(string Title, List<int> Missing, List<string> AlternateTitles, bool CanDownload)>();
         long totalMissing = 0;
         var skippedOversizedSeries = 0;
         var queuedChapters = 0;
@@ -87,39 +87,57 @@ public class MissingIssuesCheckJobHandler : IScheduledJobFindingsHandler
                 continue;
             }
 
-            if (!TryComputeMissingIssueNumbers(
-                    issues.Issues.Select(i => i.Issue), cancellationToken, out var missing))
-            {
-                skippedOversizedSeries++;
-                _logger.LogWarning(
-                    "Missing issues check: skipping {Title} because its issue range exceeds {Maximum}",
-                    LoggingHelper.SanitizeForLog(series.Title),
-                    MaxIssueNumberRange);
-                continue;
-            }
-
-            if (missing.Count == 0)
-            {
-                continue;
-            }
-
             var title = FirstNonBlank(series.Title, issues.Title, series.CanonicalTitle) ?? series.Id;
-            var alternateTitles = new[] { issues.Title, issues.CanonicalTitle, series.CanonicalTitle }
-                .Concat(issues.Aliases)
-                .Concat(series.Aliases)
-                .Where(t => !string.IsNullOrWhiteSpace(t) && !string.Equals(t, title, StringComparison.OrdinalIgnoreCase))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            seriesWithGaps.Add((title, missing, alternateTitles));
-            totalMissing += missing.Count;
 
-            _logger.LogInformation(
-                "Missing issues check: {Title} is missing {Count} issue(s)",
-                LoggingHelper.SanitizeForLog(title),
-                missing.Count);
+            // A series split into runs numbered on their own (Annuals, and the volumes of a
+            // numbering that restarts with each volume: "Green Lantern" #1 of 1990 and of 2005)
+            // is checked one run at a time; one numbering is checked as a whole.
+            var volumes = VolumeNumbering.SeparateRuns(issues.Issues, i => i.VolumeInfo, i => i.Issue, i => i.Annual);
+            var splitByVolume = volumes?.Any(run => run.Volume is not null) == true;
+            var runs = volumes is null
+                ? new (string Title, IEnumerable<SeriesIssueDto> Issues, bool CanDownload)[]
+                    { (title, issues.Issues, true) }
+                : volumes.Select(run => (
+                    Title: RunTitle(title, run.Volume, run.IsAnnual, splitByVolume),
+                    Issues: run.Items.AsEnumerable(),
+                    // Suwayomi has no notion of comic volumes or Annuals: "#3" would be any run's #3.
+                    CanDownload: false)).ToArray();
+
+            List<string>? alternateTitles = null;
+            foreach (var run in runs)
+            {
+                if (!TryComputeMissingIssueNumbers(run.Issues.Select(i => i.Issue), cancellationToken, out var missing))
+                {
+                    skippedOversizedSeries++;
+                    _logger.LogWarning(
+                        "Missing issues check: skipping {Title} because its issue range exceeds {Maximum}",
+                        LoggingHelper.SanitizeForLog(run.Title),
+                        MaxIssueNumberRange);
+                    continue;
+                }
+
+                if (missing.Count == 0)
+                {
+                    continue;
+                }
+
+                alternateTitles ??= new[] { issues.Title, issues.CanonicalTitle, series.CanonicalTitle }
+                    .Concat(issues.Aliases)
+                    .Concat(series.Aliases)
+                    .Where(t => !string.IsNullOrWhiteSpace(t) && !string.Equals(t, title, StringComparison.OrdinalIgnoreCase))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                seriesWithGaps.Add((run.Title, missing, alternateTitles, run.CanDownload));
+                totalMissing += missing.Count;
+
+                _logger.LogInformation(
+                    "Missing issues check: {Title} is missing {Count} issue(s)",
+                    LoggingHelper.SanitizeForLog(run.Title),
+                    missing.Count);
+            }
         }
 
-        if (downloadEnabled && seriesWithGaps.Count > 0)
+        if (downloadEnabled && seriesWithGaps.Any(series => series.CanDownload))
         {
             SuwayomiLibrarySnapshot? librarySnapshot = null;
             try
@@ -128,7 +146,7 @@ public class MissingIssuesCheckJobHandler : IScheduledJobFindingsHandler
             }
             catch (SuwayomiException ex)
             {
-                downloadFailures = seriesWithGaps.Count;
+                downloadFailures = seriesWithGaps.Count(series => series.CanDownload);
                 _logger.LogWarning(
                     "Missing issues check: could not load the Suwayomi library: {Message}",
                     LoggingHelper.SanitizeForLog(ex.Message));
@@ -136,7 +154,7 @@ public class MissingIssuesCheckJobHandler : IScheduledJobFindingsHandler
 
             if (librarySnapshot is not null)
             {
-                foreach (var series in seriesWithGaps)
+                foreach (var series in seriesWithGaps.Where(series => series.CanDownload))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     try
@@ -245,7 +263,7 @@ public class MissingIssuesCheckJobHandler : IScheduledJobFindingsHandler
 
     private static string BuildSummary(
         int checkedSeries,
-        List<(string Title, List<int> Missing, List<string> AlternateTitles)> seriesWithGaps,
+        List<(string Title, List<int> Missing, List<string> AlternateTitles, bool CanDownload)> seriesWithGaps,
         long totalMissing,
         int skippedOversizedSeries,
         bool autoDownloadRequested,
@@ -302,6 +320,19 @@ public class MissingIssuesCheckJobHandler : IScheduledJobFindingsHandler
         }
 
         return $"{outcomeText}{seriesWithGaps.Count} series missing {totalMissing} issue(s): {named}.";
+    }
+
+    /// <summary>
+    /// How a run of a split series is named in the summary: <c>Green Lantern (1990)</c>,
+    /// <c>Green Lantern Annual</c>, <c>Green Lantern Annual (1990)</c>, or
+    /// <c>Green Lantern (no volume)</c> for issues of no known volume among volumes.
+    /// </summary>
+    private static string RunTitle(string title, ComicMaintainer.Core.Utilities.ComicVolume? volume, bool annual, bool splitByVolume)
+    {
+        var name = annual ? $"{title} Annual" : title;
+        return volume is { } known
+            ? $"{name} {known.Label}"
+            : splitByVolume && !annual ? $"{name} (no volume)" : name;
     }
 
     private static string? FirstNonBlank(params string?[] values) =>

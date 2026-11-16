@@ -1907,6 +1907,31 @@
             gap: 16px;
         }
 
+        /* A volume's heading spans the grid row above its issues (series
+           whose numbering restarts with each volume). */
+        .series-issues-volume-heading {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            margin: 8px 0 0;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border-primary);
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .series-issues-volume-heading:first-child {
+            margin-top: 0;
+        }
+
+        .series-issues-volume-count {
+            font-size: 13px;
+            font-weight: 400;
+            color: var(--text-secondary);
+        }
+
         .series-issue-card {
             position: relative;
             display: flex;

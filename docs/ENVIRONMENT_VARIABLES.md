@@ -292,7 +292,7 @@ These can be set with an `AppSettings__<Name>` variable. It only sets the starti
 | Variable | Default | Valid values | What it does | Settings |
 |---|---|---|---|---|
 | `AppSettings__ConvertRarToCbzOnWrite` | `true` | `true`, `false` | Writing tags to a CBR, RAR or ZIP saves it as `.cbz` and deletes the original. The library record, read status and progress move with the file. See below | Yes |
-| `AppSettings__FilenameFormat` | `{series} - Chapter {issue}` | Non-blank text | The rename pattern | Yes |
+| `AppSettings__FilenameFormat` | `{series} - Chapter {issue}` | Non-blank text | The rename pattern. When an issue's volume is known, `{series}` is followed by it: a start year as `Green Lantern (1990)`, a number as `Saga Vol. 2`. This keeps #1 of each volume from being flagged as a duplicate. The volume comes from ComicInfo `<Volume>`, the series name, or the file name (a `v2` token, or a year before the issue number). Nothing is added when the pattern uses `{volume}` itself or the series name already ends in a volume | Yes |
 | `AppSettings__IssueNumberPadding` | `4` | 0 to 10 | Digits the issue number is padded to | Yes |
 | `AppSettings__WatcherEnableRename` | `true` | `true`, `false` | The watcher renames files | Yes |
 | `AppSettings__WatcherEnableNormalize` | `true` | `true`, `false` | The watcher writes metadata to files | Yes |

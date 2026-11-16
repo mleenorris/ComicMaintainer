@@ -253,13 +253,35 @@ public partial class SeriesLibraryService
         };
     }
 
+    /// <summary>
+    /// Orders a series' issues by issue number. When the series' numbering restarts with each
+    /// volume (see <see cref="VolumeNumbering"/>), each volume's issues come together, oldest
+    /// volume first, instead of #1 of every volume, then #2 of every volume.
+    /// </summary>
     private static List<SeriesIssueDto> SortIssues(IEnumerable<SeriesIssueDto> issues)
+    {
+        var list = issues as IReadOnlyCollection<SeriesIssueDto> ?? issues.ToList();
+        var volumes = RestartingVolumes(list);
+        return volumes is null
+            ? SortByIssueNumber(list)
+            : volumes.SelectMany(volume => SortByIssueNumber(volume.Items)).ToList();
+    }
+
+    private static List<SeriesIssueDto> SortByIssueNumber(IEnumerable<SeriesIssueDto> issues)
     {
         return issues
             .OrderBy(issue => ExtractIssueSortKey(ResolveIssueNumber(issue)), new NaturalStringComparer())
             .ThenBy(issue => issue.FileName, new NaturalStringComparer())
             .ToList();
     }
+
+    /// <summary>
+    /// The series' issues by volume when its numbering restarts with each volume; null when it
+    /// is one run. An issue's number falls back to its file name, as for ordering.
+    /// </summary>
+    internal static IReadOnlyList<VolumeNumbering.VolumeGroup<SeriesIssueDto>>? RestartingVolumes(
+        IEnumerable<SeriesIssueDto> issues)
+        => VolumeNumbering.RestartingGroups(issues, issue => issue.VolumeInfo, ResolveIssueNumber);
 
     private static string ExtractIssueSortKey(string? issue)
         => string.IsNullOrWhiteSpace(issue) ? "~" : issue;

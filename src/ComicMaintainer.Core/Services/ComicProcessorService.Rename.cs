@@ -95,6 +95,7 @@ public partial class ComicProcessorService
                 // file. The resolved name is applied in-memory for filename
                 // generation only; rewriting ComicInfo.xml remains the normalize
                 // operation's responsibility.
+                var originalSeries = metadata.Series;
                 var resolvedSeries = await ResolveNormalizedSeriesAsync(metadata, filePath, cancellationToken);
                 if (!string.IsNullOrEmpty(resolvedSeries) && metadata.Series != resolvedSeries)
                 {
@@ -105,7 +106,7 @@ public partial class ComicProcessorService
                 }
 
                 _logger.LogDebug("RenameFileAsync: Generating new filename for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                var newResolvedPath = GenerateFileName(metadata, resolvedPath);
+                var newResolvedPath = GenerateFileName(metadata, resolvedPath, originalSeries);
                 if (newResolvedPath == null)
                 {
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
@@ -382,23 +383,35 @@ public partial class ComicProcessorService
     /// Returns null (after logging the error) when the filename cannot be generated; callers must
     /// treat that as a rename failure, never as "already correctly named".
     /// </summary>
-    private string? GenerateFileName(ComicMetadata metadata, string originalPath)
+    /// <param name="originalSeries">
+    /// The series as the file named it before the resolved name replaced it. A volume year it
+    /// ends in ("Green Lantern (1990)") still goes into the name when the file has no
+    /// <c>&lt;Volume&gt;</c> tag, so volumes that share a resolved name stay apart.
+    /// </param>
+    private string? GenerateFileName(ComicMetadata metadata, string originalPath, string? originalSeries = null)
     {
         try
         {
             var directory = Path.GetDirectoryName(originalPath) ?? _settings.WatchedDirectory;
             var extension = Path.GetExtension(originalPath);
-            
+
             // Convert ComicMetadata to ComicInfo for use with ComicFileProcessor
             var comicInfo = ComicInfo.FromMetadata(metadata);
-            
+            if (ComicVolume.FromTag(comicInfo.Volume) is null
+                && ComicVolume.FromSeriesName(originalSeries) is { } seriesVolume)
+            {
+                // In-memory only: the copy renders the name, the file's tags are untouched.
+                comicInfo.Volume = seriesVolume.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+
             // Use ComicFileProcessor.FormatFilename to properly handle decimal issue numbers
             var filename = ComicFileProcessor.FormatFilename(
                 _settings.FilenameFormat,
                 comicInfo,
                 metadata.Issue ?? "",
                 extension,
-                _settings.IssueNumberPadding);
+                _settings.IssueNumberPadding,
+                Path.GetFileName(originalPath));
             
             // Remove extension as FormatFilename adds it
             if (filename.EndsWith(extension, StringComparison.OrdinalIgnoreCase))

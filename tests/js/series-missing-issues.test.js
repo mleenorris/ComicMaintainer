@@ -161,3 +161,43 @@ test('issue numbers above 100000, such as dates, leave no gap before them', asyn
     assert.deepEqual(layout(page), ['/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz', '/comics/Saga/Saga 20240115.cbz']);
     assert.equal(banner(page), null);
 });
+
+// An issue of one volume of Green Lantern: volume_key/volume_label as the server sends them.
+const volumeIssue = (number, year) => issue(number, {
+    file_path: `/comics/Green Lantern/Green Lantern (${year}) - Chapter ${String(number).padStart(4, '0')}.cbz`,
+    file_name: `Green Lantern (${year}) - Chapter ${String(number).padStart(4, '0')}.cbz`,
+    volume_key: year ? `y${year}` : null,
+    volume_label: year ? String(year) : null
+});
+const volumeLayout = page => page.$$('#seriesDetailPanel .series-issues-grid > *').map(element => {
+    if (element.matches('.series-issues-volume-heading')) return `== ${text(element)}`;
+    if (element.classList.contains('series-issue-card--missing')) return `${element.querySelector('.series-issue-badge').textContent} missing`;
+    return `${element.dataset.volume || ''}#${text(element.querySelector('.series-issue-badge')).replace('#', '')}`;
+});
+
+test('a series whose numbering restarts with each volume shows each volume with its own missing issues', async () => {
+    // As the server orders them: 1990 #1, #3, then 2005 #1, #2, then an issue of no known volume.
+    const page = await bootSeries({
+        issues: [volumeIssue(1, 1990), volumeIssue(3, 1990), volumeIssue(1, 2005), volumeIssue(2, 2005), volumeIssue(4, null)]
+    });
+
+    assert.deepEqual(volumeLayout(page), [
+        '== 1990 2 issues', '#1', '#2 missing', '#3',
+        '== 2005 2 issues', '#1', '#2',
+        '== No volume 1 issue', '#1 missing', '#2 missing', '#3 missing', '#4'
+    ]);
+    assert.equal(bannerText(page), 'Missing 4 issues: 1990: #2; No volume: #1-3');
+});
+
+test('volumes that continue one numbering, like a manga\'s, stay one run', async () => {
+    const page = await bootSeries({ issues: [volumeIssue(1, 1990), volumeIssue(2, 2005), volumeIssue(4, 2005)] });
+
+    assert.equal(page.$('#seriesDetailPanel .series-issues-volume-heading'), null);
+    assert.equal(bannerText(page), 'Missing 1 issue: #3');
+});
+
+test('one known volume is one run', async () => {
+    const page = await bootSeries({ issues: [volumeIssue(1, 1990), volumeIssue(1, null), volumeIssue('Annual', 1990)] });
+
+    assert.equal(page.$('#seriesDetailPanel .series-issues-volume-heading'), null);
+});

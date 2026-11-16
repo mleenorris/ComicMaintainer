@@ -389,3 +389,11 @@ test('a server that stops answering removes the download action', async () => {
     assert.ok(page.$('#seriesDetailPanel .series-detail-missing-banner'));
     assert.equal(downloadButton(page), null);
 });
+
+test('a series split into volumes offers no Suwayomi download, which cannot tell volumes apart', async () => {
+    const volume = (number, year) => issue(number, { file_path: `/comics/Saga/${year}-${number}.cbz`, volume_key: `y${year}`, volume_label: String(year) });
+    const page = await bootSeries({ issues: [volume(1, 1990), volume(3, 1990), volume(1, 2005)], suwayomi: CONNECTED });
+
+    assert.ok(page.$('#seriesDetailPanel .series-detail-missing-banner'));
+    assert.equal(downloadButton(page), null);
+});

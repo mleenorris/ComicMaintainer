@@ -289,6 +289,82 @@ public class SeriesLibraryServiceTests
         Assert.Equal("3", page2.Issues[0].Issue);
     }
 
+    private static ComicFile VolumeFile(string fileName, string issue, string? volume) => new()
+    {
+        FilePath = $"/library/Green Lantern/{fileName}",
+        FileName = fileName,
+        Directory = "/library/Green Lantern",
+        FileSize = 100,
+        LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+        Metadata = new ComicMetadata { Series = "Green Lantern", Issue = issue, Volume = volume }
+    };
+
+    [Fact]
+    public async Task GetSeriesIssuesAsync_NumberingRestartingByVolume_ListsEachVolumeInTurn()
+    {
+        // Green Lantern #1-#2 of 1990 and #1-#2 of 2005 (the second only known from its name).
+        var files = new List<ComicFile>
+        {
+            VolumeFile("a.cbz", "2", "2005"),
+            VolumeFile("b.cbz", "1", "1990"),
+            VolumeFile("Green Lantern (2005) - Chapter 0001.cbz", "1", null),
+            VolumeFile("c.cbz", "2", "1990"),
+        };
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(files);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var seriesId = (await service.GetSeriesSummariesAsync()).Series.Single().Id;
+
+        var result = await service.GetSeriesIssuesAsync(seriesId, perPage: -1);
+
+        Assert.Equal(
+            new[] { ("y1990", "1"), ("y1990", "2"), ("y2005", "1"), ("y2005", "2") },
+            result!.Issues.Select(i => (i.VolumeKey!, i.Issue!)).ToArray());
+        Assert.Equal(new[] { "1990", "1990", "2005", "2005" }, result.Issues.Select(i => i.VolumeLabel));
+    }
+
+    [Fact]
+    public async Task GetSeriesIssuesAsync_VolumesContinuingOneNumbering_StayInIssueOrder()
+    {
+        // A manga's tankōbon volumes: chapter order is the issue order.
+        var files = new List<ComicFile>
+        {
+            VolumeFile("x.cbz", "3", "2"),
+            VolumeFile("y.cbz", "1", "1"),
+            VolumeFile("z.cbz", "4", null),
+            VolumeFile("w.cbz", "2", "1"),
+        };
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(files);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var seriesId = (await service.GetSeriesSummariesAsync()).Series.Single().Id;
+
+        var result = await service.GetSeriesIssuesAsync(seriesId, perPage: -1);
+
+        Assert.Equal(new[] { "1", "2", "3", "4" }, result!.Issues.Select(i => i.Issue));
+    }
+
+    [Theory]
+    // 1990 has #1-#3; 2005 has #1 and #3 but not #2. Without volumes #2 of 1990 would hide the gap.
+    [InlineData(true)]
+    // Both volumes complete.
+    [InlineData(false)]
+    public async Task GetSeriesSummariesAsync_MissingFilter_ChecksEachVolumeOfARestartingNumbering(bool gapInSecondVolume)
+    {
+        var files = new List<ComicFile>
+        {
+            VolumeFile("a.cbz", "1", "1990"),
+            VolumeFile("b.cbz", "2", "1990"),
+            VolumeFile("c.cbz", "3", "1990"),
+            VolumeFile("d.cbz", "1", "2005"),
+            VolumeFile("e.cbz", gapInSecondVolume ? "3" : "2", "2005"),
+        };
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(files);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var missing = await service.GetSeriesSummariesAsync(filter: "missing");
+
+        Assert.Equal(gapInSecondVolume ? 1 : 0, missing.Series.Count);
+    }
+
     [Fact]
     public async Task GetSeriesAsync_PinnedName_UsesPinnedNameSlugForSeriesId()
     {

@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 
@@ -33,8 +34,9 @@ public class ComicFileProcessorTests
     }
 
     [Theory]
-    [InlineData("{series} - Chapter {issue}", "Batman", "5", "Batman - Chapter 0005.cbz")]
-    [InlineData("{series} #{issue}", "Superman", "12", "Superman #0012.cbz")]
+    // The tags' <Volume> follows the series unless the template places {volume} itself.
+    [InlineData("{series} - Chapter {issue}", "Batman", "5", "Batman Vol. 1 - Chapter 0005.cbz")]
+    [InlineData("{series} #{issue}", "Superman", "12", "Superman Vol. 1 #0012.cbz")]
     [InlineData("{series} v{volume} #{issue} - {title}", "Spiderman", "1", "Spiderman v1 #0001 - Test.cbz")]
     public void FormatFilename_WithVariousTemplates_FormatsCorrectly(
         string template, string series, string issue, string expected)
@@ -54,6 +56,26 @@ public class ComicFileProcessorTests
 
         // Assert
         Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    // A start year (tag or the file's own name) is written after the series, a number as "Vol. n".
+    [InlineData("Green Lantern", "1990", null, "Green Lantern (1990) - Chapter 0001.cbz")]
+    [InlineData("Saga", "2", null, "Saga Vol. 2 - Chapter 0001.cbz")]
+    [InlineData("Green Lantern", null, "Green Lantern (1990) 001.cbz", "Green Lantern (1990) - Chapter 0001.cbz")]
+    [InlineData("Green Lantern", null, "Green Lantern v2 001.cbz", "Green Lantern Vol. 2 - Chapter 0001.cbz")]
+    // A series name that already ends in a volume keeps it once.
+    [InlineData("Green Lantern (2023)", "2023", null, "Green Lantern (2023) - Chapter 0001.cbz")]
+    [InlineData("Saga Vol. 2", "2", null, "Saga Vol. 2 - Chapter 0001.cbz")]
+    // No volume anywhere, or only the cover year after the issue: the name is unchanged.
+    [InlineData("Saga", null, "Saga 001 (2012).cbz", "Saga - Chapter 0001.cbz")]
+    [InlineData("Saga", "-1", null, "Saga - Chapter 0001.cbz")]
+    public void FormatFilename_AddsTheIssuesVolumeAfterTheSeries(string series, string? volume, string? sourceFileName, string expected)
+    {
+        var tags = new ComicInfo { Series = series, Volume = volume };
+
+        Assert.Equal(expected, ComicFileProcessor.FormatFilename(
+            AppSettings.DefaultFilenameFormat, tags, "1", ".cbz", 4, sourceFileName));
     }
 
     [Fact]

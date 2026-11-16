@@ -616,14 +616,60 @@
             return n;
         }
 
-        // Build the grid items array for the series-issues-grid, interleaving
+        // American comics restart their numbering with each volume ("Green
+        // Lantern" #1 of 1990 and #1 of 2005). When a series' volumes share an
+        // issue number, its issues are grouped by volume (volume_key, sent by
+        // the server, which already orders the issues volume by volume) so each
+        // volume gets its own run and its own missing issues. Volumes that
+        // continue one numbering (a manga's tankōbon volumes) stay one run, as
+        // on the server (VolumeNumbering). Returns null for one run.
+        function groupIssuesByRestartingVolume(issues) {
+            const groups = new Map();
+            for (const issue of issues || []) {
+                const key = (issue && issue.volume_key) || '';
+                if (!groups.has(key)) {
+                    groups.set(key, { key, label: (issue && issue.volume_label) || '', issues: [] });
+                }
+                groups.get(key).issues.push(issue);
+            }
+            const known = [...groups.values()].filter(group => group.key);
+            if (known.length < 2) return null;
+            const seen = new Set();
+            let restarts = false;
+            for (const group of known) {
+                const numbers = new Set();
+                for (const issue of group.issues) {
+                    const value = parseNumericIssueValue(issue.issue);
+                    if (value !== null) numbers.add(Math.floor(value));
+                }
+                for (const n of numbers) {
+                    if (seen.has(n)) restarts = true;
+                    seen.add(n);
+                }
+            }
+            return restarts ? [...groups.values()] : null;
+        }
+
+        // The grid items for the series-issues-grid: one run of issues, or, for
+        // a series whose numbering restarts by volume, a heading and a run per
+        // volume (see groupIssuesByRestartingVolume).
+        function buildSeriesIssuesGridItems(issues) {
+            const volumes = groupIssuesByRestartingVolume(issues);
+            if (!volumes) return buildIssueRunGridItems(issues);
+            return volumes.flatMap(volume => [
+                { kind: 'volume', label: volume.label, count: volume.issues.length },
+                ...buildIssueRunGridItems(volume.issues)
+            ]);
+        }
+
+        // Build the grid items for one run of issues, interleaving
         // missing-issue placeholders in their proper position (by integer issue
         // number) so the user can visually see which issues are missing
         // alongside the issues they own. Numeric issues (including decimals such
         // as "1.5") are ordered by their numeric value so they appear in their
         // proper position. Issues without a numeric issue number (e.g. "Annual")
         // are appended at the end in their original order.
-        function buildSeriesIssuesGridItems(issues) {
+        function buildIssueRunGridItems(issues) {
             const items = [];
             const numericIssues = [];
             const nonNumericIssues = [];
@@ -826,17 +872,27 @@
         // Render a small banner above the issues grid summarizing any missing
         // integer issue numbers between #1 and the highest known issue number.
         function renderMissingIssuesBanner(issues, series) {
-            const runs = computeMissingIssueRanges(issues);
-            if (!runs.length) return '';
+            // A series whose numbering restarts by volume is checked volume by
+            // volume, each volume's gaps named after it ("1990: #3; Vol. 2: #5").
+            const volumes = groupIssuesByRestartingVolume(issues);
+            const parts = (volumes || [{ label: '', issues }])
+                .map(volume => ({ label: volume.label, runs: computeMissingIssueRanges(volume.issues) }))
+                .filter(part => part.runs.length);
+            if (!parts.length) return '';
             // Runs of consecutive numbers are shown as ranges (e.g. 2,3,4 -> "2-4").
-            const label = runs.map(([start, end]) => (start === end ? `#${start}` : `#${start}-${end}`)).join(', ');
-            const count = runs.reduce((total, [start, end]) => total + end - start + 1, 0);
+            const describeRuns = runs => runs.map(([start, end]) => (start === end ? `#${start}` : `#${start}-${end}`)).join(', ');
+            const label = volumes
+                ? parts.map(part => `${part.label || 'No volume'}: ${describeRuns(part.runs)}`).join('; ')
+                : describeRuns(parts[0].runs);
+            const count = parts.reduce((total, part) => total + part.runs.reduce((sum, [start, end]) => sum + end - start + 1, 0), 0);
             // The Suwayomi action is only useful when the integration is
             // configured, so it is rendered lazily once the status probe has
             // reported a reachable server (see refreshSuwayomiAvailability).
+            // Suwayomi has no notion of comic volumes, so it is not offered for
+            // a series split into volumes: "#3" would match any volume's #3.
             const seriesId = series && series.id ? series.id : '';
             const seriesTitle = series && (series.title || series.canonical_title) ? (series.title || series.canonical_title) : '';
-            const action = seriesId && suwayomiAvailable
+            const action = seriesId && suwayomiAvailable && !volumes
                 ? `<button type="button" class="btn btn-small" data-requires-write onclick="downloadMissingIssuesFromSuwayomi('${escapeJs(seriesId)}','${escapeJs(seriesTitle)}')" title="Ask the configured Suwayomi server to download these issues">${uiIcon('download')} Download from Suwayomi</button>`
                 : '';
             return `
@@ -855,6 +911,11 @@
         // used for the initial render and for incrementally appending later
         // pages without rebuilding the surrounding panel.
         function renderSeriesIssueGridItemHtml(item) {
+            if (item.kind === 'volume') {
+                const name = item.label || 'No volume';
+                return `
+                                <h3 class="series-issues-volume-heading">${escapeHtml(name)} <span class="series-issues-volume-count">${item.count} issue${item.count === 1 ? '' : 's'}</span></h3>`;
+            }
             if (item.kind === 'missing') {
                 const isRun = item.end !== undefined;
                 const label = isRun ? `Missing issues #${item.number}-${item.end}` : `Missing issue #${item.number}`;

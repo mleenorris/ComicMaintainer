@@ -47,8 +47,9 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     }
 
     [Theory]
-    [InlineData("Batman", "Batman (2016) 005.cbz", "5", "Batman - Chapter 0005.cbz")]
-    [InlineData("Series", "Vol.1 Ch.12.cbz", "12", "Series - Chapter 0012.cbz")]
+    // A year before the issue number is the volume's start year; a volume token is kept too.
+    [InlineData("Batman", "Batman (2016) 005.cbz", "5", "Batman (2016) - Chapter 0005.cbz")]
+    [InlineData("Series", "Vol.1 Ch.12.cbz", "12", "Series Vol. 1 - Chapter 0012.cbz")]
     [InlineData("Spider-Man 2099", "Spider-Man 2099 012.cbz", "12", "Spider-Man 2099 - Chapter 0012.cbz")]
     // "(c2c)", "c2c" and a CRC tag are not chapter 2.
     [InlineData("Amazing Spider-Man", "Amazing Spider-Man 001 (1963) (c2c) (Digital).cbz", "1", "Amazing Spider-Man - Chapter 0001.cbz")]
@@ -126,6 +127,52 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
             Assert.Null(info.Element("Number"));
         }
     }
+
+    [Fact]
+    public async Task ProcessFileAsync_SameIssueOfTwoVolumesInOneFolder_RenamesBothAndFlagsNeither()
+    {
+        // American comics restart their numbering with each volume: Green Lantern #1 of 1990
+        // and #1 of 2005 are different issues, not duplicates.
+        var first = WriteArchive("Green Lantern", "GL v3 001.cbz", VolumeInfo("1990", "1"));
+        var second = WriteArchive("Green Lantern", "GL v4 001.cbz", VolumeInfo("2005", "1"));
+
+        Assert.True(await _service.ProcessFileAsync(first));
+        Assert.True(await _service.ProcessFileAsync(second));
+
+        Assert.Equal(
+            new[] { "Green Lantern (1990) - Chapter 0001.cbz", "Green Lantern (2005) - Chapter 0001.cbz" },
+            Directory.GetFiles(Path.Join(_root, "Green Lantern")).Select(Path.GetFileName).Order().ToArray());
+        _fileStore.Verify(
+            f => f.MarkFileDuplicateAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_SameIssueOfTheSameVolume_IsStillADuplicate()
+    {
+        var first = WriteArchive("Green Lantern", "a.cbz", VolumeInfo("1990", "1"));
+        var second = WriteArchive("Green Lantern", "b.cbz", VolumeInfo("1990", "1"));
+
+        Assert.True(await _service.ProcessFileAsync(first));
+        await _service.ProcessFileAsync(second);
+
+        Assert.True(File.Exists(Path.Join(_root, "Green Lantern", "Green Lantern (1990) - Chapter 0001.cbz")));
+        _fileStore.Verify(f => f.MarkFileDuplicateAsync(second, true, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_TemplateWithItsOwnVolumePlaceholder_IsNotGivenASecondOne()
+    {
+        _settings.FilenameFormat = "{series} v{volume} #{issue}";
+        var path = WriteArchive("Green Lantern", "x.cbz", VolumeInfo("1990", "1"));
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        Assert.True(File.Exists(Path.Join(_root, "Green Lantern", "Green Lantern v1990 #0001.cbz")));
+    }
+
+    private static string VolumeInfo(string volume, string number)
+        => $"<ComicInfo><Series>Green Lantern</Series><Number>{number}</Number><Volume>{volume}</Volume></ComicInfo>";
 
     private string WriteArchive(string folder, string fileName, string? comicInfo = null)
     {

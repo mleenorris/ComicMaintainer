@@ -190,7 +190,7 @@ public class SettingsControllerCoverageTests
 
         Assert.Equal("{series} #{issue}", json.GetProperty("format").GetString());
         // "Reset Filename Format" in the settings page restores this value.
-        Assert.Equal("{series} - Chapter {issue}", json.GetProperty("default").GetString());
+        Assert.Equal(AppSettings.DefaultFilenameFormat, json.GetProperty("default").GetString());
         Assert.Equal(new AppSettings().FilenameFormat, json.GetProperty("default").GetString());
     }
 

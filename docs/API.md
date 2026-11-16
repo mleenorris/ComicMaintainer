@@ -845,7 +845,7 @@ Any signed-in account can read settings. Every write needs Admin. Writes use `PU
 | `GET` | `/api/settings` | Signed in | Everything, see below |
 | `PUT` | `/api/settings` | Admin | Save any groups in one write, see below |
 | `GET` | `/api/settings/filename-format` | Signed in | `{"format","default"}` |
-| `PUT` | `/api/settings/filename-format` | Admin | `{"format":"{series} - Chapter {issue}"}` |
+| `PUT` | `/api/settings/filename-format` | Admin | `{"format":"{series} {annual} {volume_label} - Chapter {issue}"}` |
 | `GET` | `/api/settings/issue-number-padding` | Signed in | `{"padding"}` |
 | `PUT` | `/api/settings/issue-number-padding` | Admin | `{"padding":4}` (0 to 10) |
 | `GET` | `/api/settings/log-max-bytes` | Signed in | `{"maxMB"}` |
@@ -898,7 +898,7 @@ A successful write returns `{"message":"..."}`, and the new value is in effect w
 
 ```json
 {
-  "filenameFormat": "{series} - Chapter {issue}",
+  "filenameFormat": "{series} {annual} {volume_label} - Chapter {issue}",
   "logMaxMB": 10,
   "issueNumberPadding": 4,
   "databaseCleanup": {

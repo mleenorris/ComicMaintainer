@@ -27,6 +27,18 @@ public class ComicFileProcessor
     private static readonly Regex ExtraWhitespacePattern =
         new(@"\s+", RegexOptions.Compiled);
 
+    /// <summary>Brackets left empty by a placeholder that rendered nothing: "()", "[ ]".</summary>
+    private static readonly Regex EmptyBracketsPattern =
+        new(@"\(\s*\)|\[\s*\]", RegexOptions.Compiled);
+
+    /// <summary>A " - " separator repeated once a placeholder between two of them rendered nothing.</summary>
+    private static readonly Regex RepeatedSeparatorPattern =
+        new(@"(?:\s+[-–—])+(?=\s+[-–—]\s)", RegexOptions.Compiled);
+
+    /// <summary>A " - " separator left at the start or end of the name.</summary>
+    private static readonly Regex DanglingSeparatorPattern =
+        new(@"^\s*[-–—]\s+|\s+[-–—]\s*$", RegexOptions.Compiled);
+
     /// <summary>
     /// Limits issue-number padding to 0..<see cref="AppSettings.MaxIssueNumberPadding"/>. Configured values
     /// are not range-checked, and the <c>"D{padding}"</c> format string turns a negative value into literal
@@ -45,9 +57,16 @@ public class ComicFileProcessor
     /// <param name="originalExtension">Original file extension (.cbz or .cbr)</param>
     /// <param name="padding">Issue number padding (default: 4), clamped by <see cref="ClampIssueNumberPadding"/></param>
     /// <param name="sourceFileName">
-    /// The file's current name, the last place its volume is looked for (see
-    /// <see cref="SeriesWithVolume"/>).
+    /// The file's current name, the last place its volume and whether it is an Annual are
+    /// looked for (see <see cref="SeriesParts"/>).
     /// </param>
+    /// <remarks>
+    /// <c>{series}</c> is the series title alone. Its Annual and volume go only where the
+    /// template places <c>{annual}</c> ("Annual", or nothing for an issue that is not one) and
+    /// <c>{volume_label}</c> ("(1990)", "Vol. 2", or nothing when the volume is unknown).
+    /// <c>{volume}</c> is the raw <c>&lt;Volume&gt;</c> value. Brackets and " - " separators a
+    /// placeholder left empty are removed with it.
+    /// </remarks>
     public static string FormatFilename(
         string template,
         ComicInfo tags,
@@ -106,9 +125,12 @@ public class ComicFileProcessor
         }
 
         // Build replacement dictionary
+        var series = SeriesParts(tags, sourceFileName);
         var replacements = new Dictionary<string, string>
         {
-            ["series"] = SeriesWithVolume(template, tags, sourceFileName),
+            ["series"] = series.Title,
+            ["annual"] = series.Annual ? "Annual" : "",
+            ["volume_label"] = series.Volume?.Label ?? "",
             ["issue"] = issueFormatted,
             ["issue_no_pad"] = issueNoPad,
             ["title"] = tags.Title ?? "",
@@ -127,8 +149,11 @@ public class ComicFileProcessor
         // Clean up any remaining unreplaced placeholders
         result = UnreplacedPlaceholderPattern.Replace(result, "");
 
-        // Clean up extra spaces
-        result = ExtraWhitespacePattern.Replace(result, " ").Trim();
+        // Clean up what an empty placeholder left: "()", " - - ", a trailing " -", extra spaces
+        result = EmptyBracketsPattern.Replace(result, "");
+        result = ExtraWhitespacePattern.Replace(result, " ");
+        result = RepeatedSeparatorPattern.Replace(result, "");
+        result = DanglingSeparatorPattern.Replace(result, "").Trim();
 
         // Ensure proper extension
         if (!result.EndsWith(".cbz", StringComparison.OrdinalIgnoreCase) && 
@@ -141,28 +166,24 @@ public class ComicFileProcessor
     }
 
     /// <summary>
-    /// The series name as the <c>{series}</c> placeholder renders it: followed by the issue's
-    /// volume (<c>Green Lantern (1990)</c>, <c>Saga Vol. 2</c>) whenever the volume is known.
-    /// American comics restart their numbering with each volume, so without it #1 of one
-    /// volume and #1 of the next render to the same name and the second is flagged as a
-    /// duplicate. The volume comes from the ComicInfo <c>&lt;Volume&gt;</c>, the series name or
-    /// <paramref name="sourceFileName"/> (see <see cref="ComicVolume.Resolve"/>). Nothing is
-    /// added when the template places <c>{volume}</c> itself or the series name already ends in
-    /// a volume.
+    /// The series split into what the <c>{series}</c>, <c>{annual}</c> and <c>{volume_label}</c>
+    /// placeholders render: the title without its Annual or volume ("Green Lantern Annual
+    /// (1990)" gives "Green Lantern"); whether the issue is an Annual (see
+    /// <see cref="AnnualIssue.IsAnnual"/>); and its volume, from the ComicInfo
+    /// <c>&lt;Volume&gt;</c>, the series name or <paramref name="sourceFileName"/> (see
+    /// <see cref="ComicVolume.Resolve"/>). American comics restart their numbering with each
+    /// volume and Annuals have their own, so a template without <c>{volume_label}</c> and
+    /// <c>{annual}</c> gives #1 of every volume and Annual #1 the same name.
     /// </summary>
-    internal static string SeriesWithVolume(string template, ComicInfo tags, string? sourceFileName)
+    internal static (string Title, bool Annual, ComicVolume? Volume) SeriesParts(ComicInfo tags, string? sourceFileName)
     {
-        var series = tags.Series ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(series)
-            || template.Contains("{volume}", StringComparison.OrdinalIgnoreCase)
-            || ComicVolume.FromSeriesName(series) is not null)
-        {
-            return series;
-        }
-
-        return ComicVolume.Resolve(tags.Volume, seriesName: null, sourceFileName) is { } volume
-            ? $"{series.TrimEnd()} {volume.Label}"
-            : series;
+        var series = (tags.Series ?? string.Empty).Trim();
+        var annual = AnnualIssue.IsAnnual(series, tags.Number, sourceFileName);
+        var volume = ComicVolume.Resolve(tags.Volume, series, sourceFileName);
+        var title = series.Length == 0
+            ? series
+            : AnnualIssue.WithoutAnnual(ComicVolume.WithoutVolume(series));
+        return (title, annual, volume);
     }
 
     public static string SanitizeFileName(string fileName)

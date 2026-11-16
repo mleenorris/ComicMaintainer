@@ -117,12 +117,23 @@ public readonly partial record struct ComicVolume(int Value, bool IsYear)
     /// </summary>
     public static ComicVolume? FromFileName(string? fileName)
     {
-        if (string.IsNullOrWhiteSpace(fileName))
+        return string.IsNullOrWhiteSpace(fileName)
+            ? null
+            : FromFileNameStem(Path.GetFileNameWithoutExtension(fileName));
+    }
+
+    /// <summary>
+    /// <see cref="FromFileName"/> for a name that has no extension, such as a file name left in
+    /// a <c>&lt;Title&gt;</c> (see <see cref="FileNameTitle"/>), where a decimal issue
+    /// (<c>012.5</c>) must not be taken for an extension.
+    /// </summary>
+    public static ComicVolume? FromFileNameStem(string? stem)
+    {
+        if (string.IsNullOrWhiteSpace(stem))
         {
             return null;
         }
 
-        var stem = Path.GetFileNameWithoutExtension(fileName);
         var volume = VolumeTokenPattern().Match(stem);
         if (volume.Success)
         {

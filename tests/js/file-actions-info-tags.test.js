@@ -418,6 +418,7 @@ test('Update on a selection opens the batch editor and sends the filled tags', a
     assert.ok(isModalOpen(page, 'batchModal'));
 
     page.input('#batch_series', 'Saga Deluxe');
+    page.input('#batch_volume', ' 2 ');
     page.input('#batch_year', '2014');
     page.input('#batch_publisher', ' ');
     page.click('#batchModal .modal-footer .btn-primary');
@@ -425,12 +426,13 @@ test('Update on a selection opens the batch editor and sends the filled tags', a
 
     assert.ok(!isModalOpen(page, 'batchModal'));
     assert.equal(page.$('#batch_series').value, '', 'the form is reset');
+    assert.equal(page.$('#batch_volume').value, '', 'the form is reset');
     const [call] = callsTo(page, 'POST', '/api/jobs/update-metadata-selected');
     // Only the filled-in fields are sent and listed; the blank Publisher is left alone.
     assert.deepEqual(call.body, {
         Files: [FIRST, SECOND],
-        Metadata: { Series: 'Saga Deluxe', Year: 2014 },
-        Fields: ['series', 'year']
+        Metadata: { Series: 'Saga Deluxe', Volume: '2', Year: 2014 },
+        Fields: ['series', 'volume', 'year']
     });
     assert.deepEqual(messageTexts(page, 'info'), ['Started updating metadata for 2 selected files in background']);
     assert.equal(page.$('#progressTitle').textContent, 'Updating Metadata for Selected Files...');

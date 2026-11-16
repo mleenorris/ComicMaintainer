@@ -235,6 +235,66 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessFileAsync_AlreadyRenamedFile_TakesTheVolumeAndCoverYearFromTheFileNameLeftInItsTitle()
+    {
+        // Renamed before volumes were named: only the title still holds the original file name.
+        var path = WriteArchive("All-New X-Men", "All-New X-Men - Chapter 0008.cbz",
+            "<ComicInfo><Series>All-New X-Men</Series><Number>8</Number><Title>All New X-Men v2 008 (2016)</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var archive = Directory.GetFiles(Path.Join(_root, "All-New X-Men")).Single();
+        Assert.Equal("All-New X-Men Vol. 2 - Chapter 0008.cbz", Path.GetFileName(archive));
+        var info = ReadComicInfo(archive);
+        Assert.Equal("2", info.Element("Volume")?.Value);
+        Assert.Equal("2016", info.Element("Year")?.Value);
+        Assert.Equal("All New X-Men v2 008 (2016)", info.Element("Title")?.Value);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_RenameOnly_StillNamesTheVolumeFromTheTitle()
+    {
+        _settings.WatcherEnableNormalize = false;
+        var path = WriteArchive("All-New X-Men", "All-New X-Men - Chapter 0008.cbz",
+            "<ComicInfo><Series>All-New X-Men</Series><Number>8</Number><Title>All New X-Men v2 008 (2016)</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var archive = Directory.GetFiles(Path.Join(_root, "All-New X-Men")).Single();
+        Assert.Equal("All-New X-Men Vol. 2 - Chapter 0008.cbz", Path.GetFileName(archive));
+        Assert.Null(ReadComicInfo(archive).Element("Volume"));
+    }
+
+    [Fact]
+    public async Task Normalize_StoryTitleNamingAVolume_IsNotReadAsOne()
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("X-Men", "X-Men - Chapter 0008.cbz",
+            "<ComicInfo><Series>X-Men</Series><Number>8</Number><Title>Vol. 2: The Return (2016)</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var info = ReadComicInfo(path);
+        Assert.Null(info.Element("Volume"));
+        Assert.Null(info.Element("Year"));
+    }
+
+    [Theory]
+    // Filled only when unset; a set year is kept even when the name says otherwise.
+    [InlineData("", "2012")]
+    [InlineData("<Year>2013</Year>", "2013")]
+    public async Task Normalize_CoverYearInTheFileName_FillsOnlyAnEmptyYear(string yearElement, string expected)
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("Saga", "Saga 001 (2012).cbz",
+            $"<ComicInfo><Series>Saga</Series><Number>1</Number><Title>Chapter 1</Title>{yearElement}</ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        Assert.Equal(expected, ReadComicInfo(path).Element("Year")?.Value);
+    }
+
+    [Fact]
     public async Task Normalize_NoVolumeToFill_LeavesVolumeOut()
     {
         // The year after the issue number is the cover date, not a volume.

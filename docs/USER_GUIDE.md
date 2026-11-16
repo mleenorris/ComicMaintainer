@@ -56,8 +56,13 @@ archive, a failed write or no series, counts as failed with a reason.
 Normalize writes the series, title and number. It keeps a real chapter title, and only fills a missing title or fixes an
 old generated `Chapter N`. It also fills an empty `<Volume>` when the series, file or folder name gives one. For
 example, `The Astonishing X-Men (1995)` gets `1995`, the year that volume started, and `(1999)` gets `1999`. A
-`Vol. 2` or `v2` token gives `2`. A volume that is already set is never replaced, and the issue's own `<Year>` is left
-alone. Everything else in `ComicInfo.xml` stays as it was.
+`Vol. 2` or `v2` token gives `2`. A volume that is already set is never replaced. The volume's start year never goes
+into `<Year>`, but an empty `<Year>` gets the issue's cover year: a year in brackets after the issue number, as in
+`Saga 001 (2012)`. Everything else in `ComicInfo.xml` stays as it was.
+
+A file renamed before this version may have lost its volume from its name. If its `<Title>` still holds the old file
+name, such as `All New X-Men v2 008 (2016)`, the volume and cover year are read from there. A real story title is never
+read this way: the title has to start with the series name and contain the issue number.
 
 Annuals keep "Annual" in their series, the way ComicVine names them. That means `<Series>Green Lantern Annual</Series>`
 with `<Number>1</Number>`, and an issue written as `Annual 1` becomes number `1`. A file is an Annual when its series
@@ -78,7 +83,8 @@ rewrites the archive. The default format is `{series} {annual} {volume_label} - 
 `{series}` is the series name alone. Its volume and "Annual" appear only where the format places them:
 
 - `{volume_label}` is the volume's start year, `(1990)`, or its number, `Vol. 2`. It comes from ComicInfo `<Volume>`,
-  then the series name, then the file name (a `v2` token, or a year before the issue number), then the folder name.
+  then the series name, then the file name (a `v2` token, or a year before the issue number), then an old file name
+  left in `<Title>`, then the folder name.
 - `{annual}` is `Annual` for an Annual.
 
 Either one renders empty when it does not apply, and any brackets or ` - ` separator around it go with it. The old

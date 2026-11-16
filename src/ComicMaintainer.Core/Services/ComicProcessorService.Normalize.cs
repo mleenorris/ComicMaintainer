@@ -232,8 +232,8 @@ public partial class ComicProcessorService
             return false;
         }
 
-        // A volume named by the series, file or folder name still has to be written.
-        if (VolumeToFill(metadata, filePath) is not null)
+        // A volume or cover year named by the series, file, title or folder name still has to be written.
+        if (VolumeToFill(metadata, filePath) is not null || YearToFill(metadata, filePath) is not null)
         {
             return false;
         }
@@ -442,22 +442,62 @@ public partial class ComicProcessorService
         // dropped its "(1995)".
         if (VolumeToFill(metadata, filePath) is { } volume)
         {
-            _logger.LogDebug("Setting volume from the series, file or folder name: {Volume}", LoggingHelper.SanitizeForLog(volume));
+            _logger.LogDebug("Setting volume from the series, file, title or folder name: {Volume}", LoggingHelper.SanitizeForLog(volume));
             normalizedMetadata.Volume = volume;
+        }
+
+        if (YearToFill(metadata, filePath) is { } year)
+        {
+            _logger.LogDebug("Setting year from the cover date in the file name or title: {Year}", year);
+            normalizedMetadata.Year = year;
         }
 
         return normalizedMetadata;
     }
 
     /// <summary>
+    /// The volume an issue's names give: a year or volume token at the end of
+    /// <paramref name="series"/>, then the file name (see <see cref="ComicVolume.FromFileName"/>),
+    /// then a file name left in <paramref name="title"/> (see <see cref="FileNameTitle"/>), then
+    /// the folder name. Normalize writes it into an empty <c>&lt;Volume&gt;</c> and the rename
+    /// names the file with it, so the two agree.
+    /// </summary>
+    internal static ComicVolume? VolumeFromNames(string? series, string? title, string? issue, string filePath)
+        => ComicVolume.FromSeriesName(series)
+           ?? ComicVolume.FromFileName(Path.GetFileName(filePath))
+           ?? (FileNameTitle.IsLeftoverFileName(title, series, issue) ? ComicVolume.FromFileNameStem(title) : null)
+           ?? ComicVolume.FromSeriesName(Path.GetFileName(Path.GetDirectoryName(filePath)));
+
+    /// <summary>
+    /// The cover year normalize writes into an empty <c>&lt;Year&gt;</c>, or null: a bracketed
+    /// year after the issue number in the file name (<c>Saga 001 (2012)</c>), else in a file name
+    /// left in the title (<c>All New X-Men v2 008 (2016)</c>); see <see cref="FileNameTitle.CoverYear"/>.
+    /// A year before the issue number is the volume's start year and is never used: #12 of a 1995
+    /// volume did not come out in 1995. A year already set is never replaced.
+    /// </summary>
+    private static int? YearToFill(ComicMetadata metadata, string filePath)
+    {
+        if (metadata.Year is > 0)
+        {
+            return null;
+        }
+
+        return FileNameTitle.CoverYear(Path.GetFileNameWithoutExtension(filePath))
+               ?? (FileNameTitle.IsLeftoverFileName(metadata.Title, metadata.Series, metadata.Issue)
+                   ? FileNameTitle.CoverYear(metadata.Title)
+                   : null);
+    }
+
+    /// <summary>
     /// The volume normalize writes into an empty <c>&lt;Volume&gt;</c>, or null. A series named for
     /// its volume, as <c>The Astonishing X-Men (1995)</c> (volume 1) and <c>(1999)</c> (volume 2),
     /// gets that start year, the value ComicVine and ComicTagger store; a <c>Vol. 2</c> or
-    /// <c>v2</c> token gives the number. It is read from the series name, then the file name
-    /// (see <see cref="ComicVolume.FromFileName"/>), then the folder name. Without it the year
-    /// would be lost once normalize replaces the series with its resolved name. A volume already
-    /// set is never replaced: only a missing one, or ComicInfo's "unset" (-1 or 0), is filled.
-    /// The issue's own <c>&lt;Year&gt;</c> is left alone: #12 of a 1995 volume did not come out in 1995.
+    /// <c>v2</c> token gives the number. It is read from the series name, then the file name,
+    /// then a file name left in the title, then the folder name (see <see cref="VolumeFromNames"/>).
+    /// Without it the year would be lost once normalize replaces the series with its resolved
+    /// name. A volume already set is never replaced: only a missing one, or ComicInfo's "unset"
+    /// (-1 or 0), is filled. The volume's start year never goes into <c>&lt;Year&gt;</c>: #12 of a
+    /// 1995 volume did not come out in 1995 (see <see cref="YearToFill"/>).
     /// </summary>
     private static string? VolumeToFill(ComicMetadata metadata, string filePath)
     {
@@ -470,10 +510,7 @@ public partial class ComicProcessorService
             return null;
         }
 
-        var volume = ComicVolume.FromSeriesName(metadata.Series)
-                     ?? ComicVolume.FromFileName(Path.GetFileName(filePath))
-                     ?? ComicVolume.FromSeriesName(Path.GetFileName(Path.GetDirectoryName(filePath)));
-        if (volume is not { } found)
+        if (VolumeFromNames(metadata.Series, metadata.Title, metadata.Issue, filePath) is not { } found)
         {
             return null;
         }
@@ -483,11 +520,23 @@ public partial class ComicProcessorService
 
     /// <summary>
     /// The ComicInfo.xml elements a normalize write changes: the ones normalize owns, plus
-    /// <c>&lt;Volume&gt;</c> when normalize filled it (see <see cref="VolumeToFill"/>), so a file
-    /// whose volume was not touched keeps its element exactly as it was.
+    /// <c>&lt;Volume&gt;</c> and <c>&lt;Year&gt;</c> when normalize filled them (see
+    /// <see cref="VolumeToFill"/> and <see cref="YearToFill"/>), so a file whose volume and year
+    /// were not touched keeps those elements exactly as they were.
     /// </summary>
     private static ComicMetadataFieldFlags NormalizeWriteFields(ComicMetadata before, ComicMetadata normalized)
-        => string.Equals(before.Volume, normalized.Volume, StringComparison.Ordinal)
-            ? NormalizedFields
-            : NormalizedFields | ComicMetadataFieldFlags.Volume;
+    {
+        var fields = NormalizedFields;
+        if (!string.Equals(before.Volume, normalized.Volume, StringComparison.Ordinal))
+        {
+            fields |= ComicMetadataFieldFlags.Volume;
+        }
+
+        if (before.Year != normalized.Year)
+        {
+            fields |= ComicMetadataFieldFlags.Year;
+        }
+
+        return fields;
+    }
 }

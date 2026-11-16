@@ -98,6 +98,53 @@ public class SeriesMatchScorerTests
         Assert.Same(alias, SeriesMatchScorer.SelectAutomaticMatch(new[] { fuzzy, alias }, "Berserk")!.Value.Match);
     }
 
+    [Theory]
+    [InlineData(2023, 100d)]
+    [InlineData(2022, 95d)]
+    [InlineData(2024, 95d)]
+    [InlineData(1960, 60d)]
+    public void Score_QueryWithVolumeYear_ComparesTheStartYear(int startYear, double expected)
+    {
+        Assert.Equal(expected, SeriesMatchScorer.Score("Green Lantern (2023)", "Green Lantern", null, startYear));
+    }
+
+    [Fact]
+    public void Score_QueryWithVolumeYear_UnknownStartYearStaysBelowTheAutomaticThreshold()
+    {
+        var score = SeriesMatchScorer.Score("Green Lantern (2023)", "Green Lantern", null, startYear: null);
+
+        Assert.Equal(85d, score);
+        Assert.True(score < SeriesMatchScorer.AutomaticMatchThreshold);
+    }
+
+    [Fact]
+    public void Score_QueryWithVolumeYear_TitleCarryingTheYearStillMatchesExactly()
+    {
+        Assert.Equal(95d, SeriesMatchScorer.Score("Batman (1940)", "Batman", new[] { "Batman (1940)" }, startYear: null));
+        Assert.Equal(100d, SeriesMatchScorer.Score("Batman (1940)", "Batman (1940)", null, startYear: 2016));
+    }
+
+    [Fact]
+    public void Score_QueryWithoutYear_IgnoresTheStartYear()
+    {
+        Assert.Equal(100d, SeriesMatchScorer.Score("Green Lantern", "Green Lantern", null, startYear: 1960));
+    }
+
+    [Fact]
+    public void SelectAutomaticMatch_QueryWithVolumeYear_PicksTheVolumeThatStartedThatYear()
+    {
+        var golden = new ExternalSeriesMetadata { CanonicalTitle = "Green Lantern", SourceId = "2839", StartYear = 1960 };
+        var foreign = new ExternalSeriesMetadata { CanonicalTitle = "Green Lantern", SourceId = "142798", StartYear = 2019 };
+        var unknown = new ExternalSeriesMetadata { CanonicalTitle = "Green Lantern", SourceId = "1" };
+        var current = new ExternalSeriesMetadata { CanonicalTitle = "Green Lantern", SourceId = "150172", StartYear = 2023 };
+
+        var best = SeriesMatchScorer.SelectAutomaticMatch(new[] { golden, foreign, unknown, current }, "Green Lantern (2023)");
+
+        Assert.NotNull(best);
+        Assert.Same(current, best.Value.Match);
+        Assert.Null(SeriesMatchScorer.SelectAutomaticMatch(new[] { golden, foreign, unknown }, "Green Lantern (2023)"));
+    }
+
     [Fact]
     public void SelectAutomaticMatch_NoCandidatesOrBlankQuery_ReturnsNull()
     {

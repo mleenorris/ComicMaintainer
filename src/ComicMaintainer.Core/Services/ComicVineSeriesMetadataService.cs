@@ -39,7 +39,16 @@ public class ComicVineSeriesMetadataService : ExternalSeriesMetadataProviderBase
     /// </summary>
     private static readonly TimeSpan RateLimitEnvelopeBackoff = TimeSpan.FromMinutes(15);
 
-    private const string FieldList = "id,name,aliases,image,deck,description,site_detail_url,count_of_issues";
+    private const string FieldList = "id,name,aliases,image,deck,description,site_detail_url,count_of_issues,start_year,publisher";
+
+    /// <summary>
+    /// Search page size for a name with a volume year. ComicVine lists dozens
+    /// of volumes under common names (US runs plus foreign editions), ranked
+    /// without regard to year: "Green Lantern (2023)" is the 17th "Green
+    /// Lantern" and "Batman (2016)" the 37th. ComicVine accepts pages of up to
+    /// 100 although its documentation says 10.
+    /// </summary>
+    private const int YearSearchPageSize = MaxSearchLimit;
 
     // ComicVine status_code values (https://comicvine.gamespot.com/api/documentation).
     private const int StatusOk = 1;
@@ -95,6 +104,15 @@ public class ComicVineSeriesMetadataService : ExternalSeriesMetadataProviderBase
 
     private protected override HttpRequestMessage CreateSearchRequest(AppSettings settings, string query, int limit)
         => CreateJsonRequest(BuildSearchUri(settings, query, limit));
+
+    /// <summary>ComicVine's search pages with a 1-based <c>page</c> parameter.</summary>
+    private protected override HttpRequestMessage CreateSearchPageRequest(AppSettings settings, string query, int limit, int page)
+        => CreateJsonRequest(page <= 1 ? BuildSearchUri(settings, query, limit) : $"{BuildSearchUri(settings, query, limit)}&page={page}");
+
+    private protected override int YearLookupCandidateCount => YearSearchPageSize;
+
+    /// <summary>At most two requests (100 volumes) per lookup with a year.</summary>
+    private protected override int YearLookupMaxPages => 2;
 
     private protected override HttpRequestMessage CreateGetByIdRequest(AppSettings settings, string sourceId)
     {
@@ -255,9 +273,43 @@ public class ComicVineSeriesMetadataService : ExternalSeriesMetadataProviderBase
             // count, which is only a count so far, is never written as a series total.
             SiteUrl = ProviderMetadataText.HttpUrl(ReadString(item, "site_detail_url")),
             TotalChapters = ReadPositiveInt(item, "count_of_issues"),
+            StartYear = ReadStartYear(item),
+            Publisher = ReadPublisher(item),
             LocalizedTitles = localizedTitles
         };
     }
+
+    /// <summary>
+    /// The volume's <c>start_year</c>, which ComicVine sends as a string
+    /// ("2023"); null when absent or not a plausible year.
+    /// </summary>
+    private static int? ReadStartYear(JsonElement item)
+    {
+        if (!item.TryGetProperty("start_year", out var value))
+        {
+            return null;
+        }
+
+        int year;
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Number when value.TryGetInt32(out year):
+                break;
+            case JsonValueKind.String when int.TryParse(value.GetString()?.Trim(), out year):
+                break;
+            default:
+                return null;
+        }
+
+        return year is >= 1800 and <= 2200 ? year : null;
+    }
+
+    /// <summary>The name of the volume's <c>publisher</c> object, or null.</summary>
+    private static string? ReadPublisher(JsonElement item)
+        => item.TryGetProperty("publisher", out var publisher)
+           && ReadString(publisher, "name")?.Trim() is { Length: > 0 } name
+            ? name
+            : null;
 
     /// <summary>
     /// Reads the ComicVine description, preferring the short plain-text

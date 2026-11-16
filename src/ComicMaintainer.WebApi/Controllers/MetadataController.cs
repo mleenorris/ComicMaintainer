@@ -348,7 +348,7 @@ public class MetadataController : ControllerBase
                 .Select(r => new
                 {
                     metadata = r,
-                    score = SeriesMatchScorer.Score(query, r.CanonicalTitle, r.Aliases)
+                    score = SeriesMatchScorer.Score(query, r.CanonicalTitle, r.Aliases, r.StartYear)
                 })
                 .OrderByDescending(x => x.score)
                 .ToList();
@@ -374,6 +374,10 @@ public class MetadataController : ControllerBase
                     publication_status = x.metadata.PublicationStatus,
                     total_chapters = x.metadata.TotalChapters,
                     origin = x.metadata.Origin,
+                    // Several ComicVine volumes share a name; the start year
+                    // and publisher tell them apart in the picker.
+                    start_year = x.metadata.StartYear,
+                    publisher = x.metadata.Publisher,
                     match_score = x.score,
                     // Surface the provider-supplied language tags so the
                     // manual-match UI can render each alias alongside its

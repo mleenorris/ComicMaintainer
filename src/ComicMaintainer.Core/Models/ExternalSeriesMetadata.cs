@@ -61,6 +61,16 @@ public class ExternalSeriesMetadata
     public string? Origin { get; set; }
 
     /// <summary>
+    /// The year the series (a ComicVine volume) started, or null when the provider does not
+    /// report one. Several volumes often share a name, so a series name that carries a year
+    /// (<c>Green Lantern (2023)</c>) is matched against it (see <see cref="Utilities.SeriesMatchScorer"/>).
+    /// </summary>
+    public int? StartYear { get; set; }
+
+    /// <summary>The publisher's name as the provider lists it, or null when unknown.</summary>
+    public string? Publisher { get; set; }
+
+    /// <summary>
     /// Optional confidence score (0–100) describing how well this candidate
     /// matches a user query. Populated by the search/scoring layer (not by
     /// providers themselves). 100 = exact normalized match on the canonical

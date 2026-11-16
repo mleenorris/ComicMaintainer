@@ -81,6 +81,34 @@ public readonly partial record struct ComicVolume(int Value, bool IsYear)
     }
 
     /// <summary>
+    /// <paramref name="seriesName"/> without the volume it ends in (see
+    /// <see cref="FromSeriesName"/>): <c>Green Lantern (1990)</c> and <c>Saga Vol. 2</c> give
+    /// <c>Green Lantern</c> and <c>Saga</c>. Unchanged when it ends in no volume, or when the
+    /// volume is all it holds.
+    /// </summary>
+    public static string WithoutVolume(string seriesName)
+    {
+        if (string.IsNullOrWhiteSpace(seriesName))
+        {
+            return seriesName;
+        }
+
+        var trimmed = seriesName.Trim();
+        var match = TrailingYearPattern().Match(trimmed);
+        if (!match.Success || FromYear(match.Groups["year"].Value) is null)
+        {
+            match = TrailingVolumePattern().Match(trimmed);
+            if (!match.Success || FromNumber(match.Groups["value"].Value) is null)
+            {
+                return trimmed;
+            }
+        }
+
+        var title = trimmed[..match.Index].TrimEnd(' ', '-', ',', ':', '–', '—');
+        return title.Any(char.IsLetterOrDigit) ? title : trimmed;
+    }
+
+    /// <summary>
     /// Reads the volume from a file name: a volume token anywhere in it (<c>Saga v02 001</c>,
     /// <c>Saga Vol. 2 - Chapter 001</c>), or else a start year in brackets that comes before the
     /// issue number (<c>Green Lantern (1990) 001</c>, <c>Green Lantern (1990) - Chapter 001</c>).

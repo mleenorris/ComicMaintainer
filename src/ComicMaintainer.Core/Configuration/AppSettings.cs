@@ -5,8 +5,19 @@ namespace ComicMaintainer.Core.Configuration;
 /// </summary>
 public class AppSettings
 {
-    /// <summary>The filename format used until one is configured.</summary>
-    public const string DefaultFilenameFormat = "{series} - Chapter {issue}";
+    /// <summary>
+    /// The filename format used until one is configured. <c>{annual}</c> and
+    /// <c>{volume_label}</c> keep Annuals and the volumes of a series with the same name apart
+    /// ("Green Lantern Annual (1990) - Chapter 0001"); they render empty when they do not apply.
+    /// </summary>
+    public const string DefaultFilenameFormat = "{series} {annual} {volume_label} - Chapter {issue}";
+
+    /// <summary>
+    /// The default before <c>{annual}</c> and <c>{volume_label}</c> existed. A setting that still
+    /// holds it, the shipped appsettings.json or an untouched saved setting, reads as
+    /// <see cref="DefaultFilenameFormat"/>, which renders the same names plus the volume and Annual.
+    /// </summary>
+    public const string LegacyDefaultFilenameFormat = "{series} - Chapter {issue}";
 
     /// <summary>
     /// The largest supported <see cref="IssueNumberPadding"/>: the number of digits in <see cref="int.MaxValue"/>.
@@ -17,7 +28,19 @@ public class AppSettings
     public string DuplicateDirectory { get; set; } = "/duplicates";
     public string ConfigDirectory { get; set; } = "/Config";
     public string TempFileDirectory { get; set; } = "/Config/temp";
-    public string FilenameFormat { get; set; } = DefaultFilenameFormat;
+    /// <summary>
+    /// The rename template. <see cref="LegacyDefaultFilenameFormat"/> is read as
+    /// <see cref="DefaultFilenameFormat"/>, from whatever source sets it.
+    /// </summary>
+    public string FilenameFormat
+    {
+        get => _filenameFormat;
+        set => _filenameFormat = string.Equals(value?.Trim(), LegacyDefaultFilenameFormat, StringComparison.Ordinal)
+            ? DefaultFilenameFormat
+            : value!;
+    }
+
+    private string _filenameFormat = DefaultFilenameFormat;
 
     /// <summary>
     /// Number of digits the <c>{issue}</c> placeholder is zero-padded to, from 0 to

@@ -34,9 +34,10 @@ public class ComicFileProcessorTests
     }
 
     [Theory]
-    // The tags' <Volume> follows the series unless the template places {volume} itself.
-    [InlineData("{series} - Chapter {issue}", "Batman", "5", "Batman Vol. 1 - Chapter 0005.cbz")]
-    [InlineData("{series} #{issue}", "Superman", "12", "Superman Vol. 1 #0012.cbz")]
+    // The volume goes only where the template places it.
+    [InlineData("{series} - Chapter {issue}", "Batman", "5", "Batman - Chapter 0005.cbz")]
+    [InlineData("{series} #{issue}", "Superman", "12", "Superman #0012.cbz")]
+    [InlineData("{series} {volume_label} #{issue}", "Superman", "12", "Superman Vol. 1 #0012.cbz")]
     [InlineData("{series} v{volume} #{issue} - {title}", "Spiderman", "1", "Spiderman v1 #0001 - Test.cbz")]
     public void FormatFilename_WithVariousTemplates_FormatsCorrectly(
         string template, string series, string issue, string expected)
@@ -76,6 +77,36 @@ public class ComicFileProcessorTests
 
         Assert.Equal(expected, ComicFileProcessor.FormatFilename(
             AppSettings.DefaultFilenameFormat, tags, "1", ".cbz", 4, sourceFileName));
+    }
+
+    [Theory]
+    // {annual} and {volume_label} go where the template puts them...
+    [InlineData("{series} {annual} {volume_label} - Chapter {issue}", "Green Lantern Annual", "1990", "Green Lantern Annual (1990) - Chapter 0001.cbz")]
+    [InlineData("{series} {volume_label} {annual} #{issue}", "Green Lantern Annual", "1990", "Green Lantern (1990) Annual #0001.cbz")]
+    [InlineData("{series} #{issue} [{annual}]", "Green Lantern Annual", null, "Green Lantern #0001 [Annual].cbz")]
+    // ...render nothing, with their brackets and separators, when they do not apply...
+    [InlineData("{series} {annual} {volume_label} - Chapter {issue}", "Green Lantern", null, "Green Lantern - Chapter 0001.cbz")]
+    [InlineData("{series} #{issue} [{annual}]", "Green Lantern", null, "Green Lantern #0001.cbz")]
+    [InlineData("{series} ({volume}) #{issue}", "Green Lantern", null, "Green Lantern #0001.cbz")]
+    [InlineData("{series} - {annual} - Chapter {issue}", "Green Lantern", null, "Green Lantern - Chapter 0001.cbz")]
+    [InlineData("{series} - Chapter {issue} - {annual}", "Green Lantern", null, "Green Lantern - Chapter 0001.cbz")]
+    // ...and are left out where the template leaves them out: {series} is the title alone.
+    [InlineData("{series} #{issue}", "Green Lantern Annual (1990)", null, "Green Lantern #0001.cbz")]
+    [InlineData("{series} {volume_label} #{issue}", "Green Lantern Annual (1990)", null, "Green Lantern (1990) #0001.cbz")]
+    public void FormatFilename_PlacesTheAnnualAndVolumeWhereTheTemplateSays(string template, string series, string? volume, string expected)
+    {
+        var tags = new ComicInfo { Series = series, Volume = volume };
+
+        Assert.Equal(expected, ComicFileProcessor.FormatFilename(template, tags, "1"));
+    }
+
+    [Theory]
+    [InlineData("{series} - Chapter {issue}", AppSettings.DefaultFilenameFormat)]
+    [InlineData(" {series} - Chapter {issue} ", AppSettings.DefaultFilenameFormat)]
+    [InlineData("{series} #{issue}", "{series} #{issue}")]
+    public void FilenameFormat_LegacyDefault_ReadsAsTheCurrentDefault(string configured, string expected)
+    {
+        Assert.Equal(expected, new AppSettings { FilenameFormat = configured }.FilenameFormat);
     }
 
     [Fact]

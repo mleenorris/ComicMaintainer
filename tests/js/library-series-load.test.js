@@ -220,6 +220,57 @@ test('on a phone the next page loads when the end of the list nears the viewport
     assert.deepEqual(page.errors, []);
 });
 
+// The sentinel lives inside #fileList, so every full redraw of the list drops
+// it. A redraw that does not put it back leaves the observer watching a
+// detached element: the next page never loads and the library stops at 60.
+function assertSentinelObserved(page, message) {
+    const sentinel = page.$('#libraryScrollSentinel');
+    assert.ok(sentinel, `${message}: the sentinel is in the list`);
+    assert.equal(page.$('#fileList').lastElementChild, sentinel, `${message}: the sentinel ends the list`);
+    assert.ok(scrollObserver(page).targets.has(sentinel), `${message}: the sentinel is observed`);
+}
+
+test('Back from a series keeps loading the library while scrolling', async () => {
+    const page = await bootLibrary({
+        series: makeSeriesList(130),
+        routes: { 'GET /api/files/series/series-5/issues': { issues: [], total: 0 } }
+    });
+
+    page.run("openSeriesDetail('series-5')");
+    await page.settle(3);
+    page.run('closeSeriesDetail()');
+    await page.settle(3);
+    assert.equal(page.$$('#fileList .series-card').length, 60);
+    assertSentinelObserved(page, 'after Back');
+
+    scrollObserver(page).trigger(true);
+    await page.settle();
+    assert.deepEqual(seriesCalls(page).at(-1).query, { offset: '60', limit: '60' });
+    assert.equal(page.$$('#fileList .series-card').length, 120);
+    assert.deepEqual(page.errors, []);
+});
+
+test('switching the library layout keeps loading the library while scrolling', async () => {
+    const page = await bootLibrary({ series: makeSeriesList(130) });
+
+    for (const layout of ['list', 'grid', 'compact']) {
+        page.run(`setSeriesLayout('${layout}')`);
+        assertSentinelObserved(page, `after switching to ${layout}`);
+    }
+
+    scrollObserver(page).trigger(true);
+    await page.settle();
+    assert.equal(page.$$('#fileList .series-card').length, 120);
+});
+
+test('an empty library has no sentinel to scroll to', async () => {
+    const page = await bootLibrary({ series: [] });
+
+    page.run("setSeriesLayout('list')");
+
+    assert.equal(page.$('#libraryScrollSentinel'), null);
+});
+
 test('an appended page renders in the list layout too', async () => {
     const page = await bootLibrary({ series: makeSeriesList(70), localStorage: { seriesLayout: 'list' } });
     assert.equal(page.$$('#fileList .series-list > .series-list-row').length, 60);

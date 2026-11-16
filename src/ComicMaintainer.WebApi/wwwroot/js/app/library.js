@@ -968,6 +968,13 @@
 
             hydrateProtectedImages(fileList);
             updateSelectInfo();
+            // Replacing the list's content dropped the infinite-scroll
+            // sentinel. Put it back and observe it again on every redraw, not
+            // only after a page is fetched: Back from a series, a layout switch
+            // or a rotation redraws without fetching, and the observer would
+            // otherwise keep watching the detached sentinel, so the library
+            // stopped at its first page.
+            ensureScrollObserver();
         }
 
         // Infinite-scroll pages only add cards, so append them to the existing

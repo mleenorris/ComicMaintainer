@@ -23,12 +23,41 @@ public static class SeriesMatchScorer
     public const double AutomaticMatchThreshold = 90d;
 
     /// <summary>
+    /// Deducted from the title score when the query's volume year and the
+    /// candidate's start year are one year apart: a volume's first cover date
+    /// and the year a library files it under often differ by one.
+    /// </summary>
+    private const double AdjacentYearPenalty = 5d;
+
+    /// <summary>Score of an exact normalized match on the canonical title.</summary>
+    private const double CanonicalExactScore = 100d;
+
+    /// <summary>Score of an exact normalized match on an alias.</summary>
+    private const double AliasExactScore = 95d;
+
+    /// <summary>
+    /// Deducted when the query names a volume year but the candidate reports
+    /// no start year. An exact title then scores 85: shown as a likely pick,
+    /// but below <see cref="AutomaticMatchThreshold"/>, because nothing
+    /// confirms it is the right one of several same-named volumes.
+    /// </summary>
+    private const double UnknownYearPenalty = 15d;
+
+    /// <summary>
+    /// Deducted when the query's volume year and the candidate's start year
+    /// disagree by more than a year: a different volume of the same name.
+    /// </summary>
+    private const double ConflictingYearPenalty = 40d;
+
+    /// <summary>
     /// Picks the candidate an automatic lookup for <paramref name="query"/>
     /// accepts: the highest-scoring candidate that reaches
     /// <see cref="AutomaticMatchThreshold"/>. On a tie the earlier candidate
     /// wins, so the provider's own relevance order breaks it. Returns null when
     /// no candidate is close enough; a provider's top search hit is never
-    /// accepted just for being first.
+    /// accepted just for being first. A query that names a volume year
+    /// (<c>Green Lantern (2023)</c>) only accepts a candidate whose start year
+    /// confirms it (see <see cref="Score(string?, string?, IEnumerable{string}?, int?)"/>).
     /// </summary>
     public static (ExternalSeriesMetadata Match, double Score)? SelectAutomaticMatch(
         IEnumerable<ExternalSeriesMetadata> candidates,
@@ -43,7 +72,7 @@ public static class SeriesMatchScorer
                 continue;
             }
 
-            var score = Score(query, candidate.CanonicalTitle, candidate.Aliases);
+            var score = Score(query, candidate.CanonicalTitle, candidate.Aliases, candidate.StartYear);
             if (score >= AutomaticMatchThreshold && (best is null || score > best.Value.Score))
             {
                 best = (candidate, score);
@@ -60,14 +89,52 @@ public static class SeriesMatchScorer
     /// confidence and falls back to a Levenshtein-based similarity ratio for
     /// fuzzy matches.
     /// </summary>
+    /// <remarks>
+    /// When <paramref name="query"/> ends in a volume year
+    /// (<c>Green Lantern (2023)</c>, see <see cref="SeriesTitleYear"/>), the
+    /// title without the year is scored too and adjusted by how the year
+    /// compares with <paramref name="startYear"/>: the same year keeps the
+    /// score, an adjacent year loses <see cref="AdjacentYearPenalty"/>, an
+    /// unknown start year <see cref="UnknownYearPenalty"/> and any other year
+    /// <see cref="ConflictingYearPenalty"/>. The better of that and the score of
+    /// the whole query (for a candidate whose own title carries the year) is
+    /// returned. A query without a year ignores <paramref name="startYear"/>.
+    /// </remarks>
     /// <returns>Score in [0, 100]. 0 when either input is empty.</returns>
-    public static double Score(string? query, string? canonicalTitle, IEnumerable<string>? aliases)
+    public static double Score(string? query, string? canonicalTitle, IEnumerable<string>? aliases, int? startYear = null)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
             return 0d;
         }
 
+        var aliasList = aliases?.Where(alias => !string.IsNullOrWhiteSpace(alias)).ToList();
+        var whole = ScoreTitles(query, canonicalTitle, aliasList);
+        var best = whole;
+
+        var (title, year) = SeriesTitleYear.Parse(query);
+        if (year is { } queryYear)
+        {
+            // The whole query only counts when a title carries the year itself
+            // ("Batman (1940)" as an alias); otherwise "green lantern 2023"
+            // containing "green lantern" would hide a conflicting start year.
+            var adjusted = ScoreTitles(title, canonicalTitle, aliasList) - YearPenalty(queryYear, startYear);
+            best = whole >= AliasExactScore ? Math.Max(whole, adjusted) : adjusted;
+        }
+
+        return Math.Round(Math.Clamp(best, 0d, 100d), 1);
+    }
+
+    private static double YearPenalty(int queryYear, int? startYear) => startYear switch
+    {
+        null => UnknownYearPenalty,
+        { } year when year == queryYear => 0d,
+        { } year when Math.Abs(year - queryYear) == 1 => AdjacentYearPenalty,
+        _ => ConflictingYearPenalty,
+    };
+
+    private static double ScoreTitles(string query, string? canonicalTitle, IReadOnlyList<string>? aliases)
+    {
         var queryNorm = Normalize(query);
         if (queryNorm.Length == 0)
         {
@@ -82,13 +149,13 @@ public static class SeriesMatchScorer
 
         if (aliases != null)
         {
-            foreach (var alias in aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)))
+            foreach (var alias in aliases)
             {
                 best = Math.Max(best, ScorePair(queryNorm, Normalize(alias), canonicalMatchBonus: false));
             }
         }
 
-        return Math.Round(Math.Clamp(best, 0d, 100d), 1);
+        return best;
     }
 
     private static double ScorePair(string queryNorm, string candidateNorm, bool canonicalMatchBonus)
@@ -103,7 +170,7 @@ public static class SeriesMatchScorer
             // Exact normalized match. Canonical exact matches score the full
             // 100, alias exact matches are slightly demoted so that a
             // canonical exact match is always preferred when both exist.
-            return canonicalMatchBonus ? 100d : 95d;
+            return canonicalMatchBonus ? CanonicalExactScore : AliasExactScore;
         }
 
         // Substring containment is a strong signal that the candidate covers

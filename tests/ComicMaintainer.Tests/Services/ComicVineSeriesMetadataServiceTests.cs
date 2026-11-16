@@ -182,6 +182,145 @@ public class ComicVineSeriesMetadataServiceTests
         Assert.NotNull(health.LastFailureUtc);
     }
 
+    [Fact]
+    public async Task LookupSeriesAsync_ParsesStartYearAndPublisher()
+    {
+        var handler = new StubHttpMessageHandler(_ => JsonResponse("""
+            {"status_code":1,"results":[
+              {"id":150172,"name":"Green Lantern","start_year":"2023","publisher":{"id":10,"name":"DC Comics"}}
+            ]}
+            """));
+        var service = CreateService(handler, EnabledSettings());
+
+        var result = await service.LookupSeriesAsync("Green Lantern");
+
+        Assert.NotNull(result);
+        Assert.Equal(2023, result!.StartYear);
+        Assert.Equal("DC Comics", result.Publisher);
+    }
+
+    [Theory]
+    [InlineData("\"start_year\":2023", 2023)]
+    [InlineData("\"start_year\":\" 1960 \"", 1960)]
+    [InlineData("\"start_year\":null", null)]
+    [InlineData("\"start_year\":\"unknown\"", null)]
+    [InlineData("\"start_year\":\"0\"", null)]
+    public async Task SearchSeriesAsync_ReadsStartYearLeniently(string field, int? expected)
+    {
+        var handler = new StubHttpMessageHandler(_ => JsonResponse(
+            $$"""{"status_code":1,"results":[{"id":1,"name":"Green Lantern",{{field}},"publisher":null}]}"""));
+        var service = CreateService(handler, EnabledSettings());
+
+        var result = Assert.Single(await service.SearchSeriesAsync("Green Lantern"));
+
+        Assert.Equal(expected, result.StartYear);
+        Assert.Null(result.Publisher);
+    }
+
+    [Fact]
+    public async Task LookupSeriesAsync_NameWithYear_PagesPastSameNamedVolumesToTheOneThatStartedThatYear()
+    {
+        // ComicVine ranks same-named volumes without regard to year: the first
+        // "Green Lantern" is the 1960 run and the 2023 one is much further down.
+        var requests = new List<Uri>();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            requests.Add(request.RequestUri!);
+            var page2 = request.RequestUri!.Query.Contains("&page=2", StringComparison.Ordinal);
+            var volumes = page2
+                ? new[] { (4363, 1990), (150172, 2023), (135228, 2021) }
+                : Enumerable.Range(0, 50).Select(i => (2839 + i, 1960 + (i % 40))).ToArray();
+            return JsonResponse(VolumesJson(volumes));
+        });
+        var service = CreateService(handler, EnabledSettings());
+
+        var result = await service.LookupSeriesAsync("Green Lantern (2023)");
+
+        Assert.NotNull(result);
+        Assert.Equal("150172", result!.SourceId);
+        Assert.Equal(2023, result.StartYear);
+        Assert.Equal(2, requests.Count);
+        // The year is left out of the search, which reads pages of 50.
+        Assert.All(requests, uri =>
+        {
+            Assert.Contains("query=Green%20Lantern", uri.Query, StringComparison.Ordinal);
+            Assert.DoesNotContain("2023", uri.Query, StringComparison.Ordinal);
+            Assert.Contains("limit=50", uri.Query, StringComparison.Ordinal);
+            Assert.Contains("start_year", uri.Query, StringComparison.Ordinal);
+        });
+        Assert.DoesNotContain("page=", requests[0].Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LookupSeriesAsync_NameWithYear_StopsAtTheFirstPageThatConfirmsTheYear()
+    {
+        var requests = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            requests++;
+            return JsonResponse(VolumesJson(Enumerable.Range(0, 50).Select(i => (100 + i, i == 16 ? 2023 : 1960)).ToArray()));
+        });
+        var service = CreateService(handler, EnabledSettings());
+
+        var result = await service.LookupSeriesAsync("Green Lantern (2023)");
+
+        Assert.Equal("116", result?.SourceId);
+        Assert.Equal(1, requests);
+    }
+
+    [Fact]
+    public async Task LookupSeriesAsync_NameWithYear_NoVolumeOfThatYear_IsNoMatch()
+    {
+        // Matching "Green Lantern (2023)" to the 1960 run is worse than no
+        // match: it is written into every file of the folder.
+        var requests = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            requests++;
+            return JsonResponse(VolumesJson(new[] { (2839, 1960), (4363, 1990) }));
+        });
+        var service = CreateService(handler, EnabledSettings());
+
+        Assert.Null(await service.LookupSeriesAsync("Green Lantern (2023)"));
+        // A short page means the search ran out; no second page is asked for.
+        Assert.Equal(1, requests);
+    }
+
+    [Fact]
+    public async Task SearchSeriesAsync_QueryWithYear_PutsTheVolumeOfThatYearFirst()
+    {
+        Uri? requestUri = null;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            requestUri = request.RequestUri;
+            return JsonResponse(VolumesJson(Enumerable.Range(0, 30).Select(i => (100 + i, i == 20 ? 2023 : 1960 + i)).ToArray()));
+        });
+        var service = CreateService(handler, EnabledSettings());
+
+        var results = await service.SearchSeriesAsync("Green Lantern (2023)", limit: 10);
+
+        Assert.Equal(10, results.Count);
+        Assert.Equal("120", results[0].SourceId);
+        Assert.Contains("limit=50", requestUri!.Query, StringComparison.Ordinal);
+        Assert.DoesNotContain("2023", requestUri.Query, StringComparison.Ordinal);
+    }
+
+    private static AppSettings EnabledSettings() => new()
+    {
+        EnableExternalSeriesMetadata = true,
+        ComicVineApiKey = "test-key",
+        ComicVineBaseUrl = "https://comicvine.example/api"
+    };
+
+    private static string VolumesJson(IEnumerable<(int Id, int StartYear)> volumes)
+        => "{\"status_code\":1,\"results\":["
+           + string.Join(",", volumes.Select(v =>
+               $"{{\"id\":{v.Id},\"name\":\"Green Lantern\",\"start_year\":\"{v.StartYear}\",\"publisher\":{{\"name\":\"DC Comics\"}}}}"))
+           + "]}";
+
+    private static HttpResponseMessage JsonResponse(string json)
+        => new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+
     private static ComicVineSeriesMetadataService CreateService(StubHttpMessageHandler handler, AppSettings settings)
     {
         var httpClientFactory = new Mock<IHttpClientFactory>();

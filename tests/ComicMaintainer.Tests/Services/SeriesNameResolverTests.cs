@@ -67,6 +67,45 @@ public class SeriesNameResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_FolderWithVolumeYear_LooksUpTheSeriesWithThatYear()
+    {
+        // "Green Lantern" alone matches whichever same-named volume a provider
+        // lists first (the 1960 run); the folder's year picks the right one.
+        var resolver = BuildResolver();
+        _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+              .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        _external.Setup(e => e.LookupSeriesAsync("Green Lantern (2023)", It.IsAny<CancellationToken>()))
+                 .Returns(Task.FromResult<ExternalSeriesMetadata?>(null));
+        _external.Setup(e => e.LookupSeriesAsync("Green Lantern", It.IsAny<CancellationToken>()))
+                 .ReturnsAsync(new ExternalSeriesMetadata { CanonicalTitle = "Green Lantern", StartYear = 1960 });
+
+        var result = await resolver.ResolveAsync(
+            "/library/Green Lantern (2023)/Green Lantern 001 (2023).cbz",
+            new ComicMetadata { Series = "Green Lantern" },
+            mutateCache: false);
+
+        Assert.Equal(new[] { "Green Lantern (2023)" }, result.Candidates);
+        Assert.Equal(SeriesNameResolutionStep.ExistingMetadata, result.WinningStep);
+        Assert.Equal("Green Lantern", result.ResolvedSeries);
+        _external.Verify(e => e.LookupSeriesAsync("Green Lantern", It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_SeriesWithItsOwnYear_KeepsIt()
+    {
+        var resolver = BuildResolver();
+        _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+              .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+
+        var result = await resolver.ResolveAsync(
+            "/library/Green Lantern (2023)/c1.cbz",
+            new ComicMetadata { Series = "Green Lantern (2021)" },
+            mutateCache: false);
+
+        Assert.Equal(new[] { "Green Lantern (2023)", "Green Lantern (2021)" }, result.Candidates);
+    }
+
+    [Fact]
     public async Task ResolveAsync_UserSelectedNameRecord_Wins()
     {
         var resolver = BuildResolver();

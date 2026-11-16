@@ -135,7 +135,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
 
             // Providers only return exact/alias matches, but the composite is
             // the gate for automatic matching, so it enforces the rule itself.
-            var score = SeriesMatchScorer.Score(seriesName, result.CanonicalTitle, result.Aliases);
+            var score = SeriesMatchScorer.Score(seriesName, result.CanonicalTitle, result.Aliases, result.StartYear);
             if (score < SeriesMatchScorer.AutomaticMatchThreshold)
             {
                 _logger.LogDebug(

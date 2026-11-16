@@ -108,6 +108,34 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
     /// <summary>Builds the search request for <paramref name="query"/>.</summary>
     private protected abstract HttpRequestMessage CreateSearchRequest(AppSettings settings, string query, int limit);
 
+    /// <summary>
+    /// Builds the request for page <paramref name="page"/> (1-based, pages of
+    /// <paramref name="limit"/>) of the search for <paramref name="query"/>.
+    /// Only called for pages after the first when <see cref="YearLookupMaxPages"/>
+    /// is above one.
+    /// </summary>
+    private protected virtual HttpRequestMessage CreateSearchPageRequest(AppSettings settings, string query, int limit, int page)
+        => page == 1
+            ? CreateSearchRequest(settings, query, limit)
+            : throw new NotSupportedException($"{ProviderName} search has no paging.");
+
+    /// <summary>
+    /// Number of search results a lookup or search reads per page when the
+    /// series name carries a volume year (<c>Green Lantern (2023)</c>). The
+    /// year is left out of the search, and a provider that lists many volumes
+    /// under the same name needs more than <see cref="LookupCandidateCount"/>
+    /// results to reach the right one.
+    /// </summary>
+    private protected virtual int YearLookupCandidateCount => LookupCandidateCount;
+
+    /// <summary>
+    /// Most search pages of <see cref="YearLookupCandidateCount"/> an automatic
+    /// lookup reads for a name with a volume year while no candidate's start
+    /// year confirms the match. Each page is one request against the provider's
+    /// rate limit.
+    /// </summary>
+    private protected virtual int YearLookupMaxPages => 1;
+
     /// <summary>Parses a successful search response into candidates, in the provider's order.</summary>
     private protected abstract IReadOnlyList<ExternalSeriesMetadata> ParseSearchResults(JsonElement root);
 
@@ -162,8 +190,7 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
             return null;
         }
 
-        var results = await SearchCoreAsync(config, seriesName, LookupCandidateCount, maxPermitWait: null, cancellationToken);
-        var match = SeriesMatchScorer.SelectAutomaticMatch(results, seriesName)?.Match;
+        var match = await FindAutomaticMatchAsync(config, seriesName, cancellationToken);
         if (match != null)
         {
             Cache.Set(cacheKey, match, CacheDuration);
@@ -174,6 +201,51 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
         }
 
         return match;
+    }
+
+    /// <summary>
+    /// Searches for <paramref name="seriesName"/> and picks the automatic match.
+    /// A name with a volume year is searched without the year (providers rank
+    /// the bare title far better) and reads up to <see cref="YearLookupMaxPages"/>
+    /// pages until a candidate's start year confirms the match.
+    /// </summary>
+    private async Task<ExternalSeriesMetadata?> FindAutomaticMatchAsync(
+        AppSettings config,
+        string seriesName,
+        CancellationToken cancellationToken)
+    {
+        var (title, year) = SeriesTitleYear.Parse(seriesName);
+        if (year is null)
+        {
+            var results = await SearchCoreAsync(config, seriesName, LookupCandidateCount, maxPermitWait: null, cancellationToken);
+            return SeriesMatchScorer.SelectAutomaticMatch(results, seriesName)?.Match;
+        }
+
+        var pageSize = Math.Clamp(YearLookupCandidateCount, 1, MaxSearchLimit);
+        var candidates = new List<ExternalSeriesMetadata>();
+        (ExternalSeriesMetadata Match, double Score)? best = null;
+        for (var page = 1; page <= Math.Max(1, YearLookupMaxPages); page++)
+        {
+            var pageNumber = page;
+            var results = await SendAsync(
+                              config,
+                              () => CreateSearchPageRequest(config, title, pageSize, pageNumber),
+                              seriesName,
+                              ParseSearchResults,
+                              maxPermitWait: null,
+                              cancellationToken)
+                          ?? Array.Empty<ExternalSeriesMetadata>();
+            candidates.AddRange(results);
+            best = SeriesMatchScorer.SelectAutomaticMatch(candidates, seriesName);
+
+            // Stop at a match the start year confirms, or when the search ran out.
+            if (best?.Match.StartYear == year || results.Count < pageSize)
+            {
+                break;
+            }
+        }
+
+        return best?.Match;
     }
 
     /// <inheritdoc />
@@ -189,6 +261,9 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
     /// <remarks>
     /// A user is waiting for the answer, so the wait for a client-side permit
     /// is limited to <see cref="RateLimitedHttpInvoker.InteractivePermitWait"/>.
+    /// A query with a volume year (<c>Green Lantern (2023)</c>) is searched
+    /// without the year, reading at least <see cref="YearLookupCandidateCount"/>
+    /// results, and the candidates whose start year matches come first.
     /// </remarks>
     public async Task<IReadOnlyList<ExternalSeriesMetadata>> SearchSeriesAsync(
         string query,
@@ -206,12 +281,25 @@ public abstract class ExternalSeriesMetadataProviderBase : IExternalSeriesMetada
             return Array.Empty<ExternalSeriesMetadata>();
         }
 
-        return await SearchCoreAsync(
+        var pageSize = Math.Clamp(limit, 1, MaxSearchLimit);
+        var (title, year) = SeriesTitleYear.Parse(query);
+        if (year is null)
+        {
+            return await SearchCoreAsync(config, query, pageSize, RateLimitedHttpInvoker.InteractivePermitWait, cancellationToken);
+        }
+
+        var results = await SearchCoreAsync(
             config,
-            query,
-            Math.Clamp(limit, 1, MaxSearchLimit),
+            title,
+            Math.Clamp(Math.Max(pageSize, YearLookupCandidateCount), 1, MaxSearchLimit),
             RateLimitedHttpInvoker.InteractivePermitWait,
             cancellationToken);
+
+        // OrderByDescending is stable, so equal scores keep the provider's order.
+        return results
+            .OrderByDescending(result => SeriesMatchScorer.Score(query, result.CanonicalTitle, result.Aliases, result.StartYear))
+            .Take(pageSize)
+            .ToList();
     }
 
     /// <inheritdoc />

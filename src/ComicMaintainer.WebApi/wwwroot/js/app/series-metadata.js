@@ -1050,10 +1050,16 @@
                                    : 'var(--text-secondary)';
                         scoreBadge = html`<span title="Confidence that this is the right match" style="font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--bg-secondary); color: ${tone}; border: 1px solid ${tone};">${score.toFixed(1)}% match</span>`;
                     }
+                    // ComicVine lists many volumes under one name ("Green
+                    // Lantern"); the start year and publisher tell them apart.
+                    const edition = [r.start_year, r.publisher].filter(Boolean).join(' · ');
+                    const editionLabel = edition
+                        ? html` <span style="font-weight: normal; font-size: 13px; color: var(--text-secondary);">(${edition})</span>`
+                        : '';
                     return html`
                         <div style="border: 1px solid var(--border-primary); border-radius: 5px; padding: 10px; margin-bottom: 8px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
-                                <strong>${r.canonical_title || ''}${canonicalLangBadge}</strong>
+                                <strong>${r.canonical_title || ''}${editionLabel}${canonicalLangBadge}</strong>
                                 <div style="display: flex; gap: 6px; align-items: center;">
                                     ${scoreBadge}
                                     <span style="font-size: 12px; color: var(--text-secondary);">${r.source || ''}</span>

@@ -681,7 +681,7 @@ Preferences are `{"defaultReaderMode","readingDirection","tapZonesEnabled","auto
 
 **`GET /api/metadata/refresh/job/{jobId}`** returns `{"jobId","status","series","totalSeries","processedSeries","successes","notFound","failures","currentSeries","startTime","endTime","recentResults":[{"seriesTitle","status","source","timestampUtc","error"}]}`. Unlike other enums, `status` is a name such as `Running`. A provider outage counts in `failures`, with the reason in `recentResults[].error`. Refresh jobs only retag series whose match or title changed.
 
-**`GET /api/metadata/search`** takes `query` and `limit`. Results from all providers are interleaved, then sorted by `match_score`:
+**`GET /api/metadata/search`** takes `query` and `limit`. Results from all providers are interleaved, then sorted by `match_score`. A query ending in a volume year, such as `Green Lantern (2023)`, is searched without the year. Candidates whose `start_year` matches then score highest, and one whose start year conflicts scores low. `start_year` and `publisher` are only reported by ComicVine:
 
 ```json
 {
@@ -699,6 +699,8 @@ Preferences are `{"defaultReaderMode","readingDirection","tapZonesEnabled","auto
     "publication_status": "ongoing",
     "total_chapters": null,
     "origin": "US",
+    "start_year": null,
+    "publisher": null,
     "match_score": 100,
     "localized_titles": [{ "title": "Batman", "language": "en" }]
   }]

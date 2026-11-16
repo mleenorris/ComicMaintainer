@@ -49,7 +49,15 @@ public class SeriesNameResolver : ISeriesNameResolver
         }
         if (!string.IsNullOrWhiteSpace(metadata?.Series))
         {
+            // A folder named for a volume ("Green Lantern (2023)") says which of
+            // the same-named volumes the file belongs to. A <Series> without a
+            // year ("Green Lantern") inherits it; on its own it would match
+            // whichever volume of that name a provider happens to list first.
             var trimmed = metadata!.Series!.Trim();
+            if (SeriesTitleYear.YearOf(folderSeries) is { } folderYear)
+            {
+                trimmed = SeriesTitleYear.WithYear(trimmed, folderYear);
+            }
             if (!candidates.Any(c => string.Equals(c, trimmed, StringComparison.OrdinalIgnoreCase)))
             {
                 candidates.Add(trimmed);

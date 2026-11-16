@@ -71,6 +71,8 @@ const RESULTS = [
         publication_status: 'ongoing',
         total_chapters: 66,
         origin: 'en',
+        start_year: 2012,
+        publisher: 'Image',
         localized_titles: [
             { title: 'サーガ', language: 'ja' },
             { title: 'Saga (Image Comics)', language: 'en' },
@@ -86,7 +88,7 @@ const RESULTS = [
         aliases: [],
         thumbnail_url: 'https://mangadex.example/swamp-thing.256.jpg'
     },
-    { canonical_title: 'SAGA', match_score: 12 },
+    { canonical_title: 'SAGA', match_score: 12, start_year: null, publisher: 'Planeta DeAgostini' },
     { source: 'AniList', aliases: ['Untitled Saga'] }
 ];
 
@@ -141,7 +143,7 @@ test('a provider search lists each candidate with its score, source and aliases'
     const actions = ['Use This Match', 'Adopt as Canonical', 'Add Aliases'];
     assert.deepEqual(resultCards(page).map(describe), [
         {
-            title: 'Saga (Image Comics) en',
+            title: 'Saga (Image Comics) (2012 · Image) en',
             score: '96.5% match',
             tone: 'var(--accent-success, #1f9d55)',
             source: 'ComicVine',
@@ -157,7 +159,7 @@ test('a provider search lists each candidate with its score, source and aliases'
             buttons: actions
         },
         {
-            title: 'SAGA',
+            title: 'SAGA (Planeta DeAgostini)',
             score: '12.0% match',
             tone: 'var(--text-secondary)',
             source: '',

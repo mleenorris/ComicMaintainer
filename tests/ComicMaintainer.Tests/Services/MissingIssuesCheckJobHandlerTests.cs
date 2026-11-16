@@ -137,6 +137,30 @@ public class MissingIssuesCheckJobHandlerTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_Annuals_AreCheckedApartFromTheSeries()
+    {
+        // The series has #1-#2; its Annuals #1 and #3 (Annual #2 missing).
+        SetupCandidates(("gl", "Green Lantern"));
+        _issuesById["gl"] = new SeriesIssuesResult
+        {
+            Id = "gl",
+            Title = "Green Lantern",
+            CanonicalTitle = "Green Lantern",
+            Issues = new List<SeriesIssueDto>
+            {
+                new() { Issue = "1" },
+                new() { Issue = "2" },
+                new() { Issue = "1", Annual = true },
+                new() { Issue = "3", Annual = true },
+            }
+        };
+
+        var summary = await BuildHandler().ExecuteAsync(null, CancellationToken.None);
+
+        Assert.Contains("1 series missing 1 issue(s): Green Lantern Annual (1)", summary);
+    }
+
+    [Fact]
     public async Task ExecuteWithFindingsAsync_ReportsHowManySeriesHaveGaps()
     {
         SetupCandidates(("a", "Alpha"), ("b", "Beta"));

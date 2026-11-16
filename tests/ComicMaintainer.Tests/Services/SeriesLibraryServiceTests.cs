@@ -365,6 +365,52 @@ public class SeriesLibraryServiceTests
         Assert.Equal(gapInSecondVolume ? 1 : 0, missing.Series.Count);
     }
 
+    private static ComicFile AnnualFile(string fileName, string issue)
+    {
+        var file = VolumeFile(fileName, issue, null);
+        file.Metadata!.Series = "Green Lantern Annual";
+        return file;
+    }
+
+    [Fact]
+    public async Task GetSeriesIssuesAsync_Annuals_AreListedAfterTheSeriesIssues()
+    {
+        var files = new List<ComicFile>
+        {
+            AnnualFile("Green Lantern Annual - Chapter 0001.cbz", "1"),
+            VolumeFile("Green Lantern - Chapter 0002.cbz", "2", null),
+            VolumeFile("Green Lantern - Chapter 0001.cbz", "1", null),
+        };
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(files);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var seriesId = (await service.GetSeriesSummariesAsync()).Series.Single().Id;
+
+        var result = await service.GetSeriesIssuesAsync(seriesId, perPage: -1);
+
+        Assert.Equal(
+            new[] { (false, "1"), (false, "2"), (true, "1") },
+            result!.Issues.Select(i => (i.Annual, i.Issue!)).ToArray());
+    }
+
+    [Theory]
+    // Annual #2 does not fill the series' missing #2...
+    [InlineData(new[] { "1", "3" }, new[] { "2" }, true)]
+    // ...and the Annuals have their own gaps.
+    [InlineData(new[] { "1", "2" }, new[] { "1", "3" }, true)]
+    [InlineData(new[] { "1", "2" }, new[] { "1", "2" }, false)]
+    public async Task GetSeriesSummariesAsync_MissingFilter_ChecksTheAnnualsApart(string[] issues, string[] annuals, bool missing)
+    {
+        var files = issues.Select(n => VolumeFile($"i{n}.cbz", n, null))
+            .Concat(annuals.Select(n => AnnualFile($"a{n}.cbz", n)))
+            .ToList();
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(files);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var result = await service.GetSeriesSummariesAsync(filter: "missing");
+
+        Assert.Equal(missing ? 1 : 0, result.Series.Count);
+    }
+
     [Fact]
     public async Task GetSeriesAsync_PinnedName_UsesPinnedNameSlugForSeriesId()
     {

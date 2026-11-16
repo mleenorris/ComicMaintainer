@@ -47,6 +47,13 @@ public class SeriesIssueDto
     public bool Read { get; set; }
 
     /// <summary>
+    /// True when the issue is an Annual (see <see cref="Utilities.AnnualIssue.IsAnnual"/>):
+    /// Annual #1 is not issue #1, so Annuals are listed, and checked for missing issues, apart.
+    /// </summary>
+    [JsonPropertyName("annual")]
+    public bool Annual { get; set; }
+
+    /// <summary>
     /// The issue's volume, from its <see cref="Volume"/> tag or else its file name (see
     /// <see cref="Utilities.ComicVolume.Resolve"/>); null when neither names one.
     /// </summary>

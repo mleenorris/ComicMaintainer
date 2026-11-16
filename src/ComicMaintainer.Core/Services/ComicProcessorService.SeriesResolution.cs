@@ -15,10 +15,25 @@ public partial class ComicProcessorService
     /// nothing names a series for: the "Unknown Series" fallback would rename every such file
     /// to the same "Unknown Series - Chapter NNNN" and flag all but one as duplicates.
     /// </para>
+    /// <para>
+    /// An Annual (see <see cref="AnnualIssue.IsAnnual"/>) keeps "Annual" in its series: the
+    /// series it belongs to is resolved ("Green Lantern Annual" is looked up as "Green
+    /// Lantern"), then "Annual" is put back ("Green Lantern Annual"). Annual #1 then neither
+    /// takes issue #1's name nor its place, while it stays in the same series, and no Annual
+    /// gets a series record of its own.
+    /// </para>
     /// </summary>
     private async Task<string> ResolveNormalizedSeriesAsync(ComicMetadata metadata, string filePath, CancellationToken cancellationToken)
     {
-        var resolution = await _seriesNameResolver.ResolveAsync(filePath, metadata, mutateCache: true, cancellationToken);
+        var annual = AnnualIssue.IsAnnual(metadata.Series, metadata.Issue, Path.GetFileName(filePath));
+        var lookup = metadata;
+        if (annual && AnnualIssue.IsAnnualSeries(metadata.Series))
+        {
+            lookup = metadata.Clone();
+            lookup.Series = AnnualIssue.WithoutAnnual(metadata.Series!);
+        }
+
+        var resolution = await _seriesNameResolver.ResolveAsync(filePath, lookup, mutateCache: true, cancellationToken);
         var unresolved = string.IsNullOrWhiteSpace(resolution.ResolvedSeries)
             || resolution.WinningStep == SeriesNameResolutionStep.UnknownSentinel;
         if (unresolved && IsInLibraryRoot(filePath))
@@ -26,7 +41,12 @@ public partial class ComicProcessorService
             return string.Empty;
         }
 
-        return string.IsNullOrWhiteSpace(resolution.ResolvedSeries) ? UnknownSeries : resolution.ResolvedSeries;
+        if (string.IsNullOrWhiteSpace(resolution.ResolvedSeries))
+        {
+            return UnknownSeries;
+        }
+
+        return annual && !unresolved ? AnnualIssue.WithAnnual(resolution.ResolvedSeries) : resolution.ResolvedSeries;
     }
 
     /// <summary>

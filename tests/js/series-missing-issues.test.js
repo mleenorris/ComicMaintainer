@@ -201,3 +201,45 @@ test('one known volume is one run', async () => {
 
     assert.equal(page.$('#seriesDetailPanel .series-issues-volume-heading'), null);
 });
+
+test('Annuals get a section of their own, with their own missing issues', async () => {
+    const annual = number => issue(number, {
+        file_path: `/comics/Saga/Saga Annual - Chapter ${number}.cbz`,
+        file_name: `Saga Annual - Chapter ${number}.cbz`,
+        annual: true
+    });
+    // As the server orders them: the series' issues, then the Annuals.
+    const page = await bootSeries({ issues: [issue(1), issue(3), annual(1), annual(3)] });
+
+    assert.deepEqual(volumeLayout(page), [
+        '== Issues 2 issues', '#1', '#2 missing', '#3',
+        '== Annual 2 issues', '#1', '#2 missing', '#3'
+    ]);
+    assert.equal(bannerText(page), 'Missing 2 issues: Issues: #2; Annual: #2');
+});
+
+test('the Annuals of a volume series are named after their volume', async () => {
+    const annualOf = (number, year) => ({ ...volumeIssue(number, year), file_path: `/comics/Green Lantern/Annual ${year} ${number}.cbz`, annual: true });
+    const page = await bootSeries({
+        issues: [volumeIssue(1, 1990), volumeIssue(1, 2005), annualOf(1, 1990), annualOf(1, 2005)]
+    });
+
+    assert.deepEqual(page.$$('#seriesDetailPanel .series-issues-volume-heading').map(text),
+        ['1990 1 issue', '2005 1 issue', '1990 Annual 1 issue', '2005 Annual 1 issue']);
+});
+
+test('only Annuals of one volume make one section named after it', async () => {
+    const annual = number => ({ ...volumeIssue(number, 1990), file_path: `/comics/Green Lantern/A${number}.cbz`, annual: true });
+    const page = await bootSeries({ issues: [annual(1), annual(2)] });
+
+    assert.deepEqual(page.$$('#seriesDetailPanel .series-issues-volume-heading').map(text), ['1990 Annual 2 issues']);
+});
+
+test('the series issues of mixed volumes, beside Annuals, are named "Issues"', async () => {
+    // 1990 #1 and 2005 #2 continue one numbering, so they stay one run.
+    const page = await bootSeries({
+        issues: [volumeIssue(1, 1990), volumeIssue(2, 2005), { ...volumeIssue(1, null), file_path: '/comics/Green Lantern/A1.cbz', annual: true }]
+    });
+
+    assert.deepEqual(page.$$('#seriesDetailPanel .series-issues-volume-heading').map(text), ['Issues 2 issues', 'Annual 1 issue']);
+});

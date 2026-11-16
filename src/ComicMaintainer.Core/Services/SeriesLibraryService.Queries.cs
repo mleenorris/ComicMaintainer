@@ -446,9 +446,9 @@ public partial class SeriesLibraryService
     /// just gaps strictly between existing issues (e.g. it has 1, 2 and 4 but
     /// not 3). Decimal "specials"/half-chapters (e.g. 2.5) count as a found
     /// issue for their whole number (2), so they can fill an otherwise-missing
-    /// slot. Non-numeric issue labels are ignored. A series whose numbering restarts with each
-    /// volume (see <see cref="VolumeNumbering"/>) is checked one volume at a time, so #3 of the
-    /// 1990 volume does not stand in for a missing #3 of the 2005 volume.
+    /// slot. Non-numeric issue labels are ignored. A series split into runs (see
+    /// <see cref="VolumeNumbering"/>) is checked one run at a time, so #3 of the 1990 volume
+    /// does not stand in for a missing #3 of the 2005 volume, nor Annual #3 for issue #3.
     /// </summary>
     private static bool HasMissingIssues(SeriesAccumulator accumulator)
     {

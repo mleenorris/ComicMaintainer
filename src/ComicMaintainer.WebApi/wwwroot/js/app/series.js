@@ -616,19 +616,42 @@
             return n;
         }
 
-        // American comics restart their numbering with each volume ("Green
-        // Lantern" #1 of 1990 and #1 of 2005). When a series' volumes share an
-        // issue number, its issues are grouped by volume (volume_key, sent by
-        // the server, which already orders the issues volume by volume) so each
-        // volume gets its own run and its own missing issues. Volumes that
-        // continue one numbering (a manga's tankōbon volumes) stay one run, as
-        // on the server (VolumeNumbering). Returns null for one run.
-        function groupIssuesByRestartingVolume(issues) {
+        // A series' issues split into runs that are numbered on their own, as
+        // on the server (VolumeNumbering), which already orders the issues run
+        // by run. Each run gets its own heading and its own missing issues:
+        //  - Annuals (issue.annual) are always a run of their own: Annual #1 is
+        //    not issue #1.
+        //  - American comics restart their numbering with each volume ("Green
+        //    Lantern" #1 of 1990 and #1 of 2005): when volumes (volume_key)
+        //    share an issue number, each volume is a run. Volumes that continue
+        //    one numbering (a manga's tankōbon volumes) stay one run.
+        // Returns [{ label, issues }], or null for one run.
+        function groupIssueRuns(issues) {
+            const list = issues || [];
+            const annuals = list.filter(issue => issue && issue.annual);
+            const regular = annuals.length ? list.filter(issue => !(issue && issue.annual)) : list;
+            const regularRuns = splitRunByRestartingVolume(regular, false);
+            if (!annuals.length) return regularRuns;
+            const runs = regular.length ? (regularRuns || [wholeRun(regular, false)]) : [];
+            return runs.concat(splitRunByRestartingVolume(annuals, true) || [wholeRun(annuals, true)]);
+        }
+
+        // A run named after its issues' volume when they all share one ("1990",
+        // "1990 Annual"); otherwise "Issues" or "Annual".
+        function wholeRun(issues, annual) {
+            const labels = new Set(issues.map(issue => (issue && issue.volume_label) || ''));
+            const volume = labels.size === 1 ? [...labels][0] : '';
+            const label = annual ? (volume ? `${volume} Annual` : 'Annual') : (volume || 'Issues');
+            return { label, issues };
+        }
+
+        // The issues by volume when their numbering restarts by volume, or null.
+        function splitRunByRestartingVolume(issues, annual) {
             const groups = new Map();
-            for (const issue of issues || []) {
+            for (const issue of issues) {
                 const key = (issue && issue.volume_key) || '';
                 if (!groups.has(key)) {
-                    groups.set(key, { key, label: (issue && issue.volume_label) || '', issues: [] });
+                    groups.set(key, { key, volume: (issue && issue.volume_label) || '', issues: [] });
                 }
                 groups.get(key).issues.push(issue);
             }
@@ -647,18 +670,24 @@
                     seen.add(n);
                 }
             }
-            return restarts ? [...groups.values()] : null;
+            if (!restarts) return null;
+            return [...groups.values()].map(group => ({
+                label: annual
+                    ? (group.volume ? `${group.volume} Annual` : 'Annual')
+                    : (group.volume || 'No volume'),
+                issues: group.issues
+            }));
         }
 
         // The grid items for the series-issues-grid: one run of issues, or, for
-        // a series whose numbering restarts by volume, a heading and a run per
-        // volume (see groupIssuesByRestartingVolume).
+        // a series split into runs, a heading and the issues of each run (see
+        // groupIssueRuns).
         function buildSeriesIssuesGridItems(issues) {
-            const volumes = groupIssuesByRestartingVolume(issues);
-            if (!volumes) return buildIssueRunGridItems(issues);
-            return volumes.flatMap(volume => [
-                { kind: 'volume', label: volume.label, count: volume.issues.length },
-                ...buildIssueRunGridItems(volume.issues)
+            const runs = groupIssueRuns(issues);
+            if (!runs) return buildIssueRunGridItems(issues);
+            return runs.flatMap(run => [
+                { kind: 'volume', label: run.label, count: run.issues.length },
+                ...buildIssueRunGridItems(run.issues)
             ]);
         }
 
@@ -872,9 +901,10 @@
         // Render a small banner above the issues grid summarizing any missing
         // integer issue numbers between #1 and the highest known issue number.
         function renderMissingIssuesBanner(issues, series) {
-            // A series whose numbering restarts by volume is checked volume by
-            // volume, each volume's gaps named after it ("1990: #3; Vol. 2: #5").
-            const volumes = groupIssuesByRestartingVolume(issues);
+            // A series split into runs (volumes of a numbering that restarts by
+            // volume, Annuals) is checked run by run, each run's gaps named
+            // after it ("1990: #3; Vol. 2: #5; Annual: #2").
+            const volumes = groupIssueRuns(issues);
             const parts = (volumes || [{ label: '', issues }])
                 .map(volume => ({ label: volume.label, runs: computeMissingIssueRanges(volume.issues) }))
                 .filter(part => part.runs.length);
@@ -882,14 +912,14 @@
             // Runs of consecutive numbers are shown as ranges (e.g. 2,3,4 -> "2-4").
             const describeRuns = runs => runs.map(([start, end]) => (start === end ? `#${start}` : `#${start}-${end}`)).join(', ');
             const label = volumes
-                ? parts.map(part => `${part.label || 'No volume'}: ${describeRuns(part.runs)}`).join('; ')
+                ? parts.map(part => `${part.label}: ${describeRuns(part.runs)}`).join('; ')
                 : describeRuns(parts[0].runs);
             const count = parts.reduce((total, part) => total + part.runs.reduce((sum, [start, end]) => sum + end - start + 1, 0), 0);
             // The Suwayomi action is only useful when the integration is
             // configured, so it is rendered lazily once the status probe has
             // reported a reachable server (see refreshSuwayomiAvailability).
-            // Suwayomi has no notion of comic volumes, so it is not offered for
-            // a series split into volumes: "#3" would match any volume's #3.
+            // Suwayomi has no notion of comic volumes or Annuals, so it is not
+            // offered for a split series: "#3" would match any run's #3.
             const seriesId = series && series.id ? series.id : '';
             const seriesTitle = series && (series.title || series.canonical_title) ? (series.title || series.canonical_title) : '';
             const action = seriesId && suwayomiAvailable && !volumes
@@ -912,9 +942,8 @@
         // pages without rebuilding the surrounding panel.
         function renderSeriesIssueGridItemHtml(item) {
             if (item.kind === 'volume') {
-                const name = item.label || 'No volume';
                 return `
-                                <h3 class="series-issues-volume-heading">${escapeHtml(name)} <span class="series-issues-volume-count">${item.count} issue${item.count === 1 ? '' : 's'}</span></h3>`;
+                                <h3 class="series-issues-volume-heading">${escapeHtml(item.label)} <span class="series-issues-volume-count">${item.count} issue${item.count === 1 ? '' : 's'}</span></h3>`;
             }
             if (item.kind === 'missing') {
                 const isRun = item.end !== undefined;

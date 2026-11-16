@@ -407,11 +407,14 @@ public partial class ComicProcessorService
                 comicInfo.Volume = volume.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
 
+            // An issue written as "Annual 1" is named by its number: the series names the Annual.
+            var issue = AnnualIssue.IssueNumber(metadata.Issue);
+
             // Use ComicFileProcessor.FormatFilename to properly handle decimal issue numbers
             var filename = ComicFileProcessor.FormatFilename(
                 _settings.FilenameFormat,
                 comicInfo,
-                metadata.Issue ?? "",
+                issue ?? "",
                 extension,
                 _settings.IssueNumberPadding,
                 Path.GetFileName(originalPath));
@@ -433,7 +436,7 @@ public partial class ComicProcessorService
             // One-shots / volume-only files (no chapter in metadata and no
             // explicit "Ch/Chapter" keyword in the original filename) are
             // intentionally left untouched.
-            filename = EnsureChapterNumberPreserved(filename, metadata.Issue, originalPath);
+            filename = EnsureChapterNumberPreserved(filename, issue, originalPath);
 
             filename = ComicFileProcessor.SanitizeFileName(filename);
             

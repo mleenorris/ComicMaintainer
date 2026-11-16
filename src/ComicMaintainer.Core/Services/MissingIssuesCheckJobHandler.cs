@@ -89,15 +89,17 @@ public class MissingIssuesCheckJobHandler : IScheduledJobFindingsHandler
 
             var title = FirstNonBlank(series.Title, issues.Title, series.CanonicalTitle) ?? series.Id;
 
-            // A series whose numbering restarts with each volume ("Green Lantern" #1 of 1990
-            // and of 2005) is checked one volume at a time; one numbering is checked as a whole.
-            var volumes = VolumeNumbering.RestartingGroups(issues.Issues, i => i.VolumeInfo, i => i.Issue);
+            // A series split into runs numbered on their own (Annuals, and the volumes of a
+            // numbering that restarts with each volume: "Green Lantern" #1 of 1990 and of 2005)
+            // is checked one run at a time; one numbering is checked as a whole.
+            var volumes = VolumeNumbering.SeparateRuns(issues.Issues, i => i.VolumeInfo, i => i.Issue, i => i.Annual);
+            var splitByVolume = volumes?.Any(run => run.Volume is not null) == true;
             var runs = volumes is null
                 ? new[] { (Title: title, Issues: (IEnumerable<SeriesIssueDto>)issues.Issues, CanDownload: true) }
-                : volumes.Select(volume => (
-                    Title: $"{title} {volume.Volume?.Label ?? "(no volume)"}",
-                    Issues: (IEnumerable<SeriesIssueDto>)volume.Items,
-                    // Suwayomi has no notion of comic volumes: "#3" would be any volume's #3.
+                : volumes.Select(run => (
+                    Title: RunTitle(title, run.Volume, run.IsAnnual, splitByVolume),
+                    Issues: (IEnumerable<SeriesIssueDto>)run.Items,
+                    // Suwayomi has no notion of comic volumes or Annuals: "#3" would be any run's #3.
                     CanDownload: false)).ToArray();
 
             List<string>? alternateTitles = null;
@@ -317,6 +319,19 @@ public class MissingIssuesCheckJobHandler : IScheduledJobFindingsHandler
         }
 
         return $"{outcomeText}{seriesWithGaps.Count} series missing {totalMissing} issue(s): {named}.";
+    }
+
+    /// <summary>
+    /// How a run of a split series is named in the summary: <c>Green Lantern (1990)</c>,
+    /// <c>Green Lantern Annual</c>, <c>Green Lantern Annual (1990)</c>, or
+    /// <c>Green Lantern (no volume)</c> for issues of no known volume among volumes.
+    /// </summary>
+    private static string RunTitle(string title, ComicMaintainer.Core.Utilities.ComicVolume? volume, bool annual, bool splitByVolume)
+    {
+        var name = annual ? $"{title} Annual" : title;
+        return volume is { } known
+            ? $"{name} {known.Label}"
+            : splitByVolume && !annual ? $"{name} (no volume)" : name;
     }
 
     private static string? FirstNonBlank(params string?[] values) =>

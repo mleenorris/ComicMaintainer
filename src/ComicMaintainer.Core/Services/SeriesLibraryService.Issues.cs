@@ -220,7 +220,8 @@ public partial class SeriesLibraryService
                 Renamed = issue.Renamed,
                 Normalized = issue.Normalized,
                 Duplicate = issue.Duplicate,
-                Read = issue.Read
+                Read = issue.Read,
+                Annual = issue.Annual
             };
         }
 
@@ -254,9 +255,10 @@ public partial class SeriesLibraryService
     }
 
     /// <summary>
-    /// Orders a series' issues by issue number. When the series' numbering restarts with each
-    /// volume (see <see cref="VolumeNumbering"/>), each volume's issues come together, oldest
-    /// volume first, instead of #1 of every volume, then #2 of every volume.
+    /// Orders a series' issues by issue number. A series split into runs (see
+    /// <see cref="VolumeNumbering"/>) lists each run in turn: each volume of a numbering that
+    /// restarts by volume, oldest first, then the Annuals, instead of #1 of every volume and
+    /// Annual #1 together.
     /// </summary>
     private static List<SeriesIssueDto> SortIssues(IEnumerable<SeriesIssueDto> issues)
     {
@@ -276,12 +278,13 @@ public partial class SeriesLibraryService
     }
 
     /// <summary>
-    /// The series' issues by volume when its numbering restarts with each volume; null when it
-    /// is one run. An issue's number falls back to its file name, as for ordering.
+    /// The series' issues split into runs numbered on their own (Annuals, and volumes of a
+    /// numbering that restarts by volume); null when it is one run. An issue's number falls
+    /// back to its file name, as for ordering.
     /// </summary>
     internal static IReadOnlyList<VolumeNumbering.VolumeGroup<SeriesIssueDto>>? RestartingVolumes(
         IEnumerable<SeriesIssueDto> issues)
-        => VolumeNumbering.RestartingGroups(issues, issue => issue.VolumeInfo, ResolveIssueNumber);
+        => VolumeNumbering.SeparateRuns(issues, issue => issue.VolumeInfo, ResolveIssueNumber, issue => issue.Annual);
 
     private static string ExtractIssueSortKey(string? issue)
         => string.IsNullOrWhiteSpace(issue) ? "~" : issue;

@@ -249,6 +249,43 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
         Assert.Null(info.Element("Volume"));
     }
 
+    [Theory]
+    // Tagged the ComicVine way, written as an issue label, or only named by the file.
+    [InlineData("<ComicInfo><Series>Green Lantern Annual</Series><Number>1</Number></ComicInfo>", "a.cbz")]
+    [InlineData("<ComicInfo><Series>Green Lantern</Series><Number>Annual 1</Number></ComicInfo>", "b.cbz")]
+    [InlineData(null, "Green Lantern Annual 001 (1992).cbz")]
+    public async Task ProcessFileAsync_AnnualAndIssueOfTheSameNumber_AreKeptApart(string? annualInfo, string annualFileName)
+    {
+        var issue = WriteArchive("Green Lantern", "GL 001.cbz", "<ComicInfo><Series>Green Lantern</Series><Number>1</Number></ComicInfo>");
+        var annual = WriteArchive("Green Lantern", annualFileName, annualInfo);
+
+        Assert.True(await _service.ProcessFileAsync(issue));
+        Assert.True(await _service.ProcessFileAsync(annual));
+
+        var folder = Path.Join(_root, "Green Lantern");
+        Assert.True(File.Exists(Path.Join(folder, "Green Lantern - Chapter 0001.cbz")));
+        var annualInfoAfter = ReadComicInfo(Path.Join(folder, "Green Lantern Annual - Chapter 0001.cbz"));
+        Assert.Equal("Green Lantern Annual", annualInfoAfter.Element("Series")?.Value);
+        Assert.Equal("1", annualInfoAfter.Element("Number")?.Value);
+        _fileStore.Verify(
+            f => f.MarkFileDuplicateAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AnnualOfAVolume_KeepsAnnualBeforeTheVolume()
+    {
+        var path = WriteArchive("Green Lantern (1990)", "Green Lantern (1990) Annual 003.cbz");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var archive = Directory.GetFiles(Path.Join(_root, "Green Lantern (1990)")).Single();
+        Assert.Equal("Green Lantern Annual (1990) - Chapter 0003.cbz", Path.GetFileName(archive));
+        var info = ReadComicInfo(archive);
+        Assert.Equal("Green Lantern Annual (1990)", info.Element("Series")?.Value);
+        Assert.Equal("1990", info.Element("Volume")?.Value);
+    }
+
     private static string VolumeInfo(string volume, string number)
         => $"<ComicInfo><Series>Green Lantern</Series><Number>{number}</Number><Volume>{volume}</Volume></ComicInfo>";
 

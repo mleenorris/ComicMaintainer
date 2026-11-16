@@ -191,6 +191,12 @@ public partial class ComicProcessorService
             // The series is missing but known from the folder or the series cache.
             return false;
         }
+        // "Annual 1" is stored as "1" (see NormalizeMetadataAsync).
+        if (AnnualIssue.IsAnnualIssueText(metadata.Issue))
+        {
+            return false;
+        }
+
         // A missing <Number> is not normalized when the filename holds the issue
         // number: normalize recovers it into the metadata (see NormalizeMetadataAsync).
         var expectedIssue = metadata.Issue;
@@ -386,6 +392,13 @@ public partial class ComicProcessorService
         {
             _logger.LogDebug("Setting normalized series name: {SeriesName}", LoggingHelper.SanitizeForLog(normalizedSeries));
             normalizedMetadata.Series = normalizedSeries;
+        }
+
+        // An issue written as "Annual 1" is stored as "1": the series names the Annual
+        // ("Green Lantern Annual", see ResolveNormalizedSeriesAsync), as ComicVine has it.
+        if (AnnualIssue.IsAnnualIssueText(normalizedMetadata.Issue))
+        {
+            normalizedMetadata.Issue = AnnualIssue.IssueNumber(normalizedMetadata.Issue);
         }
 
         // If the ComicInfo metadata is missing the issue/chapter number, fall back

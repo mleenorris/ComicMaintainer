@@ -3,9 +3,14 @@ using System.Globalization;
 namespace ComicMaintainer.Core.Utilities;
 
 /// <summary>
-/// Splits a series' issues into volumes when its numbering restarts with each volume, the way
-/// American comics are relaunched (<c>Green Lantern</c> #1 of 1990 and #1 of 2005). Issue
-/// order and missing-issue gaps are then worked out per volume.
+/// Splits a series' issues into runs that are numbered on their own, so issue order and
+/// missing-issue gaps are worked out per run:
+/// <list type="bullet">
+/// <item>Annuals (see <see cref="AnnualIssue"/>) are always a run of their own: Annual #1 is
+/// not issue #1.</item>
+/// <item>Volumes are runs of their own when the numbering restarts with each volume, the way
+/// American comics are relaunched (<c>Green Lantern</c> #1 of 1990 and #1 of 2005).</item>
+/// </list>
 /// </summary>
 /// <remarks>
 /// A series whose volumes continue one numbering (a manga's tankōbon volumes: chapters 1-10
@@ -14,36 +19,43 @@ namespace ComicMaintainer.Core.Utilities;
 /// </remarks>
 public static class VolumeNumbering
 {
-    /// <summary>One volume's issues, in their original order; <see cref="Volume"/> is null for issues of no known volume.</summary>
-    public sealed record VolumeGroup<T>(ComicVolume? Volume, IReadOnlyList<T> Items);
+    /// <summary>
+    /// One run's issues, in their original order. <see cref="Volume"/> is the run's volume, or
+    /// null when the run is not split by volume or its issues' volume is unknown.
+    /// </summary>
+    public sealed record VolumeGroup<T>(ComicVolume? Volume, IReadOnlyList<T> Items, bool IsAnnual = false);
 
     /// <summary>
-    /// The issues grouped by volume when the series' numbering restarts by volume (see the
-    /// remarks), ordered by volume (numbered volumes, then start years, each ascending; issues
-    /// of no known volume last). Null when the series is one run.
+    /// The issues split into runs (see the class summary): the series' own issues first, then
+    /// its Annuals; within each, by volume when the numbering restarts by volume (numbered
+    /// volumes, then start years, each ascending; issues of no known volume last). Null when
+    /// the series is one run.
     /// </summary>
-    public static IReadOnlyList<VolumeGroup<T>>? RestartingGroups<T>(
+    public static IReadOnlyList<VolumeGroup<T>>? SeparateRuns<T>(
         IEnumerable<T> items,
         Func<T, ComicVolume?> volumeOf,
-        Func<T, string?> issueOf)
+        Func<T, string?> issueOf,
+        Func<T, bool>? isAnnual = null)
     {
         ArgumentNullException.ThrowIfNull(items);
-        var groups = items
-            .GroupBy(volumeOf)
-            .Select(group => new VolumeGroup<T>(group.Key, group.ToList()))
-            .ToList();
-
-        var known = groups.Where(group => group.Volume is not null).ToList();
-        if (known.Count < 2 || !SharesAnIssueNumber(known, issueOf))
+        var all = items.ToList();
+        var annuals = isAnnual is null ? new List<T>() : all.Where(isAnnual).ToList();
+        if (annuals.Count == 0)
         {
-            return null;
+            return ByRestartingVolume(all, volumeOf, issueOf, annual: false);
         }
 
-        return groups
-            .OrderBy(group => group.Volume is null)
-            .ThenBy(group => group.Volume?.IsYear)
-            .ThenBy(group => group.Volume?.Value)
-            .ToList();
+        var regular = all.Where(item => !isAnnual!(item)).ToList();
+        var runs = new List<VolumeGroup<T>>();
+        if (regular.Count > 0)
+        {
+            runs.AddRange(ByRestartingVolume(regular, volumeOf, issueOf, annual: false)
+                          ?? [new VolumeGroup<T>(null, regular)]);
+        }
+
+        runs.AddRange(ByRestartingVolume(annuals, volumeOf, issueOf, annual: true)
+                      ?? [new VolumeGroup<T>(null, annuals, IsAnnual: true)]);
+        return runs;
     }
 
     /// <summary>
@@ -62,6 +74,31 @@ public static class VolumeNumbering
         }
 
         return (long)Math.Floor(value);
+    }
+
+    /// <summary>The issues by volume when their numbering restarts by volume; null for one run.</summary>
+    private static List<VolumeGroup<T>>? ByRestartingVolume<T>(
+        IEnumerable<T> items,
+        Func<T, ComicVolume?> volumeOf,
+        Func<T, string?> issueOf,
+        bool annual)
+    {
+        var groups = items
+            .GroupBy(volumeOf)
+            .Select(group => new VolumeGroup<T>(group.Key, group.ToList(), annual))
+            .ToList();
+
+        var known = groups.Where(group => group.Volume is not null).ToList();
+        if (known.Count < 2 || !SharesAnIssueNumber(known, issueOf))
+        {
+            return null;
+        }
+
+        return groups
+            .OrderBy(group => group.Volume is null)
+            .ThenBy(group => group.Volume?.IsYear)
+            .ThenBy(group => group.Volume?.Value)
+            .ToList();
     }
 
     private static bool SharesAnIssueNumber<T>(IEnumerable<VolumeGroup<T>> groups, Func<T, string?> issueOf)

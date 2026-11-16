@@ -59,6 +59,12 @@ example, `The Astonishing X-Men (1995)` gets `1995`, the year that volume starte
 `Vol. 2` or `v2` token gives `2`. A volume that is already set is never replaced, and the issue's own `<Year>` is left
 alone. Everything else in `ComicInfo.xml` stays as it was.
 
+Annuals keep "Annual" in their series, the way ComicVine names them. That means `<Series>Green Lantern Annual</Series>`
+with `<Number>1</Number>`, and an issue written as `Annual 1` becomes number `1`. A file is an Annual when its series
+ends in "Annual", its number is written as one, or its file name has "Annual" before the issue number (`Green Lantern
+Annual 001`). Annual #1 is renamed `Green Lantern Annual - Chapter 0001`, so it is never a duplicate of issue #1. It
+stays in the Green Lantern series, in its own "Annual" section with its own missing issues.
+
 ### Rename
 
 Files are named from **Settings > Filename Format** (`{series} - Chapter {issue}` by default) and

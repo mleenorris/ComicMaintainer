@@ -171,6 +171,84 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
         Assert.True(File.Exists(Path.Join(_root, "Green Lantern", "Green Lantern v1990 #0001.cbz")));
     }
 
+    [Fact]
+    public async Task ProcessFileAsync_SeriesNamedForItsVolume_WritesTheStartYearIntoVolume()
+    {
+        // "The Astonishing X-Men (1995)": 1995 is when volume 1 started, not issue #12's date.
+        var path = WriteArchive("The Astonishing X-Men (1995)", "The Astonishing X-Men 012.cbz",
+            "<ComicInfo><Series>The Astonishing X-Men (1995)</Series><Number>12</Number></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var archive = Directory.GetFiles(Path.Join(_root, "The Astonishing X-Men (1995)")).Single();
+        Assert.Equal("The Astonishing X-Men (1995) - Chapter 0012.cbz", Path.GetFileName(archive));
+        var info = ReadComicInfo(archive);
+        Assert.Equal("1995", info.Element("Volume")?.Value);
+        Assert.Null(info.Element("Year"));
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_VolumesNamedByTheirStartYears_EachGetTheirOwnVolume()
+    {
+        // Volume 1 started in 1995, volume 2 in 1999; both have a #1.
+        var first = WriteArchive("The Astonishing X-Men", "The Astonishing X-Men (1995) 001.cbz");
+        var second = WriteArchive("The Astonishing X-Men", "The Astonishing X-Men (1999) 001.cbz");
+
+        Assert.True(await _service.ProcessFileAsync(first));
+        Assert.True(await _service.ProcessFileAsync(second));
+
+        var folder = Path.Join(_root, "The Astonishing X-Men");
+        Assert.Equal("1995", ReadComicInfo(Path.Join(folder, "The Astonishing X-Men (1995) - Chapter 0001.cbz")).Element("Volume")?.Value);
+        Assert.Equal("1999", ReadComicInfo(Path.Join(folder, "The Astonishing X-Men (1999) - Chapter 0001.cbz")).Element("Volume")?.Value);
+        _fileStore.Verify(
+            f => f.MarkFileDuplicateAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData("<Volume>2</Volume>", "2")]
+    [InlineData("<Volume>Annual</Volume>", "Annual")]
+    [InlineData("<Volume>-1</Volume>", "1995")]
+    public async Task ProcessFileAsync_KeepsAVolumeAlreadySet_AndFillsOnlyAnUnsetOne(string volumeElement, string expected)
+    {
+        var path = WriteArchive("The Astonishing X-Men (1995)", "x.cbz",
+            $"<ComicInfo><Series>The Astonishing X-Men (1995)</Series><Number>1</Number>{volumeElement}<Year>1995</Year></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var info = ReadComicInfo(Directory.GetFiles(Path.Join(_root, "The Astonishing X-Men (1995)")).Single());
+        Assert.Equal(expected, info.Element("Volume")?.Value);
+        Assert.Equal("1995", info.Element("Year")?.Value);
+    }
+
+    [Fact]
+    public async Task Normalize_OtherwiseNormalizedFileMissingItsVolume_IsWrittenWithIt()
+    {
+        // Series, number and title are already normalized: only the volume is missing.
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("The Astonishing X-Men (1995)", "The Astonishing X-Men (1995) - Chapter 0001.cbz",
+            "<ComicInfo><Series>The Astonishing X-Men (1995)</Series><Number>1</Number><Title>Chapter 1</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        Assert.Equal("1995", ReadComicInfo(path).Element("Volume")?.Value);
+    }
+
+    [Fact]
+    public async Task Normalize_NoVolumeToFill_LeavesVolumeOut()
+    {
+        // The year after the issue number is the cover date, not a volume.
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("Saga", "Saga 001 (2012).cbz",
+            "<ComicInfo><Series>Saga</Series><Number>1</Number></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var info = ReadComicInfo(path);
+        Assert.Equal("Chapter 1", info.Element("Title")?.Value);
+        Assert.Null(info.Element("Volume"));
+    }
+
     private static string VolumeInfo(string volume, string number)
         => $"<ComicInfo><Series>Green Lantern</Series><Number>{number}</Number><Volume>{volume}</Volume></ComicInfo>";
 

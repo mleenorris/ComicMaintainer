@@ -116,7 +116,7 @@ public partial class ComicProcessorService
             // Write only the fields normalize owns into ComicInfo.xml, plus any provider details
             // that fill an empty element, so the archive is rewritten once; every other element stays.
             var providerFill = await ResolveProviderFillAsync(filePath, normalizedMetadata.Series, cancellationToken);
-            var write = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, NormalizedFields, cancellationToken, providerFill: providerFill);
+            var write = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, NormalizeWriteFields(beforeMetadata, normalizedMetadata), cancellationToken, providerFill: providerFill);
             if (write.Outcome == MetadataWriteOutcome.NotWritable)
             {
                 await DeferUnwritableNormalizeAsync(filePath, normalizedMetadata.Series, cancellationToken);
@@ -222,6 +222,12 @@ public partial class ComicProcessorService
             LoggingHelper.SanitizeForLog(metadata.Title),
             LoggingHelper.SanitizeForLog(expectedTitle));
         if (!string.Equals(metadata.Title, expectedTitle, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // A volume named by the series, file or folder name still has to be written.
+        if (VolumeToFill(metadata, filePath) is not null)
         {
             return false;
         }
@@ -418,7 +424,52 @@ public partial class ComicProcessorService
             _logger.LogDebug("Setting title to standard format: {Title}", LoggingHelper.SanitizeForLog(normalizedTitle));
             normalizedMetadata.Title = normalizedTitle;
         }
-        
+
+        // Read from the series as the file had it: resolving the series above may have
+        // dropped its "(1995)".
+        if (VolumeToFill(metadata, filePath) is { } volume)
+        {
+            _logger.LogDebug("Setting volume from the series, file or folder name: {Volume}", LoggingHelper.SanitizeForLog(volume));
+            normalizedMetadata.Volume = volume;
+        }
+
         return normalizedMetadata;
     }
+
+    /// <summary>
+    /// The volume normalize writes into an empty <c>&lt;Volume&gt;</c>, or null. A series named for
+    /// its volume, as <c>The Astonishing X-Men (1995)</c> (volume 1) and <c>(1999)</c> (volume 2),
+    /// gets that start year, the value ComicVine and ComicTagger store; a <c>Vol. 2</c> or
+    /// <c>v2</c> token gives the number. It is read from the series name, then the file name
+    /// (see <see cref="ComicVolume.FromFileName"/>), then the folder name. Without it the year
+    /// would be lost once normalize replaces the series with its resolved name. A volume already
+    /// set is never replaced: only a missing one, or ComicInfo's "unset" (-1 or 0), is filled.
+    /// The issue's own <c>&lt;Year&gt;</c> is left alone: #12 of a 1995 volume did not come out in 1995.
+    /// </summary>
+    private static string? VolumeToFill(ComicMetadata metadata, string filePath)
+    {
+        var current = metadata.Volume?.Trim();
+        var unset = string.IsNullOrEmpty(current)
+                    || (int.TryParse(current, System.Globalization.NumberStyles.AllowLeadingSign,
+                            System.Globalization.CultureInfo.InvariantCulture, out var number) && number <= 0);
+        if (!unset)
+        {
+            return null;
+        }
+
+        var volume = ComicVolume.FromSeriesName(metadata.Series)
+                     ?? ComicVolume.FromFileName(Path.GetFileName(filePath))
+                     ?? ComicVolume.FromSeriesName(Path.GetFileName(Path.GetDirectoryName(filePath)));
+        return volume?.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// The ComicInfo.xml elements a normalize write changes: the ones normalize owns, plus
+    /// <c>&lt;Volume&gt;</c> when normalize filled it (see <see cref="VolumeToFill"/>), so a file
+    /// whose volume was not touched keeps its element exactly as it was.
+    /// </summary>
+    private static ComicMetadataFieldFlags NormalizeWriteFields(ComicMetadata before, ComicMetadata normalized)
+        => string.Equals(before.Volume, normalized.Volume, StringComparison.Ordinal)
+            ? NormalizedFields
+            : NormalizedFields | ComicMetadataFieldFlags.Volume;
 }

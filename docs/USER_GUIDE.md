@@ -54,7 +54,10 @@ archive, a failed write or no series, counts as failed with a reason.
 ### Normalize
 
 Normalize writes the series, title and number. It keeps a real chapter title, and only fills a missing title or fixes an
-old generated `Chapter N`. Everything else in `ComicInfo.xml` stays as it was.
+old generated `Chapter N`. It also fills an empty `<Volume>` when the series, file or folder name gives one. For
+example, `The Astonishing X-Men (1995)` gets `1995`, the year that volume started, and `(1999)` gets `1999`. A
+`Vol. 2` or `v2` token gives `2`. A volume that is already set is never replaced, and the issue's own `<Year>` is left
+alone. Everything else in `ComicInfo.xml` stays as it was.
 
 ### Rename
 

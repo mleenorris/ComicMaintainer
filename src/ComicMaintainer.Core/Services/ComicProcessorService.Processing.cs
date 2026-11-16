@@ -165,7 +165,7 @@ public partial class ComicProcessorService
                     // Only the fields normalize owns are written, plus any provider details that
                     // fill an empty element; a CBR/RAR may come back as a new CBZ.
                     var providerFill = await ResolveProviderFillAsync(filePath, normalizedMetadata.Series, cancellationToken);
-                    var normalizeWrite = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, NormalizedFields, cancellationToken, providerFill: providerFill);
+                    var normalizeWrite = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, NormalizeWriteFields(beforeMetadata, normalizedMetadata), cancellationToken, providerFill: providerFill);
                     normalizeSuccess = normalizeWrite.Succeeded;
                     var beforeFilename = Path.GetFileName(filePath);
                     if (!FollowMovedFile(normalizeWrite.FilePath, ref filePath, ref resolvedPath))

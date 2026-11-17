@@ -288,6 +288,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
         private readonly Dictionary<string, string?> _synopsisBySeries = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, ComicVineFileStateEntity> _states = new(StringComparer.Ordinal);
         private readonly int[] _counts = new int[Enum.GetValues<Outcome>().Length];
+        private readonly HashSet<int> _listedThisRun = new();
         private int _requests;
         private bool _stoppedEarly;
 
@@ -474,7 +475,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             }
 
             var stale = link.IssuesListedUtc is not { } listed || DateTime.UtcNow - listed >= IssueListRefresh;
-            if (!stale)
+            if (!stale || _listedThisRun.Contains(volumeId))
             {
                 return issues;
             }
@@ -485,8 +486,20 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 return issues;
             }
 
-            var listing = await owner._client.ListVolumeIssuesAsync(volumeId, RequestsLeft, cancellationToken);
+            var budget = RequestsLeft;
+            var listing = await owner._client.ListVolumeIssuesAsync(volumeId, budget, cancellationToken);
             _requests += listing.Requests;
+            _listedThisRun.Add(volumeId);
+
+            // The list is complete only when ComicVine was asked and the last page was not cut
+            // off by the budget (a full last page with the budget used up means more pages exist).
+            var complete = owner._client.IsConfigured
+                           && !(listing.Requests >= budget && listing.Value.Count >= listing.Requests * 100);
+            if (!complete)
+            {
+                _stoppedEarly = true;
+            }
+
             var now = DateTime.UtcNow;
 
             await using var db = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -522,8 +535,13 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 }
             }
 
-            link.IssuesListedUtc = now;
-            db.ComicVineVolumeLinks.Update(link);
+            // An incomplete list is not stamped, so the next run lists the volume again.
+            if (complete)
+            {
+                link.IssuesListedUtc = now;
+                db.ComicVineVolumeLinks.Update(link);
+            }
+
             await db.SaveChangesAsync(cancellationToken);
             return issues;
         }

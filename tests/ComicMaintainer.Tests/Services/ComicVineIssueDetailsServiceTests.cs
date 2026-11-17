@@ -41,6 +41,7 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
             .ReturnsAsync((string path, CancellationToken _) => _files.FirstOrDefault(f => f.FilePath == path));
         _fileStore.Setup(f => f.FileExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string path, CancellationToken _) => _files.Any(f => f.FilePath == path));
+        _client.SetupGet(c => c.IsConfigured).Returns(true);
         _search.Setup(s => s.SearchVolumesAsync("Batman", It.IsAny<CancellationToken>())).ReturnsAsync(
         [
             new ExternalSeriesMetadata { CanonicalTitle = "Batman", StartYear = 2016, Publisher = "DC Comics", SourceId = BatmanVolume.ToString(), TotalChapters = 158 },
@@ -125,6 +126,23 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         Assert.Empty(_writes);
         Assert.Empty(_search.Invocations);
         Assert.Empty(_client.Invocations);
+    }
+
+    [Fact]
+    public async Task RunAsync_ATruncatedIssueList_IsListedAgainByTheNextRun()
+    {
+        AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");
+        var page = Enumerable.Range(0, 300)
+            .Select(i => new ComicVineIssueSummary(200 + i, (i + 1).ToString(), null, null, null, null)).ToList();
+        _client.Setup(c => c.ListVolumeIssuesAsync(BatmanVolume, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicVineResult<IReadOnlyList<ComicVineIssueSummary>>(page, 3));
+
+        // One search page and three pages of issues: the budget ends on a full page, so more exist.
+        var first = await CreateService().RunAsync(null, 4);
+        Assert.True(first.StoppedEarly);
+
+        await CreateService().RunAsync(null, 20);
+        _client.Verify(c => c.ListVolumeIssuesAsync(BatmanVolume, It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     [Fact]

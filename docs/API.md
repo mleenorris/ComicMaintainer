@@ -490,7 +490,7 @@ With `include_issues=true`, each entry also holds its `issues`. Leave it off for
 
 **`GET /api/files/series/{seriesId}/issues`** takes `filter`, `page` and `per_page`. It returns `{"id","title","canonical_title","aliases","metadata_source","cover_file_path","has_external_image","external_image_url","issue_count","total_size","issues","page","per_page","total_pages","synopsis","genres","publication_status","site_url"}`. Each issue is `{"file_path","file_name","title","issue","volume","publisher","year","size","modified","processed","renamed","normalized","duplicate","read","format","annual","volume_year","volume_key","volume_label"}`. `format` is `Annual`, `Special` or `null`; `annual` is true for an Annual.
 
-**`GET /api/files/series/{seriesId}/folders`** takes `filter` and returns `{"id","title","folders":[{"directory","file_count","total_size"}],"combine_group_key","suggested_destination_directory"}`.
+**`GET /api/files/series/{seriesId}/folders`** takes `filter` and returns `{"id","title","folders":[{"directory","file_count","total_size"}],"combine_group_key","suggested_destination_directory","combinable"}`. `combinable` is `true` when the folders are one of the groups `GET /api/files/combinable-folders` lists. The series page then shows a banner that offers to merge them. With two or more folders and no such group, `combine_group_key` is `series:<seriesId>` and `combinable` is `false`.
 
 **`GET /api/files/folders`** takes `filter`, `search`, `sort`, `direction`, `offset` and `limit`, and returns `{"folders","offset","limit","total_folders","unmarked_count"}`.
 
@@ -898,7 +898,7 @@ A successful write returns `{"message":"..."}`, and the new value is in effect w
 
 **`GET /api/settings`** returns these fields, plus `env_locked`. Secrets are never returned; the `*_set` fields say whether one is stored.
 
-- Files: `filename_format`, `issue_number_padding`, `watcher_enable_rename`, `watcher_enable_normalize`, `convert_rar_to_cbz_on_write`, `log_max_bytes`.
+- Files: `filename_format`, `folder_format`, `issue_number_padding`, `watcher_enable_rename`, `watcher_enable_normalize`, `convert_rar_to_cbz_on_write`, `log_max_bytes`.
 - Cleanup: `database_cleanup_interval_hours`, `stale_cleanup_max_removal_percent`, `stale_cleanup_missing_grace_hours`, `stale_cleanup_sentinel_file`, `processing_history_retention_days`, `processing_history_max_entries`.
 - Metadata: `enable_external_series_metadata`, `comicvine_api_key_set`, `comicvine_base_url`, `enable_mangadex_metadata`, `mangadex_base_url`, `enable_anilist_metadata`, `anilist_base_url`, `fill_comicinfo_from_providers`.
 - Suwayomi: `enable_suwayomi`, `suwayomi_base_url`, `suwayomi_username`, `suwayomi_password_set`, `suwayomi_downloads_directory`, `suwayomi_import_directory`.
@@ -914,6 +914,7 @@ A successful write returns `{"message":"..."}`, and the new value is in effect w
 ```json
 {
   "filenameFormat": "{series} {format} {volume_label} - Chapter {issue}",
+  "folderFormat": "{series} ({volume_year})",
   "logMaxMB": 10,
   "issueNumberPadding": 4,
   "databaseCleanup": {
@@ -975,6 +976,7 @@ The rules are:
 
 - `null` or a left-out field keeps the current value. An empty string clears a text field.
 - A blank base URL keeps the stored URL. Base URLs can't be cleared.
+- `folderFormat` is the series folder template. An empty string turns folder moves off. Otherwise it must contain `{series}` and must not contain `/` or `\`.
 - Ranges: `logMaxMB` 1 to 2047; `issueNumberPadding` 0 to 10; `staleCleanupMaxRemovalPercent` 0 to 100; `staleCleanupMissingGraceHours` 0 to 720; `processingHistoryRetentionDays` 0 to 3650; `processingHistoryMaxEntries` 0 to 10,000,000; `smtpPort` 1 to 65535; `emailMaxAttachmentMb` 1 to 200; `maxSendsPerHour` 0 to 10,000; `maxSendsPerDay` 0 to 100,000; `minSecondsBetweenSends` 0 to 86,400; `maxIssuesPerDay` 0 to 100; `dedupeWindowHours` 1 to 720. `maxDownloadMB` must not be below `maxMB`.
 
 **Group routes.** `PUT /api/settings/database-cleanup` takes the fields of the `databaseCleanup` group; a field left out keeps its value, and an empty `staleCleanupSentinelFile` clears it. `PUT /api/settings/external-series-metadata`, `email`, `email-rate-limit`, `suwayomi` and `error-reporting` take the fields of the matching group, with one difference: a field left out is read as blank, off or its default, and saved. These are kept when left out instead: secrets (`comicVineApiKey`, `smtpPassword`, `password`, `gitHubToken`), base URLs, and the Suwayomi `downloadsDirectory` and `importDirectory`. An empty string clears a secret or a directory. `fillComicInfoFromProviders` is only available through `PUT /api/settings`.

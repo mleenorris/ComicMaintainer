@@ -355,6 +355,7 @@
             // answer has not been superseded (e.g. by a filter change).
             if (currentSeriesDetailId === seriesId && seriesIssuesCache.get(seriesId) === entry) {
                 renderSeriesDetail(seriesId);
+                loadSeriesFolderHint(seriesId);
             } else if (selectionPruned) {
                 updateSelectInfo();
             }
@@ -925,6 +926,45 @@
             }
         }
 
+        // The folders of each series that the folder-combine service lists as
+        // one group, by series id: a series split over "Nightwing" and
+        // "Nightwing (2016-)". Filled by loadSeriesFolderHint for the banner
+        // that offers to merge them.
+        const seriesFolderHints = new Map();
+
+        // Asks which folders hold the series. It runs each time the series'
+        // issues load, so the banner follows a merge or a move. The banner is
+        // only a hint: when the question fails, it is not shown.
+        async function loadSeriesFolderHint(seriesId) {
+            let folders = [];
+            try {
+                const data = await apiFetch(`/api/files/series/${encodeURIComponent(seriesId)}/folders`);
+                if (data.combinable && Array.isArray(data.folders)) {
+                    folders = data.folders;
+                }
+            } catch (error) {
+                console.debug('Could not load the folders of the series', error);
+            }
+            seriesFolderHints.set(seriesId, folders);
+            if (currentSeriesDetailId === seriesId) {
+                renderSeriesDetail(seriesId);
+            }
+        }
+
+        // "This series is in 2 folders: Nightwing, Nightwing (2016-)." with a
+        // button that opens Manage Folders, where they can be merged.
+        function renderSeriesFoldersBanner(seriesId, series) {
+            const folders = seriesFolderHints.get(seriesId) || [];
+            if (folders.length < 2) return '';
+            const names = folders.map(folder => String(folder.directory).split(/[\\/]/).filter(Boolean).pop());
+            return html`
+                <div class="series-detail-folders-banner" role="status" data-requires-write>
+                    <span class="series-detail-folders-banner-text">This series is in ${folders.length} folders: ${names.join(', ')}.</span>
+                    <button type="button" class="btn btn-small" data-requires-write onclick="openSeriesFoldersModal('${jsArg(seriesId)}','${jsArg(series.title)}')" title="See the folders and merge them into one">${uiIcon('folder')} Merge</button>
+                </div>
+            `;
+        }
+
         // Render a small banner above the issues grid summarizing any missing
         // integer issue numbers between #1 and the highest known issue number.
         function renderMissingIssuesBanner(issues, series) {
@@ -1413,6 +1453,7 @@
                             </div>
                         </div>
                     </div>
+                    ${renderSeriesFoldersBanner(seriesId, series)}
                     ${!issuesLoading && !issuesFailed && issues.length ? html`
                         <div class="series-detail-selection-bar">
                             <label class="series-detail-select-all" for="selectAll">

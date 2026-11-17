@@ -235,12 +235,13 @@ public class SeriesNameResolver : ISeriesNameResolver
             }
         }
 
-        // Step 5: preserve existing <Series> value.
+        // Step 5: preserve existing <Series> value. A tag written by another tool may carry a
+        // naive title-caser's capital after an apostrophe ("Count’S"); that much is repaired.
         if (!string.IsNullOrWhiteSpace(metadata?.Series))
         {
             return new SeriesNameResolution
             {
-                ResolvedSeries = metadata!.Series!.Trim(),
+                ResolvedSeries = ApostropheCasing.Repair(metadata!.Series!.Trim())!,
                 WinningStep = SeriesNameResolutionStep.ExistingMetadata,
                 Candidates = candidates,
                 FolderSeries = folderSeries,

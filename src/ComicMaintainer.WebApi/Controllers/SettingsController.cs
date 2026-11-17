@@ -73,6 +73,7 @@ public class SettingsController : ControllerBase
         var settings = new
         {
             filename_format = _appSettings.CurrentValue.FilenameFormat,
+            folder_format = _appSettings.CurrentValue.FolderFormat,
             issue_number_padding = _appSettings.CurrentValue.IssueNumberPadding,
             watcher_enable_rename = _appSettings.CurrentValue.WatcherEnableRename,
             watcher_enable_normalize = _appSettings.CurrentValue.WatcherEnableNormalize,
@@ -192,6 +193,7 @@ public class SettingsController : ControllerBase
         var update = new SettingsUpdate
         {
             FilenameFormat = request.FilenameFormat,
+            FolderFormat = request.FolderFormat,
             LogMaxBytes = ToBytes(request.LogMaxMB),
             IssueNumberPadding = request.IssueNumberPadding,
             DatabaseCleanup = request.DatabaseCleanup,
@@ -659,6 +661,9 @@ public class SettingsController : ControllerBase
     public class AllSettingsRequest
     {
         public string? FilenameFormat { get; set; }
+
+        /// <summary>The series folder format; empty turns folder moves off.</summary>
+        public string? FolderFormat { get; set; }
 
         /// <summary>Largest log file before rotation, in megabytes.</summary>
         public double? LogMaxMB { get; set; }

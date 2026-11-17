@@ -195,7 +195,7 @@ public class ComicFileProcessorIntegrationTests : IDisposable
         var comicFolder = Path.Join(_testDirectory, "Batman");
         Directory.CreateDirectory(comicFolder);
 
-        var filePath = Path.Join(comicFolder, "Batman - Zero_Hour__ #0012.cbz");
+        var filePath = Path.Join(comicFolder, "Batman - Zero-Hour #0012.cbz");
         CreateArchiveWithTags(filePath, "Batman", "12", 2023, "Zero/Hour?*");
 
         // Act

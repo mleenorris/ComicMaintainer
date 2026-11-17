@@ -174,6 +174,26 @@ public class SeriesNameResolverTests
         Assert.Equal("Pre-Existing Series Name", result.ResolvedSeries);
     }
 
+    [Theory]
+    // A tag another tool title-cased keeps everything but the capital after the apostrophe.
+    [InlineData("/library/Trash/c1.cbz", "Trash Of The Count’S Family", SeriesNameResolutionStep.ExistingMetadata, "Trash Of The Count’s Family")]
+    // The folder name is read the same way when the file has no series.
+    [InlineData("/library/Trash Of The Count’S Family/c1.cbz", null, SeriesNameResolutionStep.FolderName, "Trash Of The Count’s Family")]
+    public async Task ResolveAsync_TitleCasedApostrophe_IsRepaired(string path, string? series, SeriesNameResolutionStep step, string expected)
+    {
+        var resolver = BuildResolver();
+        _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(default(ExternalSeriesMetadata?));
+
+        var result = await resolver.ResolveAsync(
+            path,
+            series is null ? null : new ComicMetadata { Series = series },
+            mutateCache: false);
+
+        Assert.Equal(step, result.WinningStep);
+        Assert.Equal(expected, result.ResolvedSeries);
+    }
+
     [Fact]
     public async Task ResolveAsync_ExternalLookupHit_AppliesGlobalLanguage()
     {

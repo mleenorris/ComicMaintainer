@@ -16,6 +16,7 @@ const MB = 1048576;
 function settingsResponse(overrides = {}) {
     return {
         filename_format: '{series} v{volume} #{issue}',
+        folder_format: '{series} ({volume_year})',
         issue_number_padding: 3,
         watcher_enable_rename: true,
         watcher_enable_normalize: false,

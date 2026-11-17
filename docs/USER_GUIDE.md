@@ -127,6 +127,36 @@ Each renders empty when it does not apply, and any brackets or ` - ` separator a
 A comic directly in the watched folder takes its series from `ComicInfo.xml` or its own file name, never from the
 folder. A loose file that names no series is left alone, and the history says why.
 
+Some characters can't be used in file or folder names. They are replaced so the name still reads well:
+
+| Character | Becomes | Example |
+|---|---|---|
+| `:` followed by a space | ` - ` | `Solo Leveling: Ragnarok` gives `Solo Leveling - Ragnarok` |
+| Any other `:`, `/`, `\`, `\|` | `-` | `Fate/Zero` gives `Fate-Zero` |
+| `"` | `'` | |
+| `?`, `*`, `<`, `>` | Left out | `What If?` gives `What If` |
+
+Older versions used `_` instead (`Solo Leveling_ Ragnarok`). Such files get the new name the next time they are
+renamed or processed.
+
+### Series folders
+
+By default a file stays in the folder it is in. To give every series one tidy folder, set **Settings > Filename
+Format > Series Folder Template**, for example `{series} ({volume_year})` or `{series}`. Processing and renaming then
+move each file into that folder, directly in the watched folder. The folder is created when needed.
+
+- The template must contain `{series}` and name one folder, so it can't contain `/` or `\`.
+- You can use `{series}`, `{volume_year}`, `{volume_number}`, `{volume_label}`, `{volume}`, `{format}`, `{annual}` and
+  `{publisher}`. They work as in the file name. Issue placeholders such as `{issue}` render nothing.
+- An empty placeholder goes away with its brackets: `{series} ({volume_year})` gives `Saga` when the year is unknown.
+- A folder that differs only in case is reused, so `X-men (2024)` is not doubled as `X-Men (2024)`.
+- If the new place is taken, the file is flagged as a duplicate and stays where it is. Nothing is overwritten.
+- Files in the duplicates folder are not moved.
+- When the last comic leaves a folder, the folder is removed if nothing else is left in it, by the same rules as
+  [Combine Folders](#combine-folders). Otherwise it is kept.
+- Files already processed move the next time they are processed or renamed. Use **Rename** or **Process** on them,
+  or the API's `forceReprocess`.
+
 ### Issue numbers in file names
 
 1. A marked number wins: `Ch 12`, `Chapter 012.5`, `c012`, `Issue 3` or `#007`.
@@ -154,6 +184,11 @@ The first of these that gives a name wins:
 5. The series already in the file
 6. The folder name
 7. `Unknown Series`
+
+In a folder name, `_` is read as `:`, as other tools such as Suwayomi write it. Some tools capitalize the letter after an
+apostrophe (`Trash Of The Count’S Family`). In steps 5 and 6 that capital is lowered: `Count’s`, `I’ll`. Names such
+as `O'Brien` are left alone. Series are matched without regard to case, punctuation or spacing, so `’` and `'`, and
+`:`, `_` and ` - `, count as the same series.
 
 To see the result for one file without changing anything, call `GET /api/files/series-resolution?filePath=...`.
 
@@ -195,6 +230,9 @@ After the moves, a source folder is removed only if what remains is disposable: 
 `folder.*` image, operating system files (`.DS_Store`, `Thumbs.db`, `desktop.ini`) and empty subfolders. A folder holding
 anything else, and any link, is kept and reported when the job ends. The watched, duplicates and Suwayomi folders are always
 kept.
+
+When a series is in folders that can be combined, its page says so: "This series is in 2 folders: Nightwing, Nightwing
+(2016-)." **Merge** opens **Manage Folders**, where **Merge Folders** combines them.
 
 ## Library filters
 

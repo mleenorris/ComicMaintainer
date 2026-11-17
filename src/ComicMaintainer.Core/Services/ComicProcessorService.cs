@@ -36,6 +36,10 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
 
     // Where a rewritten or renamed file is queued, so its new cover is generated before the library shows it.
     private readonly IFileCoverWarmupQueue _coverWarmup;
+
+    // Held while a file is moved into another series folder and while a folder it left is
+    // removed, so neither races the Suwayomi import or a folder combine in the same folders.
+    private readonly ILibraryMutationLock _libraryMutationLock;
     private readonly int _maxWorkers;
     private bool _disposed;
 
@@ -61,8 +65,10 @@ public partial class ComicProcessorService : IComicProcessorService, IDisposable
         IFileOperationLock fileLock,
         INotificationPublisher notifications,
         IFileCoverWarmupQueue coverWarmup,
+        ILibraryMutationLock libraryMutationLock,
         ComicMaintainerMetrics? metrics = null)
     {
+        _libraryMutationLock = libraryMutationLock;
         _notifications = notifications;
         _metrics = metrics;
         _coverWarmup = coverWarmup;

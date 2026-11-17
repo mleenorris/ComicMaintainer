@@ -256,8 +256,8 @@ public class ComicFileProcessorTests
         var result = ComicFileProcessor.FormatFilename(template, tags, "10");
 
         // Assert
-        Assert.Contains("Zero_Hour__", result); // '/' '?' and '*' are each replaced individually
-        Assert.Equal("Batman_ Year One - Zero_Hour__ #0010.cbz", result);
+        // ": " reads as " - ", "/" as "-", and "?" and "*" are left out.
+        Assert.Equal("Batman - Year One - Zero-Hour #0010.cbz", result);
     }
 
     [Fact]

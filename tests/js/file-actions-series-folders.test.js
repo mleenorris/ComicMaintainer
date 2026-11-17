@@ -143,10 +143,13 @@ test('folders without a combine group point to the global Combine Folders tool',
 });
 
 test('a series without folders on disk shows the empty state', async t => {
-    // An empty folder list, then a response without one.
+    // An empty folder list, then a response without one. The page asked once
+    // already, for its folders banner.
     const answers = [seriesFolders({ folders: [], ...NO_GROUP }), { id: 'saga', title: 'Saga' }];
-    const page = await bootSeriesPage({ routes: { [FOLDERS]: () => answers.shift() } });
+    const page = await bootSeriesPage({ routes: { [FOLDERS]: seriesFolders({ folders: [], ...NO_GROUP }) } });
     t.after(() => page.close());
+    assert.equal(callsTo(page, 'GET', '/api/files/series/saga/folders').length, 1);
+    page.route(FOLDERS, () => answers.shift());
 
     for (let open = 1; open <= 2; open++) {
         openManageFolders(page);
@@ -158,7 +161,7 @@ test('a series without folders on disk shows the empty state', async t => {
         assert.ok(page.$('#seriesFoldersMergeBtn').disabled);
         page.click(closeButton(page));
     }
-    assert.equal(callsTo(page, 'GET', '/api/files/series/saga/folders').length, 2);
+    assert.equal(callsTo(page, 'GET', '/api/files/series/saga/folders').length, 3);
 });
 
 test('a failed load is shown in the modal and opening it again retries', async t => {

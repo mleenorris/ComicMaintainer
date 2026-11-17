@@ -144,6 +144,8 @@ public class SettingsControllerTests
         Assert.NotNull(filenameFormatProp);
         // The legacy default reads as the current default (see AppSettings.FilenameFormat).
         Assert.Equal(AppSettings.DefaultFilenameFormat, filenameFormatProp.GetValue(settings));
+        // No folder format by default: files stay in their folders.
+        Assert.Equal(string.Empty, settings.GetType().GetProperty("folder_format")!.GetValue(settings));
     }
 
     [Fact]

@@ -395,6 +395,11 @@ public class SettingsService : ISettingsService
             values["FilenameFormat"] = format;
         }
 
+        if (update.FolderFormat is { } folderFormat)
+        {
+            values["FolderFormat"] = ValidateFolderFormat(folderFormat);
+        }
+
         if (update.LogMaxBytes is { } logMaxBytes)
         {
             ValidateLogMaxBytes(logMaxBytes);
@@ -618,6 +623,32 @@ public class SettingsService : ISettingsService
         {
             throw new SettingsValidationException("Format cannot be null or whitespace", nameof(format));
         }
+    }
+
+    /// <summary>
+    /// The folder format to store: trimmed, empty to turn folder moves off. A format without
+    /// <c>{series}</c> would file the whole library into the same few folders, and one with a
+    /// path separator would nest folders the clean-up of emptied folders does not expect.
+    /// </summary>
+    private static string ValidateFolderFormat(string format)
+    {
+        var trimmed = format.Trim();
+        if (trimmed.Length == 0)
+        {
+            return trimmed;
+        }
+
+        if (!trimmed.Contains("{series}", StringComparison.Ordinal))
+        {
+            throw new SettingsValidationException("Folder format must contain {series}", "folderFormat");
+        }
+
+        if (trimmed.IndexOfAny(['/', '\\']) >= 0)
+        {
+            throw new SettingsValidationException("Folder format names one folder, so it cannot contain / or \\", "folderFormat");
+        }
+
+        return trimmed;
     }
 
     private static void ValidateLogMaxBytes(int maxBytes)

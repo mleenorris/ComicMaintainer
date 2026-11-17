@@ -11,6 +11,12 @@ public sealed record SettingsUpdate
     /// <summary><see cref="AppSettings.FilenameFormat"/>; must not be blank.</summary>
     public string? FilenameFormat { get; init; }
 
+    /// <summary>
+    /// <see cref="AppSettings.FolderFormat"/>; empty turns folder moves off. When set it must
+    /// hold <c>{series}</c> and name one folder (no <c>/</c> or <c>\</c>).
+    /// </summary>
+    public string? FolderFormat { get; init; }
+
     /// <summary><see cref="AppSettings.LogMaxBytes"/>; greater than 0.</summary>
     public int? LogMaxBytes { get; init; }
 

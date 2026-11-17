@@ -83,6 +83,15 @@ for it.
   20,000 covers. The cover cache is pruned in the background instead of during a cover request, and once
   it has been counted the cache directory is only scanned again when it goes over its size limit. A prune
   now brings the cache down to 90% of `FileCoverCacheMaxMegabytes`.
+- A character a file name cannot hold is now replaced with one that reads the same way, instead of `_`:
+  `Solo Leveling: Ragnarok` is named `Solo Leveling - Ragnarok`, and `Fate/Zero` `Fate-Zero`. Files named
+  the old way get the new name the next time they are renamed or processed.
+- New **Series Folder Template** setting (`folder_format`, `AppSettings__FolderFormat`). When set, for
+  example to `{series} ({volume_year})`, processing and renaming move each file into that folder in the
+  watched folder, and remove the folder it left once nothing else is in it. Empty, the default, keeps files
+  where they are.
+- A series page now says when the series is in several folders that can be combined, with a **Merge**
+  button that opens **Manage Folders**.
 
 ### Fixed
 
@@ -93,6 +102,9 @@ for it.
   limit the Missing Issues Check job uses.
 - Renaming or moving a file no longer reads every user's whole reading progress table to move the
   progress with it.
+- A series name another tool title-cased, such as `Trash Of The Count’S Family` from a folder or an
+  existing tag, is no longer carried into tags and file names with the capital after the apostrophe:
+  it becomes `Count’s`. The metadata audit no longer flags `’` against `'` in a series name.
 
 ## [3.0.0] - 2026-11-09
 

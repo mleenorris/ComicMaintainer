@@ -333,6 +333,21 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessFileAsync_AnnualNamedOnlyByItsTitle_MovesOffTheIssuesName()
+    {
+        // Renamed before Annuals were told apart: only the title left by the tagger still says
+        // "Annual", and the file holds the name of issue #1.
+        var path = WriteArchive("Batman (2016-)", "Batman - Chapter 0001.cbz",
+            "<ComicInfo><Series>Batman</Series><Title>#- Annual 01</Title><Number>1</Number></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        var archive = Directory.GetFiles(Path.Join(_root, "Batman (2016-)")).Single();
+        Assert.Equal("Batman Annual (2016) - Chapter 0001.cbz", Path.GetFileName(archive));
+        Assert.Equal("Annual", ReadComicInfo(archive).Element("Format")?.Value);
+    }
+
+    [Fact]
     public async Task ProcessFileAsync_AnnualOfAVolume_KeepsAnnualBeforeTheVolume()
     {
         var path = WriteArchive("Green Lantern (1990)", "Green Lantern (1990) Annual 003.cbz");

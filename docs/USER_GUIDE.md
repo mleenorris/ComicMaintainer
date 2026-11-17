@@ -67,8 +67,10 @@ read this way: the title has to start with the series name and contain the issue
 Annuals keep "Annual" in their series, the way ComicVine names them. That means `<Series>Green Lantern Annual</Series>`
 with `<Number>1</Number>`, and an issue written as `Annual 1` becomes number `1`. A file is an Annual when its series
 ends in "Annual", its number is written as one, its file name has "Annual" before the issue number (`Green Lantern
-Annual 001`), or its `<Format>` is `Annual`. Normalize writes `<Format>Annual</Format>` into an Annual whose `<Format>`
-is empty. Annuals stay in the Green Lantern series, in their own "Annual" section with their own missing issues.
+Annual 001`), or its `<Format>` is `Annual`. A title with "Annual" right before the issue number also counts, such as
+the old file name `All New X-Men Annual 001 (2015)` or `#Annual 2021` that some taggers leave in `<Title>`: once such a
+file has been renamed, the title is all that still marks it. Normalize writes `<Format>Annual</Format>` into an Annual
+whose `<Format>` is empty. Annuals stay in the Green Lantern series, in their own "Annual" section with their own missing issues.
 
 Specials work the same way, but only by `<Format>`: set **Format** to `Special` in **View/Edit**, or for many files at
 once in **Update**. Specials get their own "Special" section, after the Annuals. Any other `<Format>` value, such as

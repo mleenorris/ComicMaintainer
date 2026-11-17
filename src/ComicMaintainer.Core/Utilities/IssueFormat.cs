@@ -36,8 +36,10 @@ public static class IssueFormat
     /// <summary>
     /// The kind of an issue: the one its <c>&lt;Format&gt;</c> names, else <see cref="Annual"/>
     /// when its series, issue number or file name marks it as one (see
-    /// <see cref="AnnualIssue.IsAnnual"/>); null for a regular issue.
+    /// <see cref="AnnualIssue.IsAnnual"/>), or its title names it as one (see
+    /// <see cref="AnnualIssue.FromTitle"/>); null for a regular issue.
     /// </summary>
-    public static string? Of(string? format, string? series, string? issue, string? fileName)
-        => FromFormat(format) ?? (AnnualIssue.IsAnnual(series, issue, fileName) ? Annual : null);
+    public static string? Of(string? format, string? series, string? issue, string? fileName, string? title)
+        => FromFormat(format) ??
+           (AnnualIssue.IsAnnual(series, issue, fileName) || AnnualIssue.FromTitle(title, issue) ? Annual : null);
 }

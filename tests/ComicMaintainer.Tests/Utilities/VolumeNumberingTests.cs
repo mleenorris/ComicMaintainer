@@ -94,7 +94,8 @@ public class VolumeNumberingTests
             new Issue(null, "1"),
             new Issue(null, "2", Kind: "Special"));
 
-        Assert.Equal(new string?[] { null, IssueFormat.Annual, IssueFormat.Special }, groups!.Select(g => g.Kind));
+        Assert.NotNull(groups);
+        Assert.Equal(new string?[] { null, IssueFormat.Annual, IssueFormat.Special }, groups.Select(g => g.Kind));
         Assert.Equal(new[] { "1", "2" }, groups[2].Items.Select(i => i.Number));
         Assert.Equal(new[] { false, true, false }, groups.Select(g => g.IsAnnual));
     }

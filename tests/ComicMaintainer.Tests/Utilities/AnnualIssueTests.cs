@@ -50,6 +50,27 @@ public class AnnualIssueTests
         Assert.Equal(expected, AnnualIssue.IssueNumber(issue));
     }
 
+    [Theory]
+    // Titles that taggers filled with the original file name, as found in a real library.
+    [InlineData("All New X-Men Annual 001 (2015)", "1", true)]
+    [InlineData("v2 .Annual 001 (2014)", "1", true)]
+    [InlineData("v3 .Annual: 01 (2013)", "1", true)]
+    [InlineData("#- Annual 01", "1", true)]
+    [InlineData("#Annual 2021", "2021", true)]
+    [InlineData("Annual_2", "2", true)]
+    [InlineData("Annual 1", "Annual 1", true)]
+    // "Annual" with another number, or in a story title, is not this issue named as an Annual.
+    [InlineData("v2 .Annual 002 (2015)", "1", false)]
+    [InlineData("The Annual Party", "3", false)]
+    [InlineData("Annuals 3", "3", false)]
+    [InlineData("All New X-Men 001", "1", false)]
+    [InlineData(null, "1", false)]
+    [InlineData("Annual 1", null, false)]
+    public void FromTitle_FindsTheIssueNamedAsAnAnnual(string? title, string? issue, bool expected)
+    {
+        Assert.Equal(expected, AnnualIssue.FromTitle(title, issue));
+    }
+
     [Fact]
     public void IsAnnual_AnySourceNamesIt()
     {

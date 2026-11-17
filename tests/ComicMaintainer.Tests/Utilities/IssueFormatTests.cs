@@ -26,11 +26,15 @@ public class IssueFormatTests
     [InlineData(null, "Green Lantern Annual", "1", "x.cbz", "Annual")]
     [InlineData("TPB", "Green Lantern", "Annual 1", "x.cbz", "Annual")]
     [InlineData(null, "Green Lantern", "1", "Green Lantern Annual 001.cbz", "Annual")]
+    // ...or by a title that names the issue as one...
+    [InlineData(null, "Batman", "1", "Batman - Chapter 0001.cbz", "Annual", "#- Annual 01")]
+    [InlineData("Special", "Batman", "1", "x.cbz", "Special", "#- Annual 01")]
     // ...and a regular issue has no kind.
+    [InlineData(null, "Batman", "1", "Batman - Chapter 0001.cbz", null, "The Annual Party")]
     [InlineData(null, "Green Lantern", "1", "Green Lantern 001.cbz", null)]
     [InlineData("TPB", "Green Lantern", "1", "x.cbz", null)]
-    public void Of_ReadsTheFormatThenTheAnnualMarks(string? format, string series, string issue, string fileName, string? expected)
+    public void Of_ReadsTheFormatThenTheAnnualMarks(string? format, string series, string issue, string fileName, string? expected, string? title = null)
     {
-        Assert.Equal(expected, IssueFormat.Of(format, series, issue, fileName));
+        Assert.Equal(expected, IssueFormat.Of(format, series, issue, fileName, title));
     }
 }

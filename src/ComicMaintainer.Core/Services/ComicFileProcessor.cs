@@ -171,7 +171,7 @@ public class ComicFileProcessor
     /// The series split into what the <c>{series}</c>, <c>{format}</c> and <c>{volume_label}</c>
     /// placeholders render: the title without its Annual or volume ("Green Lantern Annual
     /// (1990)" gives "Green Lantern"); the issue's kind, from <c>&lt;Format&gt;</c> or the
-    /// series, number or file name marking an Annual (see <see cref="IssueFormat.Of"/>); and
+    /// series, number, file name or title marking an Annual (see <see cref="IssueFormat.Of"/>); and
     /// its volume, from the ComicInfo
     /// <c>&lt;Volume&gt;</c>, the series name or <paramref name="sourceFileName"/> (see
     /// <see cref="ComicVolume.Resolve"/>). American comics restart their numbering with each
@@ -182,7 +182,7 @@ public class ComicFileProcessor
     internal static (string Title, string? Kind, ComicVolume? Volume) SeriesParts(ComicInfo tags, string? sourceFileName)
     {
         var series = (tags.Series ?? string.Empty).Trim();
-        var kind = IssueFormat.Of(tags.Format, series, tags.Number, sourceFileName);
+        var kind = IssueFormat.Of(tags.Format, series, tags.Number, sourceFileName, tags.Title);
         var volume = ComicVolume.Resolve(tags.Volume, series, sourceFileName);
         var title = series.Length == 0
             ? series

@@ -74,14 +74,14 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         _jobs.Object,
         NullLogger<ComicVineIssueDetailsService>.Instance);
 
-    private ComicFile AddFile(string path, string issue, int? volumeYear = 2016, string series = "Batman", string? format = null, bool duplicate = false)
+    private ComicFile AddFile(string path, string issue, int? volumeYear = 2016, string series = "Batman", string? format = null, bool duplicate = false, string? volume = null)
     {
         var file = new ComicFile
         {
             FilePath = path,
             FileName = Path.GetFileName(path),
             IsDuplicate = duplicate,
-            Metadata = new ComicMetadata { Series = series, Issue = issue, Title = $"Chapter {issue}", VolumeYear = volumeYear, Format = format }
+            Metadata = new ComicMetadata { Series = series, Issue = issue, Title = $"Chapter {issue}", VolumeYear = volumeYear, Format = format, Volume = volume }
         };
         _files.Add(file);
         return file;
@@ -279,6 +279,104 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         Assert.Equal(
             new BatchItemResult(false, "The archive could not be written"),
             await definition.ItemOperation("/c/Batman/Batman (2016) - Chapter 0002.cbz", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RunAsync_AVolumeNumberWithoutAStartYear_FindsThePublishersNthVolume()
+    {
+        // Batman Vol. 2 with no start year: DC's second "Batman", started 2016 here (the mocked
+        // search lists 1940 and 2016).
+        AddFile("/c/Batman/Batman Vol. 2 - Chapter 0001.cbz", "1", volumeYear: null, volume: "2");
+
+        var summary = await CreateService().RunAsync(null, 20);
+
+        Assert.Equal(1, summary.Filled);
+        Assert.Equal("I Am Gotham, Part One", _writes.Single().Metadata.Title);
+        await using var db = new ComicMaintainerDbContext(_options);
+        var link = await db.ComicVineVolumeLinks.SingleAsync();
+        Assert.Equal((0, 2, (int?)BatmanVolume), (link.StartYear, link.VolumeNumber, link.VolumeId));
+    }
+
+    [Fact]
+    public async Task RunAsync_AYearWrittenInVolume_CountsAsTheStartYear()
+    {
+        AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1", volumeYear: null, volume: "2016");
+
+        Assert.Equal(1, (await CreateService().RunAsync(null, 20)).Filled);
+    }
+
+    [Fact]
+    public async Task RunAsync_MatchingTheSeriesToComicVine_TakesEffectOnTheNextRun()
+    {
+        // No start year or volume number: the series' own match is used, and read afresh each run.
+        AddFile("/c/Saga/Saga - Chapter 0001.cbz", "1", volumeYear: null, series: "Saga");
+        _client.Setup(c => c.ListVolumeIssuesAsync(48934, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicVineResult<IReadOnlyList<ComicVineIssueSummary>>([new ComicVineIssueSummary(201, "1", "Chapter One", "2012-03-14", null, null)], 1));
+
+        Assert.Equal(1, (await CreateService().RunAsync(null, 20)).NoVolume);
+
+        _seriesCache.Setup(c => c.GetByTitleAsync("Saga", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord { CanonicalTitle = "Saga", Source = "ComicVine", SourceId = "48934", LookupStatus = "manual_match" });
+
+        Assert.Equal(1, (await CreateService().RunAsync(null, 20)).Filled);
+    }
+
+    [Fact]
+    public async Task StartJob_SearchesAgainForAVolumeNotFoundBefore_AndSaysWhyAFileWasNotFilled()
+    {
+        AddFile("/c/Batman/Batman (2003) - Chapter 0001.cbz", "1", volumeYear: 2003);
+        AddFile("/c/Batman/Batman Vol. 7 - Chapter 0001.cbz", "1", volumeYear: null, volume: "7");
+        AddFile("/c/Batman/Batman (2016) - Chapter 0099.cbz", "99");
+        AddFile("/c/Saga/Saga - Chapter 0001.cbz", "1", volumeYear: null, series: "Saga");
+        AddFile("/c/Batman/Batman Annual - Chapter 0001.cbz", "1", format: "Annual");
+        await CreateService().RunAsync(null, 20);
+        _search.Invocations.Clear();
+        BatchJobDefinition? definition = null;
+        _jobs.Setup(j => j.StartJob(It.IsAny<BatchJobDefinition>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Callback((BatchJobDefinition d, IEnumerable<string> _, CancellationToken _) => definition = d)
+            .Returns(Guid.NewGuid());
+        CreateService().StartJob(["/c/Batman/Batman (2003) - Chapter 0001.cbz"]);
+
+        Assert.Equal(
+            new BatchItemResult(false, "ComicVine has no Batman volume that started in 2003"),
+            await definition!.ItemOperation("/c/Batman/Batman (2003) - Chapter 0001.cbz", CancellationToken.None));
+        _search.Verify(s => s.SearchVolumesAsync("Batman", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(
+            new BatchItemResult(false, "ComicVine has no Batman Vol. 7"),
+            await definition.ItemOperation("/c/Batman/Batman Vol. 7 - Chapter 0001.cbz", CancellationToken.None));
+        Assert.Equal(
+            new BatchItemResult(false, $"ComicVine's Batman (volume {BatmanVolume}) has no issue #99"),
+            await definition.ItemOperation("/c/Batman/Batman (2016) - Chapter 0099.cbz", CancellationToken.None));
+        Assert.Equal(
+            new BatchItemResult(false, "The issue's volume is not known and Saga has no ComicVine match: set its volume number or start year, or match the series to ComicVine"),
+            await definition.ItemOperation("/c/Saga/Saga - Chapter 0001.cbz", CancellationToken.None));
+        Assert.True((await definition.ItemOperation("/c/Batman/Batman Annual - Chapter 0001.cbz", CancellationToken.None)).Success);
+    }
+
+    [Fact]
+    public async Task StartJob_OutOfRequestsToSearch_SaysTheNextRunContinues()
+    {
+        AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");
+        BatchJobDefinition? definition = null;
+        _jobs.Setup(j => j.StartJob(It.IsAny<BatchJobDefinition>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Callback((BatchJobDefinition d, IEnumerable<string> _, CancellationToken _) => definition = d)
+            .Returns(Guid.NewGuid());
+        _search.Setup(s => s.SearchVolumesAsync("Batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Enumerable.Range(0, 200).Select(i => new ExternalSeriesMetadata { CanonicalTitle = "Other", StartYear = 1900 + i }).ToList());
+        CreateService().StartJob(["/c/Batman/Batman (2016) - Chapter 0001.cbz"]);
+
+        // Each search of 200 results counts three requests; the job allows 250.
+        for (var i = 0; i < 83; i++)
+        {
+            AddFile($"/c/Series{i}/Series{i} (2016) - Chapter 0001.cbz", "1", series: $"Batman{i}");
+            _search.Setup(s => s.SearchVolumesAsync($"Batman{i}", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Enumerable.Range(0, 200).Select(j => new ExternalSeriesMetadata { CanonicalTitle = "Other", StartYear = 1900 + j }).ToList());
+            await definition!.ItemOperation($"/c/Series{i}/Series{i} (2016) - Chapter 0001.cbz", CancellationToken.None);
+        }
+
+        Assert.Equal(
+            new BatchItemResult(false, "No ComicVine requests were left to look up the issue's volume; the next run continues"),
+            await definition!.ItemOperation("/c/Batman/Batman (2016) - Chapter 0001.cbz", CancellationToken.None));
     }
 
     [Fact]

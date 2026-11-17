@@ -337,11 +337,14 @@ namespace ComicMaintainer.Core.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("VolumeNumber")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
                     b.HasIndex("VolumeId");
 
-                    b.HasIndex("SeriesKey", "StartYear")
+                    b.HasIndex("SeriesKey", "StartYear", "VolumeNumber")
                         .IsUnique();
 
                     b.ToTable("ComicVineVolumeLinks");

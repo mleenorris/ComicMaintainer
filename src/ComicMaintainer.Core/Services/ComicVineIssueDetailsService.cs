@@ -87,7 +87,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             ? (await _fileStore.GetAllFilesAsync(cancellationToken)).ToList()
             : await LoadFilesAsync(filePaths, cancellationToken);
 
-        var run = new Run(this, maxRequests);
+        var run = new Run(this, maxRequests, retryNotFound: false);
         await run.LoadAsync(cancellationToken);
         foreach (var file in files.OrderBy(f => f.FilePath, StringComparer.Ordinal))
         {
@@ -100,7 +100,9 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
     /// <inheritdoc />
     public Guid StartJob(IReadOnlyCollection<string> filePaths)
     {
-        var run = new Run(this, JobMaxRequests);
+        // Asked for by the user: a volume ComicVine did not have last time is searched for again,
+        // and a file that could not be filled counts as failed, with the reason.
+        var run = new Run(this, JobMaxRequests, retryNotFound: true);
         var loaded = new Lazy<Task>(() => run.LoadAsync(CancellationToken.None));
         var definition = new BatchJobDefinition(
             "ComicVineIssueDetails",
@@ -114,8 +116,10 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                     return new BatchItemResult(false, "File not found");
                 }
 
-                var outcome = await run.FillAsync(file, token);
-                return outcome == Outcome.Failed ? new BatchItemResult(false, run.LastError) : true;
+                var (outcome, reason) = await run.FillAsync(file, token);
+                return outcome is Outcome.Failed or Outcome.NoVolume or Outcome.NoIssue
+                    ? new BatchItemResult(false, reason)
+                    : true;
             },
             "Filling ComicVine issue details failed");
         return _jobRegistry.StartJob(definition, filePaths);
@@ -280,19 +284,18 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
     /// and storing them is done one file at a time (the job runs files in parallel); writing the
     /// archives is not.
     /// </summary>
-    private sealed class Run(ComicVineIssueDetailsService owner, int maxRequests)
+    private sealed class Run(ComicVineIssueDetailsService owner, int maxRequests, bool retryNotFound)
     {
         private readonly SemaphoreSlim _gate = new(1, 1);
-        private readonly Dictionary<(string Key, int Year), ComicVineVolumeLinkEntity> _links = new();
+        private readonly Dictionary<(string Key, int Year, int Number), ComicVineVolumeLinkEntity> _links = new();
         private readonly Dictionary<int, List<ComicVineIssueEntity>> _issuesByVolume = new();
         private readonly Dictionary<string, string?> _synopsisBySeries = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, ComicVineFileStateEntity> _states = new(StringComparer.Ordinal);
         private readonly int[] _counts = new int[Enum.GetValues<Outcome>().Length];
         private readonly HashSet<int> _listedThisRun = new();
+        private readonly HashSet<(string Key, int Year, int Number)> _searchedThisRun = new();
         private int _requests;
         private bool _stoppedEarly;
-
-        public string? LastError { get; private set; }
 
         private int RequestsLeft => maxRequests - _requests;
 
@@ -301,7 +304,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             await using var db = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
             foreach (var link in await db.ComicVineVolumeLinks.AsNoTracking().ToListAsync(cancellationToken))
             {
-                _links[(link.SeriesKey, link.StartYear)] = link;
+                _links[(link.SeriesKey, link.StartYear, link.VolumeNumber)] = link;
             }
 
             foreach (var state in await db.ComicVineFileStates.AsNoTracking().ToListAsync(cancellationToken))
@@ -322,22 +325,24 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 _requests,
                 _stoppedEarly);
 
-        public async Task<Outcome> FillAsync(ComicFile file, CancellationToken cancellationToken)
+        public async Task<(Outcome Outcome, string? Reason)> FillAsync(ComicFile file, CancellationToken cancellationToken)
         {
-            var outcome = await FillCoreAsync(file, cancellationToken);
-            Interlocked.Increment(ref _counts[(int)outcome]);
-            return outcome;
+            var result = await FillCoreAsync(file, cancellationToken);
+            Interlocked.Increment(ref _counts[(int)result.Outcome]);
+            return result;
         }
 
-        private async Task<Outcome> FillCoreAsync(ComicFile file, CancellationToken cancellationToken)
+        private async Task<(Outcome Outcome, string? Reason)> FillCoreAsync(ComicFile file, CancellationToken cancellationToken)
         {
             var metadata = file.Metadata;
             if (file.IsDuplicate || metadata is null
                 || string.IsNullOrWhiteSpace(metadata.Series) || string.IsNullOrWhiteSpace(metadata.Issue)
                 || IssueFormat.Of(metadata.Format, metadata.Series, metadata.Issue, file.FileName, metadata.Title) is not null)
             {
-                return Outcome.Skipped;
+                return (Outcome.Skipped, null);
             }
+
+            var (startYear, volumeNumber) = VolumeOf(metadata);
 
             ComicVineIssueEntity? issue;
             string? synopsis;
@@ -345,17 +350,19 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             await _gate.WaitAsync(cancellationToken);
             try
             {
-                var link = await LinkAsync(metadata.Series, metadata.VolumeYear ?? 0, cancellationToken);
-                if (link?.VolumeId is not { } volumeId)
+                var (link, outOfRequests) = await LinkAsync(metadata.Series, startYear, volumeNumber, cancellationToken);
+                if (link?.VolumeId is null)
                 {
-                    return Outcome.NoVolume;
+                    return (Outcome.NoVolume, outOfRequests
+                        ? "No ComicVine requests were left to look up the issue's volume; the next run continues"
+                        : NoVolumeReason(metadata.Series, startYear, volumeNumber));
                 }
 
                 var issues = await IssuesAsync(link, cancellationToken);
                 issue = issues.FirstOrDefault(candidate => SameNumber(candidate.IssueNumber, metadata.Issue));
                 if (issue is null)
                 {
-                    return Outcome.NoIssue;
+                    return (Outcome.NoIssue, $"ComicVine's {link.VolumeName ?? SeriesTitle(metadata.Series)} (volume {link.VolumeId}) has no issue #{metadata.Issue}");
                 }
 
                 if (issue.DetailsUtc is null && RequestsLeft > 0)
@@ -372,9 +379,8 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 // this run; files already looked up are still filled.
                 _stoppedEarly = true;
                 _requests = Math.Max(_requests, maxRequests);
-                LastError = ex.UserMessage;
                 owner._logger.LogWarning("ComicVine stopped answering during an issue details run: {Reason}", LoggingHelper.SanitizeForLog(ex.Message));
-                return Outcome.Failed;
+                return (Outcome.Failed, ex.UserMessage);
             }
             finally
             {
@@ -385,7 +391,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             var newest = issue.DetailsUtc is { } details && details > issue.ListedUtc ? details : issue.ListedUtc;
             if (state is not null && state.IssueId == issue.Id && state.AppliedUtc >= newest)
             {
-                return Outcome.Unchanged;
+                return (Outcome.Unchanged, null);
             }
 
             var plan = ComicVineIssueFill.For(metadata, issue, synopsis);
@@ -395,54 +401,110 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 var write = await owner._processor.WriteProviderDetailsAsync(file.FilePath, plan.Metadata, plan.Fields, plan.Fill, cancellationToken);
                 if (!write.Succeeded)
                 {
-                    LastError = "The archive could not be written";
-                    return Outcome.Failed;
+                    return (Outcome.Failed, "The archive could not be written");
                 }
 
                 outcome = write.Outcome == MetadataWriteOutcome.Unchanged ? Outcome.Unchanged : Outcome.Filled;
             }
 
             await RecordAppliedAsync(file.FilePath, issue.Id, cancellationToken);
-            return outcome;
+            return (outcome, null);
         }
 
-        private async Task<ComicVineVolumeLinkEntity?> LinkAsync(string series, int startYear, CancellationToken cancellationToken)
+        /// <summary>
+        /// What names the file's volume: its start year, else its volume number (a year written in
+        /// <c>&lt;Volume&gt;</c> counts as the start year); both 0 when it knows neither.
+        /// </summary>
+        private static (int StartYear, int VolumeNumber) VolumeOf(ComicMetadata metadata)
         {
-            var key = (SeriesKey(series), startYear);
-            if (key.Item1.Length == 0)
+            if (metadata.VolumeYear is { } year && year > 0)
             {
-                return null;
+                return (year, 0);
             }
 
-            if (_links.TryGetValue(key, out var link)
-                && (link.VolumeId is not null || DateTime.UtcNow - link.LinkedUtc < NotFoundRetry))
+            return ComicVolume.FromTag(metadata.Volume) switch
             {
-                return link;
-            }
+                { IsYear: true } tagged => (tagged.Value, 0),
+                { } number => (0, number.Value),
+                null => (0, 0)
+            };
+        }
 
+        private static string NoVolumeReason(string series, int startYear, int volumeNumber)
+        {
             var title = SeriesTitle(series);
-            ExternalSeriesMetadata? volume = null;
             if (startYear > 0)
             {
+                return $"ComicVine has no {title} volume that started in {startYear}";
+            }
+
+            return volumeNumber > 0
+                ? $"ComicVine has no {title} Vol. {volumeNumber}"
+                : $"The issue's volume is not known and {series} has no ComicVine match: set its volume number or start year, or match the series to ComicVine";
+        }
+
+        /// <summary>
+        /// The ComicVine volume the series volume belongs to: by start year, as for volume numbers
+        /// (see <see cref="VolumeOrdinal.Suggest"/>); else by volume number, the publisher's Nth
+        /// volume of that name (see <see cref="VolumeOrdinal.Numbered"/>); else the series' own
+        /// ComicVine match. The match is read afresh every time, so matching the series to
+        /// ComicVine takes effect at once. <c>OutOfRequests</c> is true when a search was needed
+        /// but the run had no requests left.
+        /// </summary>
+        private async Task<(ComicVineVolumeLinkEntity? Link, bool OutOfRequests)> LinkAsync(
+            string series,
+            int startYear,
+            int volumeNumber,
+            CancellationToken cancellationToken)
+        {
+            var key = (SeriesKey(series), startYear, volumeNumber);
+            if (key.Item1.Length == 0)
+            {
+                return (null, false);
+            }
+
+            _links.TryGetValue(key, out var link);
+            var title = SeriesTitle(series);
+            ExternalSeriesMetadata? volume;
+            if (startYear == 0 && volumeNumber == 0)
+            {
+                // Costs no request, so it is never kept as "not found".
+                volume = await SeriesMatchAsync(series, cancellationToken);
+                if (volume is null)
+                {
+                    return (null, false);
+                }
+
+                if (link is not null && link.VolumeId?.ToString(CultureInfo.InvariantCulture) == volume.SourceId)
+                {
+                    return (link, false);
+                }
+            }
+            else
+            {
+                if (link is not null
+                    && (link.VolumeId is not null
+                        || _searchedThisRun.Contains(key)
+                        || (!retryNotFound && DateTime.UtcNow - link.LinkedUtc < NotFoundRetry)))
+                {
+                    return (link, false);
+                }
+
                 if (RequestsLeft < SearchRequests)
                 {
                     _stoppedEarly = true;
-                    return link;
+                    return (link, true);
                 }
 
                 var volumes = await owner._volumeSearch.SearchVolumesAsync(title, cancellationToken);
                 _requests += Math.Min(SearchRequests, volumes.Count / 50 + 1);
-                volume = VolumeOrdinal.Suggest(volumes, title, startYear)?.Match;
-            }
-            else if (await owner._seriesCache.GetByTitleAsync(series, cancellationToken) is { } record
-                     && string.Equals(record.Source, "ComicVine", StringComparison.OrdinalIgnoreCase)
-                     && record.LookupStatus is "success" or "manual_match")
-            {
-                // No start year: the series' own ComicVine match is its only volume we know of.
-                volume = new ExternalSeriesMetadata { CanonicalTitle = record.CanonicalTitle, SourceId = record.SourceId };
+                _searchedThisRun.Add(key);
+                volume = startYear > 0
+                    ? VolumeOrdinal.Suggest(volumes, title, startYear)?.Match
+                    : VolumeOrdinal.Numbered(volumes, title, volumeNumber, (await SeriesMatchAsync(series, cancellationToken))?.SourceId);
             }
 
-            link ??= new ComicVineVolumeLinkEntity { SeriesKey = key.Item1, StartYear = startYear };
+            link ??= new ComicVineVolumeLinkEntity { SeriesKey = key.Item1, StartYear = startYear, VolumeNumber = volumeNumber };
             link.VolumeId = int.TryParse(volume?.SourceId, NumberStyles.None, CultureInfo.InvariantCulture, out var id) ? id : null;
             link.VolumeName = Truncate(volume?.CanonicalTitle, 512);
             link.Publisher = Truncate(volume?.Publisher, 256);
@@ -461,8 +523,16 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
 
             await db.SaveChangesAsync(cancellationToken);
             _links[key] = link;
-            return link;
+            return (link, false);
         }
+
+        /// <summary>The series' own ComicVine match, or null when its match is another provider's or there is none.</summary>
+        private async Task<ExternalSeriesMetadata?> SeriesMatchAsync(string series, CancellationToken cancellationToken)
+            => await owner._seriesCache.GetByTitleAsync(series, cancellationToken) is { } record
+               && string.Equals(record.Source, "ComicVine", StringComparison.OrdinalIgnoreCase)
+               && record.LookupStatus is "success" or "manual_match"
+                ? new ExternalSeriesMetadata { CanonicalTitle = record.CanonicalTitle, SourceId = record.SourceId }
+                : null;
 
         private async Task<List<ComicVineIssueEntity>> IssuesAsync(ComicVineVolumeLinkEntity link, CancellationToken cancellationToken)
         {

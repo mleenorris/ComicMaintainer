@@ -67,6 +67,46 @@ public static class VolumeOrdinal
     /// </summary>
     public static bool CountsByDefault(ExternalSeriesMetadata volume) => (volume.TotalChapters ?? 2) > 1;
 
+    /// <summary>
+    /// The other way round from <see cref="Suggest"/>: the volume of <paramref name="title"/> that
+    /// is number <paramref name="number"/>, counting the publisher's volumes of that name by start
+    /// year, one-shots left out. The publisher is that of <paramref name="knownVolumeId"/> (the
+    /// series' own ComicVine match) when it is among <paramref name="volumes"/>, otherwise the one
+    /// with the most volumes of that name. Null when there are fewer volumes than the number.
+    /// </summary>
+    public static ExternalSeriesMetadata? Numbered(
+        IEnumerable<ExternalSeriesMetadata> volumes,
+        string title,
+        int number,
+        string? knownVolumeId = null)
+    {
+        var key = Key(title);
+        if (number < 1 || key.Length == 0)
+        {
+            return null;
+        }
+
+        var named = volumes
+            .Where(volume => volume.StartYear is not null && Key(volume.CanonicalTitle) == key)
+            .ToList();
+        var known = knownVolumeId is null ? null : named.FirstOrDefault(volume => volume.SourceId == knownVolumeId);
+        var publisher = known is not null
+            ? known.Publisher
+            : named.Where(CountsByDefault)
+                .GroupBy(volume => volume.Publisher ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => group.Min(volume => volume.StartYear))
+                .FirstOrDefault()?.Key;
+
+        var counted = named
+            .Where(volume => string.Equals(volume.Publisher ?? string.Empty, publisher ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+                             && CountsByDefault(volume))
+            .OrderBy(volume => volume.StartYear)
+            .ThenByDescending(volume => volume.TotalChapters ?? 0)
+            .ToList();
+        return number <= counted.Count ? counted[number - 1] : null;
+    }
+
     /// <summary>Letters and digits only, lower case, so "All-New X-Men" and "All New X-Men" compare equal.</summary>
     private static string Key(string? text)
         => new((text ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());

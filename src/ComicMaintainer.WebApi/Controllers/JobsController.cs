@@ -379,11 +379,10 @@ public class JobsController : ControllerBase
 
         var clashes = new List<object>();
         var failures = new List<object>();
-        foreach (var file in job.Files)
+        foreach (var (file, error) in job.Files
+                     .Where(f => job.Errors.ContainsKey(f))
+                     .Select(f => (f, job.Errors[f])))
         {
-            if (!job.Errors.TryGetValue(file, out var error))
-                continue;
-
             if (DuplicateRecheck.ClashingPathOf(error) is { } clashingPath)
                 clashes.Add(new { file, clashes_with = clashingPath });
             else

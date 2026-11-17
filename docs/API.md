@@ -25,6 +25,7 @@ Related documents:
 - [Folder combine](#folder-combine)
 - [Batch jobs](#batch-jobs)
 - [Duplicates](#duplicates)
+- [Processing preview](#processing-preview)
 - [Processed status](#processed-status)
 - [Comic reader](#comic-reader)
 - [Reader progress, preferences and sessions](#reader-progress-preferences-and-sessions)
@@ -220,6 +221,7 @@ Paged routes use one of these forms:
 | `limit`, `offset` | `/api/processing-history` | Default 50. `limit` must be 1 to 1000, otherwise `400` |
 | `limit`, `offset` | `/api/email/deliveries` | Default 50, limited to 1 to 500 |
 | `offset`, `limit` | `/api/scheduled-jobs/metadata-audit/findings` | Default 200. A `limit` outside 1 to 1000 becomes 200 |
+| `offset`, `limit` | `/api/files/process-preview/{jobId}` | Default 200. A `limit` outside 1 to 1000 becomes 200 |
 | `limit` only | `/api/error-reports` (1 to 200), `/api/metadata/search` (1 to 50), `/api/series-images/candidates` (1 to 25), `/api/suwayomi/series` (1 to 100) | Out-of-range values are moved into the range |
 | `page` | `/api/suwayomi/sources/{sourceId}/series` (1 to 100), OPDS feeds | OPDS feeds hold 50 entries per page |
 
@@ -386,7 +388,7 @@ Filter values for the listing routes:
 
 **`GET /api/files/scan-unmarked`** returns `{"total_count","unmarked_count","marked_count"}`.
 
-**Metadata.** The metadata object is `{"series","title","issue","volume","volumeYear","format","publisher","year","summary","authors":[],"tags":[],"isUserEdited","userLockedFieldsMask"}`. `format` is ComicInfo `<Format>`; `Annual` and `Special` mark issues numbered on their own. `volume` is the volume number and `volumeYear` the year the volume started, which only the database keeps.
+**Metadata.** The metadata object is `{"series","title","issue","volume","volumeYear","format","publisher","year","summary","authors":[],"tags":[],"isUserEdited","userLockedFieldsMask"}`. `format` is ComicInfo `<Format>`; `Annual`, `Special` and `Giant-Size` mark issues numbered on their own. `volume` is the volume number and `volumeYear` the year the volume started, which only the database keeps.
 
 - `GET` metadata routes answer `404` when the file has none.
 - `PUT /api/files/metadata?filePath=` and `PUT /api/files/{encodedFilePath}/tags` merge: a field left out or sent as `null` keeps its value. They answer an empty `200`.
@@ -489,7 +491,7 @@ With `include_issues=true`, each entry also holds its `issues`. Leave it off for
 
 **`GET /api/files/series/facets`** returns `{"genres":[{"value","count"}],"statuses":[{"value","count"}],"series_without_genres","series_without_status"}`.
 
-**`GET /api/files/series/{seriesId}/issues`** takes `filter`, `page` and `per_page`. It returns `{"id","title","canonical_title","aliases","metadata_source","cover_file_path","has_external_image","external_image_url","issue_count","total_size","issues","page","per_page","total_pages","synopsis","genres","publication_status","site_url"}`. Each issue is `{"file_path","file_name","title","issue","volume","publisher","year","size","modified","processed","renamed","normalized","duplicate","read","format","annual","volume_year","volume_key","volume_label"}`. `format` is `Annual`, `Special` or `null`; `annual` is true for an Annual.
+**`GET /api/files/series/{seriesId}/issues`** takes `filter`, `page` and `per_page`. It returns `{"id","title","canonical_title","aliases","metadata_source","cover_file_path","has_external_image","external_image_url","issue_count","total_size","issues","page","per_page","total_pages","synopsis","genres","publication_status","site_url"}`. Each issue is `{"file_path","file_name","title","issue","volume","publisher","year","size","modified","processed","renamed","normalized","duplicate","read","format","annual","volume_year","volume_key","volume_label"}`. `format` is `Annual`, `Special`, `Giant-Size` or `null`; `annual` is true for an Annual.
 
 **`GET /api/files/series/{seriesId}/folders`** takes `filter` and returns `{"id","title","folders":[{"directory","file_count","total_size"}],"combine_group_key","suggested_destination_directory"}`.
 
@@ -675,6 +677,113 @@ A file is flagged as a duplicate when the name processing would give it already 
 - `file_path` is where the former duplicate is now. `duplicate_path` is where the other file is now.
 - `409 {"error":"..."}` when nothing was changed because the files are not as compared: the file is not flagged, no other file has its name now, or another file does.
 - `400 {"error":"..."}` when the path is missing or outside the library, the processed name cannot be worked out, the other file cannot be renamed, or the file could not take the name.
+
+## Processing preview
+
+A preview works out what processing (normalize, then rename) would do to files, and changes nothing: no file, tag, database row, history entry or series alias. It uses the same steps as processing, so the two agree. It works as a forced reprocess (`forceReprocess=true`): files already marked processed are previewed too. It follows `watcher_enable_normalize` and `watcher_enable_rename`.
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/files/process-preview` | Signed in | Preview one file now, by `filePath` |
+| `POST` | `/api/files/process-preview` | Library write | Start a preview job |
+| `GET` | `/api/files/process-preview/{jobId}` | Signed in | One page of a preview job's results |
+
+**A file's preview** is:
+
+```json
+{
+  "filePath": "/watched_dir/Batman/batman 1.cbz",
+  "fileName": "batman 1.cbz",
+  "series": "Batman",
+  "newFilePath": "/watched_dir/Batman/Batman - Chapter 0001.cbz",
+  "newFileName": "Batman - Chapter 0001.cbz",
+  "renamed": true,
+  "tagChanges": [
+    { "field": "Series", "before": "batman", "after": "Batman" },
+    { "field": "VolumeYear", "before": null, "after": "2016" }
+  ],
+  "clash": null,
+  "clashWith": null,
+  "warning": null,
+  "error": null,
+  "changed": true
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `filePath`, `fileName` | The file now |
+| `series` | The series the file is listed under: its series once normalized, or else its folder's name |
+| `newFilePath`, `newFileName` | The path processing would give the file, or `null` when it keeps its path. A CBR, RAR or ZIP whose tags are written becomes a `.cbz`. With a `clash`, this is the name the file would not get |
+| `renamed` | `true` when the file would be renamed: it has a new path, no clash and no error |
+| `tagChanges` | Each value that changes, as `{"field","before","after"}`. `field` is the `ComicInfo.xml` element name (`Series`, `Number`, `Title`, `Volume`, `Year`, `Format`, `Summary`, `Genre`, `Web`, `Count`, `Manga`, ...), or `VolumeYear`, which only the database keeps. `before` is `null` for a value that is added, `after` is `null` for one that is removed |
+| `clash` | `null`; `"existing"` when a file with the new name (ignoring case) is already there; or `"preview"` when an earlier file of the same preview job gets that name. Processing flags the file as a duplicate instead of renaming it. Only a preview job finds `"preview"` clashes |
+| `clashWith` | The file that has, or would first get, the new name |
+| `warning` | Something processing would leave undone, or `null`. Today: tags not written because the file is a CBR, RAR or ZIP and conversion to CBZ is off |
+| `error` | Why processing would fail for the file, or `null`: for example `File not found`, an unreadable archive, or no series name |
+| `changed` | `true` when any of `newFilePath`, `tagChanges`, `clash`, `warning` or `error` is set |
+
+The preview assumes every write succeeds. A disk or permission problem during the real run is not foreseen.
+
+**`GET /api/files/process-preview?filePath=`** previews one file in the request and returns its preview. It answers `400 {"error":"File path is required"}` without `filePath`, and `400 {"error":"File path is outside the allowed directory"}` for a path outside the watched and duplicates directories.
+
+**`POST /api/files/process-preview`** starts a preview job. It takes:
+
+```json
+{ "scope": "selected", "files": ["/watched_dir/Batman/batman 1.cbz"], "seriesId": null }
+```
+
+| `scope` | Files |
+|---|---|
+| `all` | Every tracked file that is not flagged as a duplicate, as `process-all` takes them |
+| `selected` | The paths in `files`. Blank and repeated entries are dropped |
+| `series` | The issues of the series `seriesId` (its id in the series routes) that are not flagged as duplicates |
+
+It returns the [batch job response](#batch-jobs), `{"job_id","total_items","jobId","totalItems"}`. When no file qualifies, the id is the empty GUID and `total_items` is 0. Follow the job's progress with the [batch job routes](#batch-jobs); every file counts as processed, since a file processing would fail for is still previewed. Errors:
+
+- `400 {"error":"scope must be all, selected or series"}` for a missing or other `scope`.
+- `400 {"error":"No files specified"}` for `selected` without a path, and `400 {"error":"One or more file paths are outside the allowed directory"}` when one is outside.
+- `400 {"error":"seriesId is required"}` for `series` without `seriesId`, and `404 {"error":"Series not found"}` for an unknown series.
+
+**`GET /api/files/process-preview/{jobId}`** takes `filter`, `offset` and `limit`, and returns one page of results:
+
+```json
+{
+  "jobId": "...",
+  "status": "completed",
+  "finished": true,
+  "totalFiles": 25000,
+  "summary": {
+    "checked": 25000,
+    "changed": 1012,
+    "renamed": 980,
+    "tagsChanged": 640,
+    "clashes": 3,
+    "unchanged": 23988,
+    "errors": 9
+  },
+  "filter": "changes",
+  "offset": 0,
+  "limit": 200,
+  "total": 1012,
+  "items": [ { "filePath": "...", "...": "a file's preview, as above" } ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `jobId` | The preview job |
+| `status` | The job's status, as `GET /api/jobs/{jobId}` words it. `completed` or `interrupted` when the job record is gone |
+| `finished` | `true` once every file is checked |
+| `totalFiles` | The files the preview covers |
+| `summary` | Counts over every file checked so far: `checked`; `changed` (files with anything to show); `renamed`; `tagsChanged`; `clashes`; `unchanged`; `errors` |
+| `filter`, `offset`, `limit` | The page asked for |
+| `total` | The files the filter selects |
+| `items` | The page, sorted by series, then by path |
+
+`filter` is `changes` (the default: files with `changed` set), `all`, `renamed`, `tags`, `clashes` or `errors`. Another value is `400 {"error":"Unknown filter: x"}`. While the job runs, the page holds the files checked so far. Results are kept in memory for the five most recent previews; an older preview, or one from before a restart, answers `404 {"error":"Preview not found. ..."}`.
+
+To process what a preview showed, send the files to `POST /api/jobs/process-selected` with `"forceReprocess": true`. The web app does this for the files ticked in its preview.
 
 ## Processed status
 

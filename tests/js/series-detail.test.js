@@ -444,7 +444,7 @@ test('read-only users are offered only the read actions of an issue and no Serie
     ]);
     assert.ok(isDisplayed(seriesActions(admin)));
     assert.deepEqual(seriesActionItems(admin).filter(isDisplayed).map(text), [
-        'Manage Names', 'Manage Folders', 'Find Volume Numbers', 'Re-check Duplicates', 'Refresh Metadata', 'Refresh Folder', 'Update Covers',
-        'Email All Issues', 'Auto-send New Issues', 'Reset Processed Status'
+        'Manage Names', 'Manage Folders', 'Find Volume Numbers', 'Re-check Duplicates', 'Preview Changes', 'Refresh Metadata',
+        'Refresh Folder', 'Update Covers', 'Email All Issues', 'Auto-send New Issues', 'Reset Processed Status'
     ]);
 });

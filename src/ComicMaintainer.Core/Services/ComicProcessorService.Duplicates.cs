@@ -157,9 +157,9 @@ public partial class ComicProcessorService
             }
 
             var originalSeries = metadata.Series;
-            if (_settings.WatcherEnableNormalize && !await IsMetadataNormalizedAsync(metadata, filePath, cancellationToken))
+            if (_settings.WatcherEnableNormalize && !await IsMetadataNormalizedAsync(metadata, filePath, mutateCache: false, cancellationToken))
             {
-                metadata = await NormalizeMetadataAsync(metadata, filePath, cancellationToken);
+                metadata = await NormalizeMetadataAsync(metadata, filePath, mutateCache: false, cancellationToken);
             }
 
             if (string.IsNullOrEmpty(metadata.Series))
@@ -380,30 +380,29 @@ public partial class ComicProcessorService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        var leases = new List<IDisposable>(paths.Count);
+        return await RunHoldingLocksAsync(paths, 0, operation, cancellationToken);
+    }
+
+    private async Task<T> RunHoldingLocksAsync<T>(
+        IReadOnlyList<string> paths,
+        int index,
+        Func<CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken)
+    {
+        if (index < paths.Count)
+        {
+            using var lease = await _fileLock.AcquireAsync(paths[index], cancellationToken);
+            return await RunHoldingLocksAsync(paths, index + 1, operation, cancellationToken);
+        }
+
+        await _processingSemaphore.WaitAsync(cancellationToken);
         try
         {
-            foreach (var path in paths)
-            {
-                leases.Add(await _fileLock.AcquireAsync(path, cancellationToken));
-            }
-
-            await _processingSemaphore.WaitAsync(cancellationToken);
-            try
-            {
-                return await operation(cancellationToken);
-            }
-            finally
-            {
-                _processingSemaphore.Release();
-            }
+            return await operation(cancellationToken);
         }
         finally
         {
-            foreach (var lease in leases)
-            {
-                lease.Dispose();
-            }
+            _processingSemaphore.Release();
         }
     }
 }

@@ -96,7 +96,7 @@ public partial class ComicProcessorService
                 // generation only; rewriting ComicInfo.xml remains the normalize
                 // operation's responsibility.
                 var originalSeries = metadata.Series;
-                var resolvedSeries = await ResolveNormalizedSeriesAsync(metadata, filePath, cancellationToken);
+                var resolvedSeries = await ResolveNormalizedSeriesAsync(metadata, filePath, mutateCache: true, cancellationToken);
                 if (!string.IsNullOrEmpty(resolvedSeries) && metadata.Series != resolvedSeries)
                 {
                     _logger.LogDebug(
@@ -106,18 +106,19 @@ public partial class ComicProcessorService
                 }
 
                 _logger.LogDebug("RenameFileAsync: Generating new filename for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                var newResolvedPath = GenerateFileName(metadata, resolvedPath, originalSeries);
-                if (newResolvedPath == null)
+                var (decision, target) = DecideRename(metadata, resolvedPath, originalSeries);
+                if (decision == RenameDecision.NameFailed)
                 {
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await LogHistoryAsync(filePath, "Rename", false, FilenameGenerationFailedMessage, cancellationToken);
                     return false;
                 }
 
+                var newResolvedPath = target!;
                 _logger.LogDebug("RenameFileAsync: Generated filename: {NewFilePath} (Original: {OriginalFilePath})",
                     LoggingHelper.SanitizePathForLog(newResolvedPath), LoggingHelper.SanitizePathForLog(filePath));
 
-                if (newResolvedPath == resolvedPath)
+                if (decision == RenameDecision.AlreadyNamed)
                 {
                     _logger.LogInformation("RenameFileAsync: File already has correct name: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                     await _fileStore.MarkFileRenamedAsync(filePath, true, cancellationToken);
@@ -128,7 +129,7 @@ public partial class ComicProcessorService
                     return true;
                 }
 
-                if (TargetFileExists(newResolvedPath, resolvedPath))
+                if (decision == RenameDecision.TargetTaken)
                 {
                     _logger.LogInformation("RenameFileAsync: Duplicate detected - target file already exists: {NewPath}", LoggingHelper.SanitizePathForLog(newResolvedPath));
                     await MarkDuplicateAsync(filePath, cancellationToken);
@@ -378,6 +379,45 @@ public partial class ComicProcessorService
 
     private const string FilenameGenerationFailedMessage = "Failed to generate new filename";
 
+    /// <summary>What the rename phase does with a file (see <see cref="DecideRename"/>).</summary>
+    private enum RenameDecision
+    {
+        /// <summary>No file name could be generated: the rename fails.</summary>
+        NameFailed,
+
+        /// <summary>The file already has its target name.</summary>
+        AlreadyNamed,
+
+        /// <summary>Another file has the target name: the file is flagged as a duplicate.</summary>
+        TargetTaken,
+
+        /// <summary>The file is renamed to the target.</summary>
+        Rename
+    }
+
+    /// <summary>
+    /// Decides the rename of the file at <paramref name="resolvedPath"/> from
+    /// <paramref name="metadata"/>: its target path (see <see cref="GenerateFileName"/>), and
+    /// whether it already has that name or another file does (see <see cref="TargetFileExists"/>).
+    /// Processing, renaming and the processing preview all decide here, so a preview names the
+    /// same target as the real run.
+    /// </summary>
+    private (RenameDecision Decision, string? Target) DecideRename(ComicMetadata metadata, string resolvedPath, string? originalSeries)
+    {
+        var target = GenerateFileName(metadata, resolvedPath, originalSeries);
+        if (target is null)
+        {
+            return (RenameDecision.NameFailed, null);
+        }
+
+        if (target == resolvedPath)
+        {
+            return (RenameDecision.AlreadyNamed, target);
+        }
+
+        return (TargetFileExists(target, resolvedPath) ? RenameDecision.TargetTaken : RenameDecision.Rename, target);
+    }
+
     /// <summary>
     /// Renders the target path for <paramref name="originalPath"/> from <paramref name="metadata"/>.
     /// Returns null (after logging the error) when the filename cannot be generated; callers must
@@ -408,6 +448,17 @@ public partial class ComicProcessorService
 
             // An issue written as "Annual 1" is named by its number: the series names the Annual.
             var issue = AnnualIssue.IssueNumber(metadata.Issue);
+
+            // With no number, a title names the issue in place of it (see FormatFilename). With
+            // neither, the template can only give the series' name, which every such issue would
+            // share, so the current name is kept: it is the best name there is. A name an earlier
+            // rename left ending in a bare "- Chapter" is the exception, and is renamed.
+            if (string.IsNullOrWhiteSpace(issue)
+                && ComicFileProcessor.TitleInPlaceOfNumber(comicInfo.Title, comicInfo.Series) is null
+                && !ComicFileProcessor.EndsInBareIssuePrefix(Path.GetFileNameWithoutExtension(originalPath)))
+            {
+                return originalPath;
+            }
 
             // Use ComicFileProcessor.FormatFilename to properly handle decimal issue numbers
             var filename = ComicFileProcessor.FormatFilename(

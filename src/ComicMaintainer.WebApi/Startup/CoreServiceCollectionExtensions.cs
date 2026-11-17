@@ -245,6 +245,8 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<IJobStateStore, JobStateStore>();
         services.AddSingleton<IBatchJobRegistry, BatchJobRegistry>();
         services.AddSingleton<IComicProcessorService, ComicProcessorService>();
+        // Holds the results of processing previews between the job that makes them and the reads.
+        services.AddSingleton<IProcessingPreviewService, ProcessingPreviewService>();
         services.AddSingleton<ArchiveWriteRecoveryService>();
         services.AddSingleton<IFileWatcherService, FileWatcherService>();
         services.AddSingleton<IProcessingHistoryService, ProcessingHistoryService>();

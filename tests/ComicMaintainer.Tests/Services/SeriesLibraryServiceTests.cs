@@ -445,7 +445,7 @@ public class SeriesLibraryServiceTests
         var result = await service.GetSeriesIssuesAsync(seriesId, perPage: -1);
 
         Assert.Equal(
-            new[] { ((string?)null, "1"), ("Giant-Size", "2025") },
+            new (string? Format, string Issue)[] { (null, "1"), ("Giant-Size", "2025") },
             result!.Issues.Select(i => (i.Format, i.Issue!)).ToArray());
     }
 

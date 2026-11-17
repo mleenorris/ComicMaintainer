@@ -2220,6 +2220,7 @@
                          </div>
                      </div>
                      <div class="duplicate-review-actions">
+                         <button class="btn" onclick="compareCurrentDuplicate()"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg> Compare</button>
                          <button class="btn" onclick="openDuplicateInfo()"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg> View Info</button>
                          <button class="btn" onclick="openDuplicateTags()"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg> View/Edit Tags</button>
                          <button class="btn" onclick="openDuplicateReader()"><svg class="icon" aria-hidden="true"><use href="#i-book-open"/></svg> Read Comic</button>
@@ -2229,12 +2230,37 @@
                      </div>
                      <div class="duplicate-review-tip">
                          Review duplicates one-by-one, inspect their metadata, and delete the copy you do not want to keep.
+                         "Compare" shows a duplicate next to the file that has its name, and can swap the two.
+                         "Re-check All" clears the flag of every duplicate whose name is free again and processes it.
                          Use "Delete All Duplicates" to remove every file currently marked as a duplicate in one pass.
                      </div>
                  </div>
              </div>
              <div class="modal-footer">
+                 <button class="btn" id="duplicateReviewRecheckAllBtn" onclick="recheckAllDuplicates()" data-requires-write title="Clear the flag of every duplicate whose processed name is free again, and process it"><svg class="icon" aria-hidden="true"><use href="#i-rotate-ccw"/></svg> Re-check All</button>
                  <button class="btn" onclick="closeDuplicateReviewModal()">Close</button>
+             </div>
+         </div>
+     </div>
+
+     <!-- Duplicate Compare Modal -->
+     <div class="modal" id="duplicateCompareModal" role="dialog" aria-modal="true" aria-labelledby="duplicateCompareModalTitle" aria-hidden="true">
+         <div class="modal-content" style="max-width: 960px;">
+             <div class="modal-header">
+                 <h2 id="duplicateCompareModalTitle">Compare Duplicate</h2>
+                 <button class="close-btn" onclick="closeDuplicateCompareModal()">&times;</button>
+             </div>
+             <div class="modal-body">
+                 <p class="combine-folders-meta" id="duplicateCompareSummary"></p>
+                 <div class="duplicate-compare-grid" id="duplicateCompareContent"></div>
+                 <div class="duplicate-review-tip">
+                     "Keep Both" leaves both files as they are. "Swap" gives the duplicate the name, and renames the other file with "(duplicate)" added and flags it instead. No file is deleted.
+                 </div>
+             </div>
+             <div class="modal-footer">
+                 <button class="btn" id="duplicateCompareRecheckBtn" onclick="recheckComparedDuplicate()" data-requires-write hidden><svg class="icon" aria-hidden="true"><use href="#i-rotate-ccw"/></svg> Re-check This File</button>
+                 <button class="btn btn-warning" id="duplicateCompareSwapBtn" onclick="swapComparedDuplicate()" data-requires-write disabled><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Swap</button>
+                 <button class="btn" onclick="closeDuplicateCompareModal()">Keep Both</button>
              </div>
          </div>
      </div>

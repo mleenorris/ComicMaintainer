@@ -621,7 +621,16 @@ public partial class ComicProcessorService
     /// case "exists" on a file system that ignores case because it names the source, and
     /// treating that as a collision flagged the only copy of the file as a duplicate.
     /// </summary>
-    private bool TargetFileExists(string targetPath, string? sourcePath = null)
+    private bool TargetFileExists(string targetPath, string? sourcePath = null) =>
+        FindTargetFile(targetPath, sourcePath) is not null;
+
+    /// <summary>
+    /// The other file <see cref="TargetFileExists"/> finds in the way of renaming
+    /// <paramref name="sourcePath"/> to <paramref name="targetPath"/>, or null when there is none.
+    /// It can be spelled as asked for rather than as the directory lists it; see
+    /// <see cref="ListedSpellingOf"/>. The duplicate re-check and compare name it to the user.
+    /// </summary>
+    private string? FindTargetFile(string targetPath, string? sourcePath = null)
     {
         var directory = Path.GetDirectoryName(targetPath);
         var targetFileName = Path.GetFileName(targetPath);
@@ -630,15 +639,17 @@ public partial class ComicProcessorService
         {
             if (sourcePath is null || !IsCaseOnlyRename(sourcePath, targetPath))
             {
-                return true;
+                return targetPath;
             }
 
             try
             {
-                return !IsSameFileUnderAnotherCase(
+                return IsSameFileUnderAnotherCase(
                     sourcePath,
                     targetPath,
-                    Directory.EnumerateFiles(directory!).Select(Path.GetFileName).OfType<string>());
+                    Directory.EnumerateFiles(directory!).Select(Path.GetFileName).OfType<string>())
+                    ? null
+                    : targetPath;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -647,13 +658,13 @@ public partial class ComicProcessorService
                 // still fails the rename rather than losing a file.
                 _logger.LogDebug(ex, "Unable to enumerate directory while checking a case-only rename: {TargetPath}",
                     LoggingHelper.SanitizePathForLog(targetPath));
-                return false;
+                return null;
             }
         }
 
         if (string.IsNullOrEmpty(directory) || string.IsNullOrEmpty(targetFileName) || !Directory.Exists(directory))
         {
-            return false;
+            return null;
         }
 
         var sourceFullPath = sourcePath == null ? null : Path.GetFullPath(sourcePath);
@@ -670,7 +681,7 @@ public partial class ComicProcessorService
 
                 if (string.Equals(Path.GetFileName(existingPath), targetFileName, StringComparison.OrdinalIgnoreCase))
                 {
-                    return true;
+                    return existingPath;
                 }
             }
         }
@@ -678,15 +689,48 @@ public partial class ComicProcessorService
         {
             _logger.LogDebug(ex, "Unable to enumerate directory while checking duplicate target path: {TargetPath}",
                 LoggingHelper.SanitizePathForLog(targetPath));
-            return false;
+            return null;
         }
         catch (UnauthorizedAccessException ex)
         {
             _logger.LogDebug(ex, "Access denied while checking duplicate target path: {TargetPath}",
                 LoggingHelper.SanitizePathForLog(targetPath));
-            return false;
+            return null;
         }
 
-        return false;
+        return null;
+    }
+
+    /// <summary>
+    /// <paramref name="path"/>, which exists, spelled as its directory lists it: on a file system
+    /// that ignores case the name asked for can differ in case from the file's own, and the file
+    /// store knows the file by its own. The path as asked for when the listing cannot be read.
+    /// </summary>
+    private static string ListedSpellingOf(string path)
+    {
+        try
+        {
+            var name = Path.GetFileName(path);
+            string? otherCase = null;
+            foreach (var entry in Directory.EnumerateFiles(Path.GetDirectoryName(path)!))
+            {
+                var entryName = Path.GetFileName(entry);
+                if (string.Equals(entryName, name, StringComparison.Ordinal))
+                {
+                    return entry;
+                }
+
+                if (otherCase is null && string.Equals(entryName, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    otherCase = entry;
+                }
+            }
+
+            return otherCase ?? path;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return path;
+        }
     }
 }

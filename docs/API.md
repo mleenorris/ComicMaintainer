@@ -24,6 +24,7 @@ Related documents:
 - [Library browsing](#library-browsing)
 - [Folder combine](#folder-combine)
 - [Batch jobs](#batch-jobs)
+- [Duplicates](#duplicates)
 - [Processing preview](#processing-preview)
 - [Processed status](#processed-status)
 - [Comic reader](#comic-reader)
@@ -529,6 +530,7 @@ The combine answers `202` with `{"jobId","job_id","totalItems","total_items","de
 | `POST` | `/api/jobs/{operation}-{scope}` | Library write | Start a batch job |
 | `GET` | `/api/jobs` | Signed in | List jobs |
 | `GET` | `/api/jobs/{jobId}` | Signed in | One job's status, and each file's result with `?include=results` |
+| `GET` | `/api/jobs/{jobId}/duplicate-recheck` | Signed in | What a duplicate re-check job found |
 | `POST` | `/api/jobs/{jobId}/cancel` | Library write | Cancel a running job |
 | `DELETE` | `/api/jobs/{jobId}` | Library write | Delete a job's record |
 | `GET` | `/api/active-job` | Signed in | The running job, if any |
@@ -543,6 +545,7 @@ The operations and the scopes each one supports are:
 | `remove-metadata` | yes | yes | no |
 | `update-metadata` | yes | no | no |
 | `delete` | yes | no | no |
+| `recheck-duplicates` | yes | yes | no |
 
 So the concrete routes are:
 
@@ -552,6 +555,7 @@ So the concrete routes are:
 - `POST /api/jobs/remove-metadata-selected`, `POST /api/jobs/remove-metadata-all`
 - `POST /api/jobs/update-metadata-selected`
 - `POST /api/jobs/delete-selected`
+- `POST /api/jobs/recheck-duplicates-selected`, `POST /api/jobs/recheck-duplicates-all`
 
 Any other combination answers `404`.
 
@@ -571,6 +575,7 @@ The body is:
 - `forceReprocess` can also be sent as `?forceReprocess=true`.
 - `selected` paths must be inside the watched or duplicates directory after resolving links, or the whole request is `400 {"error":"One or more file paths are outside the allowed directory"}`. `delete-selected` is stricter: the entry itself and its directory must be inside, with no `..` segment or trailing separator.
 - The `all` and `unmarked` scopes leave out files flagged as duplicates. To act on a duplicate, name it with a `selected` route.
+- `recheck-duplicates` is the exception: it acts only on files flagged as duplicates. `recheck-duplicates-all` takes every one, and `recheck-duplicates-selected` drops named files that are not flagged. See [Duplicates](#duplicates).
 - The `all` and `unmarked` routes need no body. A non-JSON body is `415`, and malformed JSON is `400`.
 
 The response carries both spellings:
@@ -601,9 +606,77 @@ When nothing qualifies, the id is the empty GUID and `total_items` is 0.
 
 Add `?include=results` for the outcome of every file of the job, in the job's order, as `"results": [{ "file": "...", "success": false, "error": "the reason" }]`. A file not reached yet has `success` false and no `error`. The list has an entry for every file, so it is left out unless asked for: to follow progress, read the counts.
 
+**`GET /api/jobs/{jobId}/duplicate-recheck`** sums up a `recheck-duplicates` job. Any other job, or an unknown one, is `404`.
+
+```json
+{
+  "job_id": "...",
+  "status": "completed",
+  "total_items": 3,
+  "cleared": 1,
+  "still_duplicate": 1,
+  "failed": 1,
+  "clashes": [{ "file": "/watched_dir/Saga/Saga 1.cbz", "clashes_with": "/watched_dir/Saga/Saga - Chapter 0001.cbz" }],
+  "failures": [{ "file": "/watched_dir/Saga/Saga 2.cbz", "error": "Could not work out the processed name: File not found" }]
+}
+```
+
+- `cleared` counts the files whose flag was cleared and that were processed. While the job runs, it counts those done so far.
+- `still_duplicate` counts the files left flagged; `clashes` lists each with the file that has its processed name.
+- `failed` counts the files that could not be re-checked, or failed to process once cleared; `failures` lists each with the reason.
+- In `GET /api/jobs/{jobId}`, a still-duplicate file is a failed item whose `error` is `Still a duplicate of <path>`.
+
 **`GET /api/jobs`** returns `{"jobs":[...],"count":3}`, with the summary fields above. **`POST /api/jobs/{jobId}/cancel`** returns `{"success":true}`, or `404`. **`DELETE /api/jobs/{jobId}`** answers `204`, or `404`.
 
 **`GET /api/active-job`** returns `{"active":false}` when nothing is running. Otherwise it returns the summary fields plus `job_title`. After a restart it also reports the most recent interrupted job, so a client can explain why work stopped.
+
+## Duplicates
+
+A file is flagged as a duplicate when the name processing would give it already belongs to another file. These routes compare such a file with that other file, and swap the two. To re-check duplicates, start a `recheck-duplicates` [batch job](#batch-jobs): a file whose name is free again loses its flag and is processed (forced), and a file whose name is still taken is left as it is. No route here deletes a file.
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/duplicates/compare` | Signed in | A file and the file that has its processed name, side by side, by `filePath` |
+| `POST` | `/api/duplicates/swap` | Library write | Give a duplicate the other file's name, and flag that file instead |
+
+**`GET /api/duplicates/compare?filePath=...`** returns:
+
+```json
+{
+  "status": "clashes",
+  "reason": null,
+  "file": {
+    "file_path": "/watched_dir/Saga/Saga 1.cbz",
+    "name": "Saga 1.cbz",
+    "size": 52428800,
+    "modified": 1767225600,
+    "page_count": 22,
+    "duplicate": true,
+    "processed_name": "Saga - Chapter 0001.cbz",
+    "tags": { "series": "Saga", "number": "1", "volume": "1", "volume_year": 2012, "format": null, "title": "Chapter 1", "year": 2012 }
+  },
+  "other": { "file_path": "/watched_dir/Saga/Saga - Chapter 0001.cbz", "...": "the same fields" }
+}
+```
+
+- `status` is `clashes` when another file has the name processing would give the file, `free` when none does, and `unknown` when the name could not be worked out. Then `reason` says why, and `processed_name` is `null`.
+- `file` is the file asked for. `other` is the file that has its processed name; it is `null` unless `status` is `clashes`.
+- `processed_name` is the file name processing would give that file now. For `other` it is its own: when it differs from `other`'s name, processing `other` again would move it off the name.
+- `size` is in bytes and `modified` in Unix seconds, both from the file on disk. `page_count` is `null` when the archive cannot be listed.
+- `duplicate` is the file's duplicate flag.
+- `tags` are the file's current tags: `number` is `<Number>`, and `volume_year` is the volume's start year, which only the database keeps. `tags` is `null` when the archive cannot be read.
+- The cover is `GET /api/comicreader/cover?filePath=...`.
+- A missing `filePath` is `400`, as is a path outside the watched and duplicates directories. A file that does not exist is `404`.
+
+**`POST /api/duplicates/swap`** takes `{"filePath":"/watched_dir/Saga/Saga 1.cbz"}`, a file flagged as a duplicate. The file that has its processed name is renamed aside: its own name with ` (duplicate)` added (` (duplicate 2)` and so on when that is taken), and it is flagged as the duplicate. Then the file is processed (forced), which gives it the freed name and its tags. If it does not end up with the name, the other file is renamed back and both keep their flags. It returns:
+
+```json
+{ "success": true, "file_path": "/watched_dir/Saga/Saga - Chapter 0001.cbz", "duplicate_path": "/watched_dir/Saga/Saga - Chapter 0001 (duplicate).cbz" }
+```
+
+- `file_path` is where the former duplicate is now. `duplicate_path` is where the other file is now.
+- `409 {"error":"..."}` when nothing was changed because the files are not as compared: the file is not flagged, no other file has its name now, or another file does.
+- `400 {"error":"..."}` when the path is missing or outside the library, the processed name cannot be worked out, the other file cannot be renamed, or the file could not take the name.
 
 ## Processing preview
 

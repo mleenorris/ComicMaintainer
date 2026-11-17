@@ -83,6 +83,61 @@ public class SeriesImageStore : ISeriesImageStore
         }
 
         var settings = _settings.CurrentValue;
+
+        // Allow fetching a source image larger than the persisted cap so we can
+        // downscale it below. Only payloads exceeding the hard ceiling are
+        // rejected outright.
+        var downloadCeiling = Math.Max(settings.SeriesImageMaxDownloadBytes, settings.SeriesImageMaxBytes);
+        var (bytes, length, normalizedContentType) = await DownloadValidatedAsync(remoteImageUrl, downloadCeiling, cancellationToken);
+
+        // A large source image must not block the cover from being populated:
+        // when the payload exceeds the persisted cap, downscale and re-encode
+        // it as JPEG so it fits, rather than rejecting the download.
+        if (length > settings.SeriesImageMaxBytes)
+        {
+            var scaled = SeriesImageDownscaler.DownscaleToJpeg(
+                bytes.AsSpan(0, length),
+                settings.SeriesImageMaxBytes,
+                Math.Max(1, settings.SeriesImageMaxDimension));
+            _logger.LogInformation(
+                "Downscaled oversized series image for {SeriesKey} from {OriginalBytes} to {ScaledBytes} bytes",
+                LoggingHelper.SanitizeForLog(normalizedKey),
+                length,
+                scaled.Length);
+            bytes = scaled;
+            length = scaled.Length;
+            normalizedContentType = "image/jpeg";
+        }
+
+        return Persist(normalizedKey, bytes, length, normalizedContentType, previousFile);
+    }
+
+    /// <inheritdoc />
+    public async Task<(byte[] Bytes, string ContentType)> FetchImageAsync(
+        string remoteImageUrl,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(remoteImageUrl))
+        {
+            throw new ArgumentException("Remote URL is required", nameof(remoteImageUrl));
+        }
+
+        var (bytes, length, contentType) = await DownloadValidatedAsync(
+            remoteImageUrl, _settings.CurrentValue.SeriesImageMaxDownloadBytes, cancellationToken);
+        return (bytes.AsSpan(0, length).ToArray(), contentType);
+    }
+
+    /// <summary>
+    /// Downloads <paramref name="remoteImageUrl"/> with every check a provider image gets: a
+    /// public http(s) address (each redirect checked too), a time limit, at most
+    /// <paramref name="ceilingBytes"/>, and a JPEG, PNG or WebP whose bytes match its declared type.
+    /// </summary>
+    private async Task<(byte[] Bytes, int Length, string ContentType)> DownloadValidatedAsync(
+        string remoteImageUrl,
+        int ceilingBytes,
+        CancellationToken cancellationToken)
+    {
+        var settings = _settings.CurrentValue;
         ValidateRemoteUrl(remoteImageUrl, out var uri);
 
         using var httpClient = _httpClientFactory.CreateClient(HttpClientName);
@@ -112,12 +167,8 @@ public class SeriesImageStore : ISeriesImageStore
                 $"Unsupported image content-type: '{LoggingHelper.SanitizeForLog(declaredContentType)}'");
         }
 
-        // Allow fetching a source image larger than the persisted cap so we can
-        // downscale it below. Only payloads exceeding the hard ceiling are
-        // rejected outright.
-        var downloadCeiling = Math.Max(settings.SeriesImageMaxDownloadBytes, settings.SeriesImageMaxBytes);
         await using var responseStream = await response.Content.ReadAsStreamAsync(cts.Token);
-        var (bytes, length) = await ReadCappedAsync(responseStream, downloadCeiling, cts.Token);
+        var (bytes, length) = await ReadCappedAsync(responseStream, ceilingBytes, cts.Token);
 
         var detected = DetectContentType(bytes, length);
         if (detected is null || !string.Equals(detected, normalizedContentType, StringComparison.OrdinalIgnoreCase))
@@ -126,26 +177,7 @@ public class SeriesImageStore : ISeriesImageStore
                 "Image payload failed magic-byte validation against declared content-type");
         }
 
-        // A large source image must not block the cover from being populated:
-        // when the payload exceeds the persisted cap, downscale and re-encode
-        // it as JPEG so it fits, rather than rejecting the download.
-        if (length > settings.SeriesImageMaxBytes)
-        {
-            var scaled = SeriesImageDownscaler.DownscaleToJpeg(
-                bytes.AsSpan(0, length),
-                settings.SeriesImageMaxBytes,
-                Math.Max(1, settings.SeriesImageMaxDimension));
-            _logger.LogInformation(
-                "Downscaled oversized series image for {SeriesKey} from {OriginalBytes} to {ScaledBytes} bytes",
-                LoggingHelper.SanitizeForLog(normalizedKey),
-                length,
-                scaled.Length);
-            bytes = scaled;
-            length = scaled.Length;
-            normalizedContentType = "image/jpeg";
-        }
-
-        return Persist(normalizedKey, bytes, length, normalizedContentType, previousFile);
+        return (bytes, length, normalizedContentType);
     }
 
     public async Task<SeriesImageStoreResult> SaveUserImageAsync(

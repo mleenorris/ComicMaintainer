@@ -111,6 +111,17 @@ order across every series, as ComicVine lists it. Issues you have can be read fr
 **Not in your library**. The arcs are also written into each file's `<StoryArc>`, which Komga and Kavita use to build
 reading lists.
 
+### Replacing a cover with ComicVine's
+
+An issue's cover can be replaced with its cover from ComicVine. Open the issue's menu on the series page and choose
+**Replace Cover…**. The dialog shows the issue's cover now and every cover ComicVine has for its volume, with the issue's
+own chosen. If the issue was matched to the wrong ComicVine issue, or not matched at all, choose another cover from the
+list. **Replace Cover** downloads the full-size cover and makes it page 1 of the CBZ, in place of the old cover. Every
+other page is kept. Only a CBZ can be changed this way; convert a CBR to CBZ first.
+
+The issue is matched to ComicVine as for issue details: through its series and its volume's start year or number.
+Annuals, Specials and Giant-Size issues are not matched yet. This needs a ComicVine API key.
+
 A file renamed before this version may have lost its volume from its name. If its `<Title>` still holds the old file
 name, such as `All New X-Men v2 008 (2016)`, the volume and cover year are read from there. A real story title is never
 read this way: the title has to start with the series name and contain the issue number.

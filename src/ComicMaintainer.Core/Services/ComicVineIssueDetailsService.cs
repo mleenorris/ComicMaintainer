@@ -33,6 +33,9 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
     /// <summary>Requests a series job may make; ComicVine's hourly limit applies on top.</summary>
     internal const int JobMaxRequests = 250;
 
+    /// <summary>Requests the cover picker may make: a search for the volume and its issue list.</summary>
+    internal const int CoverRequests = 8;
+
     /// <summary>Requests one search for a volume can take (<see cref="IComicVineVolumeSearch"/> reads up to three pages).</summary>
     private const int SearchRequests = 3;
 
@@ -123,6 +126,21 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             },
             "Filling ComicVine issue details failed");
         return _jobRegistry.StartJob(definition, filePaths);
+    }
+
+    /// <inheritdoc />
+    public async Task<CoverCandidates?> GetCoverCandidatesAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        if (await _fileStore.GetFileAsync(filePath, cancellationToken) is not { } file)
+        {
+            return null;
+        }
+
+        // Asked for by the user: a volume not found before is searched again, and one listed
+        // before covers were kept is listed again.
+        var run = new Run(this, CoverRequests, retryNotFound: true) { ListForCovers = true };
+        await run.LoadAsync(cancellationToken);
+        return await run.CoverCandidatesAsync(file, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -298,6 +316,9 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
 
         private int RequestsLeft => maxRequests - _requests;
 
+        /// <summary>True for the cover picker: a volume whose stored issues have no covers is listed again.</summary>
+        public bool ListForCovers { get; init; }
+
         public async Task LoadAsync(CancellationToken cancellationToken)
         {
             await using var db = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -409,6 +430,59 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             await RecordAppliedAsync(file.FilePath, issue.Id, cancellationToken);
             return (outcome, null);
         }
+
+        public async Task<CoverCandidates> CoverCandidatesAsync(ComicFile file, CancellationToken cancellationToken)
+        {
+            var metadata = file.Metadata;
+            if (metadata is null || string.IsNullOrWhiteSpace(metadata.Series))
+            {
+                return NoCovers("The issue has no series name to look up on ComicVine");
+            }
+
+            if (IssueFormat.Of(metadata.Format, metadata.Series, metadata.Issue, file.FileName, metadata.Title) is not null)
+            {
+                return NoCovers("Annuals, Specials and Giant-Size issues are not matched to ComicVine yet");
+            }
+
+            var (startYear, volumeNumber) = VolumeOf(metadata);
+            await _gate.WaitAsync(cancellationToken);
+            try
+            {
+                var (link, outOfRequests) = await LinkAsync(metadata.Series, startYear, volumeNumber, cancellationToken);
+                if (link?.VolumeId is not { } volumeId)
+                {
+                    return NoCovers(outOfRequests
+                        ? "No ComicVine requests were left to look up the issue's volume; try again later"
+                        : NoVolumeReason(metadata.Series, startYear, volumeNumber));
+                }
+
+                var issues = await IssuesAsync(link, cancellationToken);
+                var matched = string.IsNullOrWhiteSpace(metadata.Issue)
+                    ? null
+                    : issues.FirstOrDefault(issue => SameNumber(issue.IssueNumber, metadata.Issue));
+                var covers = issues
+                    .Where(issue => issue.CoverUrl is not null)
+                    .OrderBy(issue => decimal.TryParse(issue.IssueNumber, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var n) ? n : decimal.MaxValue)
+                    .ThenBy(issue => issue.IssueNumber, StringComparer.OrdinalIgnoreCase)
+                    .Select(issue => new CoverCandidate(issue.Id, issue.IssueNumber, issue.Name, issue.CoverDate, issue.CoverUrl!, issue.CoverThumbUrl, issue.SiteUrl))
+                    .ToList();
+                var volumeName = link.VolumeName ?? SeriesTitle(metadata.Series);
+                var reason = matched is null
+                    ? $"ComicVine's {volumeName} has no issue #{metadata.Issue}; pick its cover from the others"
+                    : matched.CoverUrl is null ? "ComicVine has no cover for this issue" : null;
+                return new CoverCandidates(volumeId, link.VolumeName, matched?.Id, reason, covers);
+            }
+            catch (ExternalMetadataUnavailableException ex)
+            {
+                return NoCovers(ex.UserMessage);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        private static CoverCandidates NoCovers(string reason) => new(null, null, null, reason, []);
 
         /// <summary>
         /// What names the file's volume: its start year, else its volume number (a year written in
@@ -535,7 +609,9 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 _issuesByVolume[volumeId] = issues;
             }
 
-            var stale = link.IssuesListedUtc is not { } listed || DateTime.UtcNow - listed >= IssueListRefresh;
+            // The cover picker also lists again a volume listed before covers were kept.
+            var stale = link.IssuesListedUtc is not { } listed || DateTime.UtcNow - listed >= IssueListRefresh
+                        || (ListForCovers && issues.Count > 0 && issues.All(issue => issue.CoverUrl is null));
             if (!stale || _listedThisRun.Contains(volumeId))
             {
                 return issues;
@@ -572,7 +648,9 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 var changed = isNew
                               || issue.IssueNumber != summary.IssueNumber || issue.Name != summary.Name
                               || issue.CoverDate != summary.CoverDate || issue.Summary != Truncate(summary.Summary, 4000)
-                              || issue.SiteUrl != summary.SiteUrl;
+                              || issue.SiteUrl != summary.SiteUrl
+                              || issue.CoverUrl != Truncate(summary.CoverUrl, 512)
+                              || issue.CoverThumbUrl != Truncate(summary.CoverThumbUrl, 512);
                 if (!changed)
                 {
                     continue;
@@ -584,6 +662,8 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 issue.CoverDate = Truncate(summary.CoverDate, 10);
                 issue.Summary = Truncate(summary.Summary, 4000);
                 issue.SiteUrl = Truncate(summary.SiteUrl, 512);
+                issue.CoverUrl = Truncate(summary.CoverUrl, 512);
+                issue.CoverThumbUrl = Truncate(summary.CoverThumbUrl, 512);
                 issue.ListedUtc = now;
                 if (isNew)
                 {

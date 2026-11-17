@@ -56,6 +56,12 @@ public class ComicVineIssueEntity
 
     public string? SiteUrl { get; set; }
 
+    /// <summary>The cover at the largest size ComicVine has: what replaces an archive's cover.</summary>
+    public string? CoverUrl { get; set; }
+
+    /// <summary>The cover about a screen high, for the cover picker.</summary>
+    public string? CoverThumbUrl { get; set; }
+
     /// <summary>The writers, comma-separated, once the issue's details are fetched.</summary>
     public string? Writers { get; set; }
 

@@ -69,6 +69,8 @@ public class FailureMessageAttributeTests
     [InlineData(typeof(MetadataController), nameof(MetadataController.Search), "Error searching external metadata")]
     [InlineData(typeof(MetadataController), nameof(MetadataController.SetAliases), "Error updating aliases")]
     [InlineData(typeof(MetadataController), nameof(MetadataController.VolumeNumber), "Error looking up the volume number")]
+    [InlineData(typeof(CoversController), nameof(CoversController.Candidates), "Error looking up covers on ComicVine")]
+    [InlineData(typeof(CoversController), nameof(CoversController.Replace), "Error replacing the cover")]
     [InlineData(typeof(MetadataController), nameof(MetadataController.FetchIssueDetails), "Error starting the ComicVine issue details job")]
     [InlineData(typeof(MetadataController), nameof(MetadataController.SeriesStoryArcs), "Error reading the series' story arcs")]
     [InlineData(typeof(MetadataController), nameof(MetadataController.StoryArc), "Error reading the story arc")]

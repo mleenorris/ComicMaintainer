@@ -317,6 +317,8 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<IComicVineVolumeSearch>(sp => sp.GetRequiredService<ComicVineSeriesMetadataService>());
         services.AddSingleton<IComicVineCatalogClient>(sp => sp.GetRequiredService<ComicVineSeriesMetadataService>());
         services.AddSingleton<IComicVineIssueDetailsService, ComicVineIssueDetailsService>();
+        services.AddSingleton<IIssueCoverWriter, IssueCoverWriter>();
+        services.AddSingleton<IIssueCoverService, IssueCoverService>();
         services.AddSingleton<MangaDexSeriesMetadataService>();
         services.AddSingleton<AniListManhwaSeriesMetadataService>();
         services.AddSingleton<AniListMangaSeriesMetadataService>();

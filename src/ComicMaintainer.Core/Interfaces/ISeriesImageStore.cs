@@ -16,6 +16,15 @@ public record SeriesImageStoreResult(string FileName, string ContentType, long S
 public interface ISeriesImageStore
 {
     /// <summary>
+    /// Downloads <paramref name="remoteImageUrl"/> with the same checks as <see cref="DownloadAsync"/>
+    /// (SSRF protection, size cap, content-type and magic bytes) and returns the image without
+    /// storing or resizing it. Throws on validation failure.
+    /// </summary>
+    Task<(byte[] Bytes, string ContentType)> FetchImageAsync(
+        string remoteImageUrl,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Download <paramref name="remoteImageUrl"/> and persist it under a
     /// filename derived from <paramref name="normalizedKey"/> and the content
     /// hash. Returns the stored filename (relative to the cache directory)

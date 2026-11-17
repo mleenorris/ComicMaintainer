@@ -24,6 +24,13 @@ public interface IComicVineIssueDetailsService
     /// </summary>
     Guid StartJob(IReadOnlyCollection<string> filePaths);
 
+    /// <summary>
+    /// The ComicVine covers the cover of the file at <paramref name="filePath"/> can be replaced
+    /// with: its volume is matched, and its issues listed, as for filling details. Null when the
+    /// file is not in the library.
+    /// </summary>
+    Task<CoverCandidates?> GetCoverCandidatesAsync(string filePath, CancellationToken cancellationToken = default);
+
     /// <summary>The story arcs the files at <paramref name="filePaths"/> are part of, by name.</summary>
     Task<IReadOnlyList<SeriesStoryArc>> GetStoryArcsAsync(
         IReadOnlyCollection<string> filePaths,

@@ -671,7 +671,16 @@ public class SuwayomiService : ISuwayomiService
             var foundExactForQuery = false;
             for (var page = 1; ; page++)
             {
-                if (_timeProvider.GetUtcNow() >= deadline)
+                var now = _timeProvider.GetUtcNow();
+                if (queryIndex == 0 && page == 1 && now >= discoveryDeadline)
+                {
+                    // The series' budget ran out while this source waited to
+                    // send its first request: it was never searched, just like
+                    // the sources whose turn came after the deadline.
+                    return new SourceSearchOutcome(source, candidates, null, Skipped: true);
+                }
+
+                if (now >= deadline)
                 {
                     truncation = deadline == sourceDeadline
                         ? $"The search was stopped after {SourceSearchBudget.TotalMinutes:0} minutes without an exact title match."
@@ -865,7 +874,8 @@ public class SuwayomiService : ISuwayomiService
     /// </param>
     /// <param name="Skipped">
     /// The source was never searched: the discovery for the series had used up
-    /// <see cref="SourceDiscoveryBudget"/> before its turn came.
+    /// <see cref="SourceDiscoveryBudget"/> before its turn came or before it
+    /// sent its first request.
     /// </param>
     private sealed record SourceSearchOutcome(
         SuwayomiSource Source,

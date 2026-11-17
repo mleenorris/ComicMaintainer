@@ -411,6 +411,44 @@ public class SeriesLibraryServiceTests
         Assert.Equal(missing ? 1 : 0, result.Series.Count);
     }
 
+    [Theory]
+    // Nightwing's #1,000,000 and an issue numbered by its year leave no gap before them...
+    [InlineData(new[] { "1", "2", "3", "1000000" }, false)]
+    [InlineData(new[] { "1", "2", "2021" }, false)]
+    // ...while a gap inside the run still counts.
+    [InlineData(new[] { "1", "3", "1000000" }, true)]
+    public async Task GetSeriesSummariesAsync_MissingFilter_IgnoresANumberFarBeyondTheRest(string[] issues, bool missing)
+    {
+        var files = issues.Select(n => VolumeFile($"i{n}.cbz", n, null)).ToList();
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(files);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var result = await service.GetSeriesSummariesAsync(filter: "missing");
+
+        Assert.Equal(missing ? 1 : 0, result.Series.Count);
+    }
+
+    [Fact]
+    public async Task GetSeriesIssuesAsync_GiantSizeIssues_AreListedAfterTheSeriesIssues()
+    {
+        var giant = VolumeFile("Green Lantern - Chapter 2025.cbz", "2025", null);
+        giant.Metadata!.Title = "#Giant 2025 2";
+        var files = new List<ComicFile>
+        {
+            giant,
+            VolumeFile("Green Lantern - Chapter 0001.cbz", "1", null),
+        };
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(files);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+        var seriesId = (await service.GetSeriesSummariesAsync()).Series.Single().Id;
+
+        var result = await service.GetSeriesIssuesAsync(seriesId, perPage: -1);
+
+        Assert.Equal(
+            new (string? Format, string Issue)[] { (null, "1"), ("Giant-Size", "2025") },
+            result!.Issues.Select(i => (i.Format, i.Issue!)).ToArray());
+    }
+
     [Fact]
     public async Task GetSeriesAsync_PinnedName_UsesPinnedNameSlugForSeriesId()
     {

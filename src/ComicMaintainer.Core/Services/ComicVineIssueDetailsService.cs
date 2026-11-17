@@ -533,7 +533,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             var details = await owner._client.GetIssueDetailsAsync(issue.Id, cancellationToken);
             _requests++;
             issue.Writers = details is { Writers.Count: > 0 } ? Truncate(string.Join(", ", details.Writers), 1024) : null;
-            issue.StoryArcsJson = details is { StoryArcs.Count: > 0 } ? Truncate(ComicVineIssueFill.StoryArcsJson(details.StoryArcs), 4000) : null;
+            issue.StoryArcsJson = details is { StoryArcs.Count: > 0 } ? ComicVineIssueFill.StoryArcsJson(details.StoryArcs, 4000) : null;
             issue.DetailsUtc = DateTime.UtcNow;
 
             await using var db = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);

@@ -40,6 +40,7 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
         { "/api/jobs/update-metadata-selected", """{ "Files": [PATH], "Metadata": { "Series": "Overwritten" } }""" },
         { "/api/jobs/remove-metadata-selected", """{ "Files": [PATH] }""" },
         { "/api/jobs/delete-selected", """{ "Files": [PATH] }""" },
+        { "/api/jobs/recheck-duplicates-selected", """{ "Files": [PATH] }""" },
         { "/api/files/process-batch", """[PATH]""" },
         { "/api/files/tags", """{ "Files": [PATH], "Metadata": { "Series": "Overwritten" } }""" },
     };
@@ -54,6 +55,7 @@ public sealed class BatchPathConfinementTests : IClassFixture<BatchPathConfineme
         "/api/jobs/process-unmarked",
         "/api/jobs/rename-unmarked",
         "/api/jobs/normalize-unmarked?forceReprocess=true",
+        "/api/jobs/recheck-duplicates-all",
     };
 
     [Theory]

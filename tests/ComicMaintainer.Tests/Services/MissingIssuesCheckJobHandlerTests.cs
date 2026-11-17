@@ -64,7 +64,25 @@ public class MissingIssuesCheckJobHandlerTests
     public void ComputeMissingIssueNumbers_RejectsExcessiveRange()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            MissingIssuesCheckJobHandler.ComputeMissingIssueNumbers(new[] { "1", "2147483647" }));
+            MissingIssuesCheckJobHandler.ComputeMissingIssueNumbers(new[] { "2147483647" }));
+    }
+
+    [Fact]
+    public void ComputeMissingIssueNumbers_ANumberFarBeyondTheRest_LeavesNoGapBeforeIt()
+    {
+        // Nightwing's #1,000,000, and an issue numbered by its year, among issues 1-160.
+        var issues = Enumerable.Range(1, 160).Where(n => n != 7).Select(n => n.ToString()).ToList();
+        issues.Add("1000000");
+        issues.Add("2021");
+        issues.Add("2147483647");
+
+        Assert.Equal(new[] { 7 }, MissingIssuesCheckJobHandler.ComputeMissingIssueNumbers(issues));
+    }
+
+    [Fact]
+    public void ComputeMissingIssueNumbers_IssueZero_IsNotCounted()
+    {
+        Assert.Equal(new[] { 1 }, MissingIssuesCheckJobHandler.ComputeMissingIssueNumbers(new[] { "0", "2" }));
     }
 
     [Fact]
@@ -328,7 +346,7 @@ public class MissingIssuesCheckJobHandlerTests
     public async Task ExecuteAsync_OversizedIssueRange_IsReportedAsSkipped()
     {
         SetupCandidates(("a", "Alpha"));
-        SetupSeries("a", "Alpha", "1", "2147483647");
+        SetupSeries("a", "Alpha", "2147483647");
 
         var summary = await BuildHandler().ExecuteAsync(null, CancellationToken.None);
 

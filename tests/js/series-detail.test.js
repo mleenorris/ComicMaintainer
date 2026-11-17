@@ -430,7 +430,7 @@ test('read-only users are offered only the read actions of an issue and no Serie
     assert.deepEqual(await issueMenus(readOnly), [
         ['Info', 'View/Edit', 'Read Comic', '—', 'Mark Read'],
         ['Info', 'View/Edit', 'Read Comic', '—', 'Mark Unread'],
-        ['Info', 'View/Edit', 'Read Comic', 'Review Duplicate', '—', 'Mark Read']
+        ['Info', 'View/Edit', 'Read Comic', 'Review Duplicate', 'Compare Duplicate', '—', 'Mark Read']
     ]);
     // Every series action changes the library or sends mail, so the menu is
     // hidden, and each item is marked too for when it is open in <body>.
@@ -444,7 +444,7 @@ test('read-only users are offered only the read actions of an issue and no Serie
     ]);
     assert.ok(isDisplayed(seriesActions(admin)));
     assert.deepEqual(seriesActionItems(admin).filter(isDisplayed).map(text), [
-        'Manage Names', 'Manage Folders', 'Find Volume Numbers', 'Fetch Issue Details', 'Refresh Metadata', 'Refresh Folder', 'Update Covers',
-        'Email All Issues', 'Auto-send New Issues', 'Reset Processed Status'
+        'Manage Names', 'Manage Folders', 'Find Volume Numbers', 'Fetch Issue Details', 'Re-check Duplicates', 'Preview Changes',
+        'Refresh Metadata', 'Refresh Folder', 'Update Covers', 'Email All Issues', 'Auto-send New Issues', 'Reset Processed Status'
     ]);
 });

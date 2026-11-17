@@ -47,7 +47,7 @@ public class SeriesIssueDto
     public bool Read { get; set; }
 
     /// <summary>
-    /// The issue's kind when it has a numbering of its own, <c>Annual</c> or <c>Special</c>
+    /// The issue's kind when it has a numbering of its own, <c>Annual</c>, <c>Special</c> or <c>Giant-Size</c>
     /// (see <see cref="Utilities.IssueFormat.Of"/>); null for a regular issue. Annual #1 is not
     /// issue #1, so each kind is listed, and checked for missing issues, apart.
     /// </summary>

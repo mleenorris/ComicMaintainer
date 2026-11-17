@@ -564,30 +564,66 @@
             return n;
         }
 
-        // Issue numbers above this are not counted when looking for gaps: they
-        // are dates or typos ("20240115"), not the length of a run. The
-        // Missing Issues Check job (MissingIssuesCheckJobHandler) uses the same
-        // limit.
+        // A run whose numbers reach above this is not checked for gaps: its
+        // numbers are dates or typos ("20240115"), not the length of a run.
+        // The Missing Issues Check job (MissingIssuesCheckJobHandler) uses the
+        // same limit.
         const MAX_MISSING_ISSUE_NUMBER = 100000;
         // A run of missing issues longer than this is shown as one card for
         // the whole range instead of a card per issue.
         const MAX_MISSING_PLACEHOLDERS_PER_RUN = 12;
+        // Two issue numbers further apart than this, or this many per distinct
+        // number in the run when that is more, are in different clusters (see
+        // highestCountedIssueNumber).
+        const MIN_OUTLIER_JUMP = 1000;
+        const OUTLIER_JUMP_PER_ISSUE = 5;
+
+        // The highest issue number gaps are counted up to, from a run's
+        // distinct numbers in ascending order. A number far beyond the rest is
+        // not where the run ends (Nightwing #1000000 in a series of about 160
+        // issues, or an issue numbered by its year among issues below 200).
+        // The numbers are split into clusters wherever one is more than the
+        // outlier jump above the one before it. The cluster with the most
+        // numbers (the lowest of equals) is the run, and gaps count from #1 up
+        // to its highest number; clusters above it leave no gap before them.
+        // The server uses the same rule (IssueNumberGaps).
+        function highestCountedIssueNumber(sorted) {
+            const jump = Math.max(MIN_OUTLIER_JUMP, OUTLIER_JUMP_PER_ISSUE * sorted.length);
+            let start = 0;
+            let largest = 0;
+            let highest = sorted[0];
+            for (let i = 1; i <= sorted.length; i++) {
+                if (i < sorted.length && sorted[i] - sorted[i - 1] <= jump) continue;
+                if (i - start > largest) {
+                    largest = i - start;
+                    highest = sorted[i - 1];
+                }
+                start = i;
+            }
+            return highest;
+        }
 
         // Given the issues array returned by the API, identify the runs of
-        // integer issue numbers missing between 1 and the highest known integer
-        // issue number. Returns sorted [start, end] pairs (inclusive). Works
-        // from the numbers present, so a large highest number costs nothing.
+        // integer issue numbers missing between 1 and the highest counted
+        // integer issue number (see highestCountedIssueNumber). Returns sorted
+        // [start, end] pairs (inclusive). Works from the numbers present, so a
+        // large highest number costs nothing.
         function computeMissingIssueRanges(issues) {
             if (!Array.isArray(issues) || !issues.length) return [];
             const present = new Set();
             for (const issue of issues) {
                 const n = parseIntegerIssueNumber(issue && issue.issue);
-                if (n === null || n < 1 || n > MAX_MISSING_ISSUE_NUMBER) continue;
+                if (n === null || n < 1) continue;
                 present.add(n);
             }
+            if (!present.size) return [];
+            const sorted = [...present].sort((a, b) => a - b);
+            const highest = highestCountedIssueNumber(sorted);
+            if (highest > MAX_MISSING_ISSUE_NUMBER) return [];
             const ranges = [];
             let next = 1;
-            for (const n of [...present].sort((a, b) => a - b)) {
+            for (const n of sorted) {
+                if (n > highest) break;
                 if (n > next) ranges.push([next, n - 1]);
                 next = n + 1;
             }
@@ -622,7 +658,7 @@
         // A series' issues split into runs that are numbered on their own, as
         // on the server (VolumeNumbering), which already orders the issues run
         // by run. Each run gets its own heading and its own missing issues:
-        //  - Annuals and Specials (issue.format) are always runs of their own,
+        //  - Annuals, Specials and Giant-Size issues (issue.format) are always runs of their own,
         //    after the regular issues: Annual #1 is not issue #1.
         //  - American comics restart their numbering with each volume ("Green
         //    Lantern" #1 of 1990 and #1 of 2005): when volumes (volume_key)
@@ -649,17 +685,19 @@
             return runs;
         }
 
-        // The kind of issue with a numbering of its own ("Annual", "Special"),
-        // or '' for a regular issue.
+        // The kind of issue with a numbering of its own ("Annual", "Special",
+        // "Giant-Size"), or '' for a regular issue.
         function issueKind(issue) {
             if (!issue) return '';
             return issue.format || (issue.annual ? 'Annual' : '');
         }
 
-        // Annuals before Specials, as on the server (IssueFormat.Kinds).
+        // Annuals, then Specials, then Giant-Size issues, as on the server
+        // (IssueFormat.Kinds); any other kind after them.
+        const ISSUE_KINDS = ['Annual', 'Special', 'Giant-Size'];
         function kindOrder(kind) {
-            const index = ['Annual', 'Special'].indexOf(kind);
-            return index === -1 ? 2 : index;
+            const index = ISSUE_KINDS.indexOf(kind);
+            return index === -1 ? ISSUE_KINDS.length : index;
         }
 
         // A run's heading: its volume and kind ("1990", "1990 Annual",
@@ -1051,6 +1089,9 @@
                                             ${issue.duplicate
                                                 ? `<button class="dropdown-item" onclick="openDuplicateReviewModal('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
                                                     ${uiIcon('copy')} Review Duplicate
+                                                </button>
+                                                <button class="dropdown-item" onclick="openDuplicateCompareModal('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                                    ${uiIcon('copy')} Compare Duplicate
                                                 </button>`
                                                 : ''
                                             }
@@ -1390,6 +1431,20 @@
             storyArcModalCurrent = null;
         }
 
+        // Re-checks the issues of the open series flagged as duplicates (see
+        // startDuplicateRecheck), as listed on the series page.
+        function recheckSeriesDuplicates(seriesId, seriesTitle) {
+            const cached = seriesIssuesCache.get(seriesId);
+            const paths = (cached ? cached.issues : [])
+                .filter(issue => issue && issue.duplicate && issue.file_path)
+                .map(issue => issue.file_path);
+            if (!paths.length) {
+                showMessage(`No issue of ${seriesTitle} is flagged as a duplicate`, 'info');
+                return;
+            }
+            return startDuplicateRecheck(paths);
+        }
+
         // Expands/collapses a clamped synopsis block.
         function toggleSeriesSynopsis(btn) {
             const block = btn.closest('[data-synopsis-block]');
@@ -1507,6 +1562,12 @@
                                             </button>
                                             <button class="dropdown-item" data-requires-write onclick="fetchSeriesIssueDetails('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Fill issue titles, cover dates, summaries, writers and story arcs from ComicVine into fields that are empty">
                                                 ${uiIcon('globe')} Fetch Issue Details
+                                            </button>
+                                            <button class="dropdown-item" data-requires-write onclick="recheckSeriesDuplicates('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Clear the flag of each duplicate issue whose processed name is free again, and process it">
+                                                ${uiIcon('rotate-ccw')} Re-check Duplicates
+                                            </button>
+                                            <button class="dropdown-item" data-requires-write onclick="previewSeriesProcessing('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="See what processing this series would rename and retag, before anything is changed">
+                                                ${uiIcon('eye')} Preview Changes
                                             </button>
                                             <div class="dropdown-divider" data-requires-write></div>
                                             <button class="dropdown-item" data-requires-write onclick="refreshSeriesMetadataDirect('${jsArg(series.title)}'); closeAllDropdowns();">

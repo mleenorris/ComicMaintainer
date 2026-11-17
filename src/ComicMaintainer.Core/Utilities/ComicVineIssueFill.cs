@@ -141,6 +141,24 @@ public static partial class ComicVineIssueFill
     public static string StoryArcsJson(IReadOnlyList<ComicVineArcReference> arcs)
         => JsonSerializer.Serialize(arcs, JsonOptions);
 
+    /// <summary>
+    /// The JSON for <see cref="StoryArcsJson(IReadOnlyList{ComicVineArcReference})"/> that fits a column of
+    /// <paramref name="maxLength"/> characters: whole arcs are dropped from the end, so the text stays valid JSON
+    /// (cutting the string would leave it unreadable).
+    /// </summary>
+    public static string StoryArcsJson(IReadOnlyList<ComicVineArcReference> arcs, int maxLength)
+    {
+        var kept = arcs.ToList();
+        var json = StoryArcsJson(kept);
+        while (json.Length > maxLength && kept.Count > 0)
+        {
+            kept.RemoveAt(kept.Count - 1);
+            json = StoryArcsJson(kept);
+        }
+
+        return json;
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private static bool IsSeriesSynopsis(string summary, string? seriesSynopsis)

@@ -6,8 +6,8 @@ namespace ComicMaintainer.Core.Utilities;
 /// Splits a series' issues into runs that are numbered on their own, so issue order and
 /// missing-issue gaps are worked out per run:
 /// <list type="bullet">
-/// <item>Annuals and Specials (see <see cref="IssueFormat"/>) are always runs of their own:
-/// Annual #1 is not issue #1, nor Special #1.</item>
+/// <item>Annuals, Specials and Giant-Size issues (see <see cref="IssueFormat"/>) are always runs of their own:
+/// Annual #1 is not issue #1, nor Special #1 or Giant-Size #1.</item>
 /// <item>Volumes are runs of their own when the numbering restarts with each volume, the way
 /// American comics are relaunched (<c>Green Lantern</c> #1 of 1990 and #1 of 2005).</item>
 /// </list>
@@ -23,7 +23,7 @@ public static class VolumeNumbering
     /// One run's issues, in their original order. <see cref="Volume"/> is the run's volume, or
     /// null when the run is not split by volume or its issues' volume is unknown.
     /// <see cref="Kind"/> is the run's kind of issue (<see cref="IssueFormat.Annual"/>,
-    /// <see cref="IssueFormat.Special"/>), or null for the series' regular issues.
+    /// <see cref="IssueFormat.Special"/>, <see cref="IssueFormat.GiantSize"/>), or null for the series' regular issues.
     /// </summary>
     public sealed record VolumeGroup<T>(ComicVolume? Volume, IReadOnlyList<T> Items, string? Kind = null)
     {
@@ -34,7 +34,7 @@ public static class VolumeNumbering
     /// <summary>
     /// The issues split into runs (see the class summary): the series' own issues first, then
     /// each kind of issue <paramref name="kindOf"/> names, in <see cref="IssueFormat.Kinds"/>
-    /// order (Annuals, then Specials); within each, by volume when the numbering restarts by volume (numbered
+    /// order (Annuals, Specials, then Giant-Size issues); within each, by volume when the numbering restarts by volume (numbered
     /// volumes, then start years, each ascending; issues of no known volume last). Null when
     /// the series is one run.
     /// </summary>

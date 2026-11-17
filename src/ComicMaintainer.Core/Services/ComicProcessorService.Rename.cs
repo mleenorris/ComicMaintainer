@@ -96,7 +96,7 @@ public partial class ComicProcessorService
                 // generation only; rewriting ComicInfo.xml remains the normalize
                 // operation's responsibility.
                 var originalSeries = metadata.Series;
-                var resolvedSeries = await ResolveNormalizedSeriesAsync(metadata, filePath, cancellationToken);
+                var resolvedSeries = await ResolveNormalizedSeriesAsync(metadata, filePath, mutateCache: true, cancellationToken);
                 if (!string.IsNullOrEmpty(resolvedSeries) && metadata.Series != resolvedSeries)
                 {
                     _logger.LogDebug(
@@ -106,18 +106,19 @@ public partial class ComicProcessorService
                 }
 
                 _logger.LogDebug("RenameFileAsync: Generating new filename for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                var newResolvedPath = GenerateFileName(metadata, resolvedPath, originalSeries);
-                if (newResolvedPath == null)
+                var (decision, target) = DecideRename(metadata, resolvedPath, originalSeries);
+                if (decision == RenameDecision.NameFailed)
                 {
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await LogHistoryAsync(filePath, "Rename", false, FilenameGenerationFailedMessage, cancellationToken);
                     return false;
                 }
 
+                var newResolvedPath = target!;
                 _logger.LogDebug("RenameFileAsync: Generated filename: {NewFilePath} (Original: {OriginalFilePath})",
                     LoggingHelper.SanitizePathForLog(newResolvedPath), LoggingHelper.SanitizePathForLog(filePath));
 
-                if (newResolvedPath == resolvedPath)
+                if (decision == RenameDecision.AlreadyNamed)
                 {
                     _logger.LogInformation("RenameFileAsync: File already has correct name: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                     await _fileStore.MarkFileRenamedAsync(filePath, true, cancellationToken);
@@ -128,7 +129,7 @@ public partial class ComicProcessorService
                     return true;
                 }
 
-                if (TargetFileExists(newResolvedPath, resolvedPath))
+                if (decision == RenameDecision.TargetTaken)
                 {
                     _logger.LogInformation("RenameFileAsync: Duplicate detected - target file already exists: {NewPath}", LoggingHelper.SanitizePathForLog(newResolvedPath));
                     await MarkDuplicateAsync(filePath, cancellationToken);
@@ -378,6 +379,45 @@ public partial class ComicProcessorService
 
     private const string FilenameGenerationFailedMessage = "Failed to generate new filename";
 
+    /// <summary>What the rename phase does with a file (see <see cref="DecideRename"/>).</summary>
+    private enum RenameDecision
+    {
+        /// <summary>No file name could be generated: the rename fails.</summary>
+        NameFailed,
+
+        /// <summary>The file already has its target name.</summary>
+        AlreadyNamed,
+
+        /// <summary>Another file has the target name: the file is flagged as a duplicate.</summary>
+        TargetTaken,
+
+        /// <summary>The file is renamed to the target.</summary>
+        Rename
+    }
+
+    /// <summary>
+    /// Decides the rename of the file at <paramref name="resolvedPath"/> from
+    /// <paramref name="metadata"/>: its target path (see <see cref="GenerateFileName"/>), and
+    /// whether it already has that name or another file does (see <see cref="TargetFileExists"/>).
+    /// Processing, renaming and the processing preview all decide here, so a preview names the
+    /// same target as the real run.
+    /// </summary>
+    private (RenameDecision Decision, string? Target) DecideRename(ComicMetadata metadata, string resolvedPath, string? originalSeries)
+    {
+        var target = GenerateFileName(metadata, resolvedPath, originalSeries);
+        if (target is null)
+        {
+            return (RenameDecision.NameFailed, null);
+        }
+
+        if (target == resolvedPath)
+        {
+            return (RenameDecision.AlreadyNamed, target);
+        }
+
+        return (TargetFileExists(target, resolvedPath) ? RenameDecision.TargetTaken : RenameDecision.Rename, target);
+    }
+
     /// <summary>
     /// Renders the target path for <paramref name="originalPath"/> from <paramref name="metadata"/>.
     /// Returns null (after logging the error) when the filename cannot be generated; callers must
@@ -408,6 +448,17 @@ public partial class ComicProcessorService
 
             // An issue written as "Annual 1" is named by its number: the series names the Annual.
             var issue = AnnualIssue.IssueNumber(metadata.Issue);
+
+            // With no number, a title names the issue in place of it (see FormatFilename). With
+            // neither, the template can only give the series' name, which every such issue would
+            // share, so the current name is kept: it is the best name there is. A name an earlier
+            // rename left ending in a bare "- Chapter" is the exception, and is renamed.
+            if (string.IsNullOrWhiteSpace(issue)
+                && ComicFileProcessor.TitleInPlaceOfNumber(comicInfo.Title, comicInfo.Series) is null
+                && !ComicFileProcessor.EndsInBareIssuePrefix(Path.GetFileNameWithoutExtension(originalPath)))
+            {
+                return originalPath;
+            }
 
             // Use ComicFileProcessor.FormatFilename to properly handle decimal issue numbers
             var filename = ComicFileProcessor.FormatFilename(
@@ -570,7 +621,16 @@ public partial class ComicProcessorService
     /// case "exists" on a file system that ignores case because it names the source, and
     /// treating that as a collision flagged the only copy of the file as a duplicate.
     /// </summary>
-    private bool TargetFileExists(string targetPath, string? sourcePath = null)
+    private bool TargetFileExists(string targetPath, string? sourcePath = null) =>
+        FindTargetFile(targetPath, sourcePath) is not null;
+
+    /// <summary>
+    /// The other file <see cref="TargetFileExists"/> finds in the way of renaming
+    /// <paramref name="sourcePath"/> to <paramref name="targetPath"/>, or null when there is none.
+    /// It can be spelled as asked for rather than as the directory lists it; see
+    /// <see cref="ListedSpellingOf"/>. The duplicate re-check and compare name it to the user.
+    /// </summary>
+    private string? FindTargetFile(string targetPath, string? sourcePath = null)
     {
         var directory = Path.GetDirectoryName(targetPath);
         var targetFileName = Path.GetFileName(targetPath);
@@ -579,15 +639,17 @@ public partial class ComicProcessorService
         {
             if (sourcePath is null || !IsCaseOnlyRename(sourcePath, targetPath))
             {
-                return true;
+                return targetPath;
             }
 
             try
             {
-                return !IsSameFileUnderAnotherCase(
+                return IsSameFileUnderAnotherCase(
                     sourcePath,
                     targetPath,
-                    Directory.EnumerateFiles(directory!).Select(Path.GetFileName).OfType<string>());
+                    Directory.EnumerateFiles(directory!).Select(Path.GetFileName).OfType<string>())
+                    ? null
+                    : targetPath;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -596,13 +658,13 @@ public partial class ComicProcessorService
                 // still fails the rename rather than losing a file.
                 _logger.LogDebug(ex, "Unable to enumerate directory while checking a case-only rename: {TargetPath}",
                     LoggingHelper.SanitizePathForLog(targetPath));
-                return false;
+                return null;
             }
         }
 
         if (string.IsNullOrEmpty(directory) || string.IsNullOrEmpty(targetFileName) || !Directory.Exists(directory))
         {
-            return false;
+            return null;
         }
 
         var sourceFullPath = sourcePath == null ? null : Path.GetFullPath(sourcePath);
@@ -619,7 +681,7 @@ public partial class ComicProcessorService
 
                 if (string.Equals(Path.GetFileName(existingPath), targetFileName, StringComparison.OrdinalIgnoreCase))
                 {
-                    return true;
+                    return existingPath;
                 }
             }
         }
@@ -627,15 +689,48 @@ public partial class ComicProcessorService
         {
             _logger.LogDebug(ex, "Unable to enumerate directory while checking duplicate target path: {TargetPath}",
                 LoggingHelper.SanitizePathForLog(targetPath));
-            return false;
+            return null;
         }
         catch (UnauthorizedAccessException ex)
         {
             _logger.LogDebug(ex, "Access denied while checking duplicate target path: {TargetPath}",
                 LoggingHelper.SanitizePathForLog(targetPath));
-            return false;
+            return null;
         }
 
-        return false;
+        return null;
+    }
+
+    /// <summary>
+    /// <paramref name="path"/>, which exists, spelled as its directory lists it: on a file system
+    /// that ignores case the name asked for can differ in case from the file's own, and the file
+    /// store knows the file by its own. The path as asked for when the listing cannot be read.
+    /// </summary>
+    private static string ListedSpellingOf(string path)
+    {
+        try
+        {
+            var name = Path.GetFileName(path);
+            string? otherCase = null;
+            foreach (var entry in Directory.EnumerateFiles(Path.GetDirectoryName(path)!))
+            {
+                var entryName = Path.GetFileName(entry);
+                if (string.Equals(entryName, name, StringComparison.Ordinal))
+                {
+                    return entry;
+                }
+
+                if (otherCase is null && string.Equals(entryName, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    otherCase = entry;
+                }
+            }
+
+            return otherCase ?? path;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return path;
+        }
     }
 }

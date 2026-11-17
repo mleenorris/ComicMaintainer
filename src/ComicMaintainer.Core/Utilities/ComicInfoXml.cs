@@ -141,6 +141,56 @@ public static class ComicInfoXml
     }
 
     /// <summary>
+    /// The elements whose value differs between <paramref name="before"/> (null for an archive
+    /// without ComicInfo.xml) and <paramref name="after"/>: the ones changed or added, in the
+    /// order <paramref name="after"/> holds them, then the ones removed. An element repeated under
+    /// one name (older files repeat &lt;Writer&gt;) is compared as its values joined by ", ".
+    /// Elements that hold other elements (&lt;Pages&gt;) are not compared: no metadata write
+    /// changes them.
+    /// </summary>
+    public static IReadOnlyList<ComicInfoFieldChange> Diff(XDocument? before, XDocument after)
+    {
+        ArgumentNullException.ThrowIfNull(after);
+        var oldValues = SimpleValues(before?.Root);
+        var newValues = SimpleValues(after.Root);
+        var oldByName = oldValues.ToDictionary(entry => entry.Name, entry => entry.Value, StringComparer.Ordinal);
+        var newNames = newValues.Select(entry => entry.Name).ToHashSet(StringComparer.Ordinal);
+        var changes = new List<ComicInfoFieldChange>();
+        foreach (var (name, value) in newValues)
+        {
+            var old = oldByName.GetValueOrDefault(name);
+            if (!string.Equals(old, value, StringComparison.Ordinal))
+            {
+                changes.Add(new ComicInfoFieldChange(name, old, value));
+            }
+        }
+
+        changes.AddRange(oldValues
+            .Where(entry => !newNames.Contains(entry.Name))
+            .Select(entry => new ComicInfoFieldChange(entry.Name, entry.Value, null)));
+        return changes;
+    }
+
+    /// <summary>
+    /// The value of each element of <paramref name="root"/> that holds only text, by local name, in
+    /// document order; an empty element counts as missing.
+    /// </summary>
+    private static List<(string Name, string Value)> SimpleValues(XElement? root)
+    {
+        if (root is null)
+        {
+            return [];
+        }
+
+        return root.Elements()
+            .Where(e => !e.HasElements)
+            .GroupBy(e => e.Name.LocalName, StringComparer.Ordinal)
+            .Select(group => (group.Key, string.Join(", ", group.Select(e => e.Value).Where(v => !string.IsNullOrEmpty(v)))))
+            .Where(entry => entry.Item2.Length > 0)
+            .ToList();
+    }
+
+    /// <summary>
     /// Serializes <paramref name="document"/> as indented UTF-8 with an XML declaration. Comments
     /// and processing instructions outside the root element are kept.
     /// </summary>

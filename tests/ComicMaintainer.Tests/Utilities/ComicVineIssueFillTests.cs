@@ -116,6 +116,20 @@ public class ComicVineIssueFillTests
     }
 
     [Fact]
+    public void StoryArcsJson_WithLimit_DropsWholeArcsAndStaysReadable()
+    {
+        var arcs = Enumerable.Range(1, 400).Select(i => new ComicVineArcReference(i, $"Story arc number {i}")).ToList();
+
+        var json = ComicVineIssueFill.StoryArcsJson(arcs, 4000);
+
+        Assert.True(json.Length <= 4000);
+        var read = ComicVineIssueFill.StoryArcs(json);
+        Assert.NotEmpty(read);
+        Assert.Equal(arcs.Take(read.Count), read);
+        Assert.Equal(ComicVineIssueFill.StoryArcsJson(arcs.Take(2).ToList()), ComicVineIssueFill.StoryArcsJson(arcs.Take(2).ToList(), 4000));
+    }
+
+    [Fact]
     public void FillEmptyFields_WritesStoryArcAndMonth_OnlyIntoEmptyElements()
     {
         var existing = System.Xml.Linq.XDocument.Parse("<ComicInfo><Month>-1</Month><StoryArc>Kept</StoryArc></ComicInfo>");

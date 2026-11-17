@@ -293,6 +293,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
         private readonly Dictionary<string, ComicVineFileStateEntity> _states = new(StringComparer.Ordinal);
         private readonly int[] _counts = new int[Enum.GetValues<Outcome>().Length];
         private readonly HashSet<int> _listedThisRun = new();
+        private readonly HashSet<(string Key, int Year, int Number)> _searchedThisRun = new();
         private int _requests;
         private bool _stoppedEarly;
 
@@ -469,6 +470,11 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             {
                 // Costs no request, so it is never kept as "not found".
                 volume = await SeriesMatchAsync(series, cancellationToken);
+                if (volume is null)
+                {
+                    return (null, false);
+                }
+
                 if (link is not null && link.VolumeId?.ToString(CultureInfo.InvariantCulture) == volume?.SourceId)
                 {
                     return (link, false);
@@ -477,7 +483,9 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             else
             {
                 if (link is not null
-                    && (link.VolumeId is not null || (!retryNotFound && DateTime.UtcNow - link.LinkedUtc < NotFoundRetry)))
+                    && (link.VolumeId is not null
+                        || _searchedThisRun.Contains(key)
+                        || (!retryNotFound && DateTime.UtcNow - link.LinkedUtc < NotFoundRetry)))
                 {
                     return (link, false);
                 }
@@ -490,6 +498,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
 
                 var volumes = await owner._volumeSearch.SearchVolumesAsync(title, cancellationToken);
                 _requests += Math.Min(SearchRequests, volumes.Count / 50 + 1);
+                _searchedThisRun.Add(key);
                 volume = startYear > 0
                     ? VolumeOrdinal.Suggest(volumes, title, startYear)?.Match
                     : VolumeOrdinal.Numbered(volumes, title, volumeNumber, (await SeriesMatchAsync(series, cancellationToken))?.SourceId);

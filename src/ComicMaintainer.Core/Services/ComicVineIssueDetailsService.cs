@@ -206,7 +206,12 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
         var fileByIssue = new Dictionary<int, string>();
         foreach (var state in files)
         {
-            if (!fileByIssue.ContainsKey(state.IssueId) && await _fileStore.FileExistsAsync(state.FilePath, cancellationToken))
+            if (fileByIssue.ContainsKey(state.IssueId))
+            {
+                continue;
+            }
+
+            if (await _fileStore.FileExistsAsync(state.FilePath, cancellationToken))
             {
                 fileByIssue[state.IssueId] = state.FilePath;
             }
@@ -230,10 +235,13 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
         var files = new List<ComicFile>();
         foreach (var path in filePaths.Distinct(StringComparer.Ordinal))
         {
-            if (await _fileStore.GetFileAsync(path, cancellationToken) is { } file)
+            var file = await _fileStore.GetFileAsync(path, cancellationToken);
+            if (file is null)
             {
-                files.Add(file);
+                continue;
             }
+
+            files.Add(file);
         }
 
         return files;

@@ -193,7 +193,12 @@ public partial class ComicVineSeriesMetadataService
         {
             foreach (var arc in list.EnumerateArray())
             {
-                if (ReadIntId(arc) is { } id && ReadString(arc, "name")?.Trim() is { Length: > 0 } name && arcs.All(a => a.Id != id))
+                if (ReadIntId(arc) is not { } id || ReadString(arc, "name")?.Trim() is not { Length: > 0 } name)
+                {
+                    continue;
+                }
+
+                if (arcs.All(a => a.Id != id))
                 {
                     arcs.Add(new ComicVineArcReference(id, name));
                 }

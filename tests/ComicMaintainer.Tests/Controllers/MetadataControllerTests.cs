@@ -26,7 +26,8 @@ public class MetadataControllerTests
             new Mock<ILogger<MetadataController>>().Object,
             Mock.Of<IComicProcessorService>(),
             Mock.Of<IFileStoreService>(),
-            Mock.Of<ISeriesLanguagePreferenceRetagService>());
+            Mock.Of<ISeriesLanguagePreferenceRetagService>(),
+            Mock.Of<IComicVineVolumeSearch>());
     }
 
     [Fact]
@@ -188,7 +189,8 @@ public class MetadataControllerTests
             new Mock<ILogger<MetadataController>>().Object,
             Mock.Of<IComicProcessorService>(),
             Mock.Of<IFileStoreService>(),
-            retag.Object);
+            retag.Object,
+            Mock.Of<IComicVineVolumeSearch>());
 
         var result = await controller.SetPreferredLanguage(
             "Batman",
@@ -375,7 +377,8 @@ public class MetadataControllerTests
             new Mock<ILogger<MetadataController>>().Object,
             processor.Object,
             fileStore.Object,
-            Mock.Of<ISeriesLanguagePreferenceRetagService>());
+            Mock.Of<ISeriesLanguagePreferenceRetagService>(),
+            Mock.Of<IComicVineVolumeSearch>());
 
         var result = await controller.ApplyMatch(
             "Batman",

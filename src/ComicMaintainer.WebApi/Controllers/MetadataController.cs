@@ -22,6 +22,7 @@ public class MetadataController : ControllerBase
     private readonly IFileStoreService _fileStore;
     private readonly ISeriesLanguagePreferenceRetagService _languageRetag;
     private readonly IHostApplicationLifetime? _applicationLifetime;
+    private readonly IComicVineVolumeSearch _volumeSearch;
     private readonly ILogger<MetadataController> _logger;
 
     public MetadataController(
@@ -33,6 +34,7 @@ public class MetadataController : ControllerBase
         IComicProcessorService processor,
         IFileStoreService fileStore,
         ISeriesLanguagePreferenceRetagService languageRetag,
+        IComicVineVolumeSearch volumeSearch,
         IHostApplicationLifetime? applicationLifetime = null)
     {
         _library = library;
@@ -44,6 +46,7 @@ public class MetadataController : ControllerBase
         _fileStore = fileStore;
         _languageRetag = languageRetag;
         _applicationLifetime = applicationLifetime;
+        _volumeSearch = volumeSearch;
     }
 
     /// <summary>
@@ -397,6 +400,64 @@ public class MetadataController : ControllerBase
             return ProvidersUnavailable(ex);
         }
     }
+
+    /// <summary>
+    /// Suggests the number of the volume of <paramref name="title"/> that started in
+    /// <paramref name="year"/>, counted from ComicVine's volumes (see <see cref="VolumeOrdinal"/>).
+    /// Nothing is written: the series page shows the suggestion and the volumes counted, and
+    /// applies it through <c>POST /api/files/tags</c> when the user accepts it.
+    /// </summary>
+    [HttpGet("volume-number")]
+    [FailureMessage("Error looking up the volume number")]
+    public async Task<ActionResult<object>> VolumeNumber([FromQuery] string? title, [FromQuery] int year, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return BadRequest(new { error = "Title parameter is required" });
+        }
+
+        if (year is < 1900 or > 2199)
+        {
+            return BadRequest(new { error = "Year parameter must be a year between 1900 and 2199" });
+        }
+
+        try
+        {
+            var volumes = await _volumeSearch.SearchVolumesAsync(title, cancellationToken);
+            var suggestion = VolumeOrdinal.Suggest(volumes, title, year);
+            return Ok(new
+            {
+                title,
+                year,
+                number = suggestion?.Number,
+                publisher = suggestion?.Publisher,
+                // The earlier volumes, each counted or not, then the volume itself.
+                volumes = suggestion is null
+                    ? []
+                    : suggestion.Earlier
+                        .Select(volume => VolumeNumberEntry(volume, VolumeOrdinal.CountsByDefault(volume), matched: false))
+                        .Append(VolumeNumberEntry(suggestion.Match, counted: true, matched: true))
+                        .ToList()
+            });
+        }
+        catch (ExternalMetadataUnavailableException ex)
+        {
+            _logger.LogWarning(LoggingHelper.WithWebsitePrefix("Volume number lookup for {Title} failed: {Reason}"),
+                LoggingHelper.SanitizeForLog(title), LoggingHelper.SanitizeForLog(ex.Message));
+            return ProvidersUnavailable(ex);
+        }
+    }
+
+    private static object VolumeNumberEntry(ExternalSeriesMetadata volume, bool counted, bool matched) => new
+    {
+        name = volume.CanonicalTitle,
+        start_year = volume.StartYear,
+        issues = volume.TotalChapters,
+        publisher = volume.Publisher,
+        site_url = volume.SiteUrl,
+        counted,
+        matched
+    };
 
     /// <summary>Get the cached record for a series (canonical title, aliases, user aliases).</summary>
     [HttpGet("series/{seriesTitle}")]

@@ -1121,6 +1121,158 @@
             `;
         }
 
+        // ── Volume numbers from ComicVine ────────────────────────────────
+        //
+        // A volume known only by the year it started ("Batman (2016)") gets a
+        // number suggested from ComicVine's volumes of that name
+        // (GET /api/metadata/volume-number): Batman (2016) is DC's third
+        // "Batman", Vol. 3. Nothing is written until the user applies it.
+        let volumeNumbersCurrent = null;
+
+        // The volumes of `issues` known only by their start year (volume_key
+        // "y2016"), oldest first: [{ year, paths }].
+        function yearOnlyVolumes(issues) {
+            const byYear = new Map();
+            for (const issue of issues || []) {
+                const key = issue && issue.volume_key;
+                if (typeof key !== 'string' || !/^y\d{4}$/.test(key)) continue;
+                const year = Number(key.slice(1));
+                if (!byYear.has(year)) byYear.set(year, []);
+                byYear.get(year).push(issue.file_path);
+            }
+            return [...byYear].sort((a, b) => a[0] - b[0]).map(([year, paths]) => ({ year, paths }));
+        }
+
+        async function openVolumeNumbersModal(seriesId, seriesTitle) {
+            const list = document.getElementById('volumeNumbersList');
+            const emptyState = document.getElementById('volumeNumbersEmptyState');
+            document.getElementById('volumeNumbersModalTitle').textContent = `Volume numbers for "${seriesTitle}"`;
+            const cached = seriesIssuesCache.get(seriesId);
+            const volumes = yearOnlyVolumes(cached ? cached.issues : []);
+            const current = { seriesId, title: seriesTitle, volumes };
+            volumeNumbersCurrent = current;
+            document.getElementById('volumeNumbersModal').classList.add('active');
+            if (!volumes.length) {
+                clearChildren(list);
+                emptyState.style.display = 'block';
+                return;
+            }
+            emptyState.style.display = 'none';
+            renderHtml(list, volumes.map(volume => html`
+                <div class="volume-number-row combine-folder-row" data-volume-year="${volume.year}">
+                    <div class="volume-number-heading"><strong>(${volume.year})</strong> · ${volume.paths.length} issue${volume.paths.length === 1 ? '' : 's'}</div>
+                    <div class="volume-number-result combine-folders-meta">Asking ComicVine...</div>
+                </div>
+            `));
+            // One volume at a time: each lookup can take several ComicVine requests.
+            for (const volume of volumes) {
+                if (volumeNumbersCurrent !== current) return;
+                await lookupVolumeNumber(current, volume);
+            }
+        }
+
+        async function lookupVolumeNumber(current, volume) {
+            let data = null;
+            let failure = '';
+            try {
+                data = await apiFetch(`/api/metadata/volume-number?title=${encodeURIComponent(current.title)}&year=${volume.year}`);
+            } catch (error) {
+                if (error.authHandled) return;
+                failure = error.message;
+            }
+            // The modal was closed or opened for another series meanwhile.
+            if (volumeNumbersCurrent !== current) return;
+            const result = document.querySelector(`#volumeNumbersList [data-volume-year="${volume.year}"] .volume-number-result`);
+            if (failure) {
+                result.textContent = `ComicVine could not be asked: ${failure}`;
+                return;
+            }
+            if (!data.number) {
+                result.textContent = `ComicVine has no volume named "${current.title}" that started in ${volume.year}.`;
+                return;
+            }
+            volume.number = data.number;
+            volume.publisher = data.publisher;
+            const listed = Array.isArray(data.volumes) ? data.volumes : [];
+            // Each earlier volume can be left out: ComicVine also lists, under
+            // the same name, volumes readers do not count. The volume itself
+            // always counts.
+            renderHtml(result, html`
+                <div class="volume-number-summary">${volumeNumberSummary(current, volume)}</div>
+                <ol class="volume-number-counted">
+                    ${listed.map(item => html`<li><label><input type="checkbox" ${item.matched || item.counted !== false ? 'checked' : ''} ${item.matched ? 'disabled' : ''} onchange="recountVolumeNumber(${volume.year})"> ${volumeNumberSource(item)}</label></li>`)}
+                </ol>
+                <button type="button" class="btn btn-small btn-primary volume-number-apply" data-requires-write onclick="applyVolumeNumber(${volume.year})">${volumeNumberApplyLabel(volume)}</button>
+            `);
+        }
+
+        function volumeNumberSummary(current, volume) {
+            const from = volume.publisher ? `: the ${ordinalWord(volume.number)} "${current.title}" from ${volume.publisher}` : '';
+            return `ComicVine suggests Vol. ${volume.number}${from}.`;
+        }
+
+        function volumeNumberApplyLabel(volume) {
+            return `Set Vol. ${volume.number} on ${volume.paths.length} issue${volume.paths.length === 1 ? '' : 's'}`;
+        }
+
+        // The number once the user has ticked or unticked earlier volumes: the
+        // ticked ones, the volume itself among them.
+        function recountVolumeNumber(year) {
+            const current = volumeNumbersCurrent;
+            const volume = current && current.volumes.find(item => item.year === year);
+            if (!volume) return;
+            const row = document.querySelector(`#volumeNumbersList [data-volume-year="${year}"]`);
+            volume.number = row.querySelectorAll('.volume-number-counted input:checked').length;
+            row.querySelector('.volume-number-summary').textContent = volumeNumberSummary(current, volume);
+            row.querySelector('.volume-number-apply').textContent = volumeNumberApplyLabel(volume);
+        }
+
+        // One ComicVine volume: its name, start year and issue count, linked
+        // to its ComicVine page.
+        function volumeNumberSource(item) {
+            const issues = typeof item.issues === 'number' ? ` · ${item.issues} issue${item.issues === 1 ? '' : 's'}` : '';
+            const text = `${item.name} (${item.start_year})${issues}`;
+            const note = item.matched ? ' (this volume)' : '';
+            const link = seriesSiteLink(item.site_url);
+            return link
+                ? html`<a href="${link}" target="_blank" rel="noopener noreferrer">${text}</a>${note}`
+                : html`${text}${note}`;
+        }
+
+        function ordinalWord(number) {
+            const words = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
+            return words[number - 1] || `${number}th`;
+        }
+
+        function closeVolumeNumbersModal() {
+            document.getElementById('volumeNumbersModal').classList.remove('active');
+            volumeNumbersCurrent = null;
+        }
+
+        // Writes the suggested number into <Volume> of the volume's issues, as
+        // the batch Update dialog does, in a background job.
+        async function applyVolumeNumber(year) {
+            const current = volumeNumbersCurrent;
+            const volume = current && current.volumes.find(item => item.year === year);
+            if (!volume || !volume.number) return;
+            if (!jobProgress.canStartJob()) return;
+            closeVolumeNumbersModal();
+            showProgressModal('Setting the volume number...');
+            try {
+                const data = await apiFetch('/api/jobs/update-metadata-selected', {
+                    method: 'POST',
+                    body: { Files: volume.paths, Metadata: { Volume: String(volume.number) }, Fields: ['volume'] },
+                    errorMessage: 'Failed to start setting the volume number'
+                });
+                showMessage(`Setting Vol. ${volume.number} on ${volume.paths.length} issue${volume.paths.length === 1 ? '' : 's'} of ${current.title} (${year})`, 'info');
+                await trackJobStatus(data.job_id, 'Setting the Volume Number...');
+            } catch (error) {
+                if (error.authHandled) return;
+                showMessage('Failed to set the volume number: ' + error.message, 'error');
+                closeProgressModal();
+            }
+        }
+
         // Expands/collapses a clamped synopsis block.
         function toggleSeriesSynopsis(btn) {
             const block = btn.closest('[data-synopsis-block]');
@@ -1231,6 +1383,9 @@
                                             </button>
                                             <button class="dropdown-item" data-requires-write onclick="openSeriesFoldersModal('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="See the on-disk folders contributing to this series and merge them into one">
                                                 ${uiIcon('folder')} Manage Folders
+                                            </button>
+                                            <button class="dropdown-item" data-requires-write onclick="openVolumeNumbersModal('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Ask ComicVine for the number of each volume known only by the year it started">
+                                                ${uiIcon('globe')} Find Volume Numbers
                                             </button>
                                             <div class="dropdown-divider" data-requires-write></div>
                                             <button class="dropdown-item" data-requires-write onclick="refreshSeriesMetadataDirect('${jsArg(series.title)}'); closeAllDropdowns();">

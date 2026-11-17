@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Caching.Memory;
@@ -25,7 +26,7 @@ namespace ComicMaintainer.Core.Services;
 /// Throttling answers (HTTP 420/429) and API error envelopes
 /// (<c>status_code</c> other than 1) are failures, not empty results.
 /// </remarks>
-public class ComicVineSeriesMetadataService : ExternalSeriesMetadataProviderBase
+public class ComicVineSeriesMetadataService : ExternalSeriesMetadataProviderBase, IComicVineVolumeSearch
 {
     /// <summary>
     /// The health probe spends a search request from the hourly budget, so its
@@ -113,6 +114,44 @@ public class ComicVineSeriesMetadataService : ExternalSeriesMetadataProviderBase
 
     /// <summary>At most two requests (100 volumes) per lookup with a year.</summary>
     private protected override int YearLookupMaxPages => 2;
+
+    /// <summary>Search pages read for <see cref="SearchVolumesAsync"/>: 150 volumes at most.</summary>
+    private const int VolumeSearchMaxPages = 3;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Reads up to <see cref="VolumeSearchMaxPages"/> pages, stopping at a short one. A user is
+    /// waiting, so the wait for a client-side permit is limited as for any interactive search.
+    /// </remarks>
+    public async Task<IReadOnlyList<ExternalSeriesMetadata>> SearchVolumesAsync(string title, CancellationToken cancellationToken = default)
+    {
+        var config = Settings.CurrentValue;
+        if (string.IsNullOrWhiteSpace(title) || !CanQuery(config))
+        {
+            return Array.Empty<ExternalSeriesMetadata>();
+        }
+
+        var volumes = new List<ExternalSeriesMetadata>();
+        for (var page = 1; page <= VolumeSearchMaxPages; page++)
+        {
+            var pageNumber = page;
+            var results = await SendAsync(
+                              config,
+                              () => CreateSearchPageRequest(config, title.Trim(), YearSearchPageSize, pageNumber),
+                              title,
+                              ParseSearchResults,
+                              RateLimitedHttpInvoker.InteractivePermitWait,
+                              cancellationToken)
+                          ?? Array.Empty<ExternalSeriesMetadata>();
+            volumes.AddRange(results);
+            if (results.Count < YearSearchPageSize)
+            {
+                break;
+            }
+        }
+
+        return volumes;
+    }
 
     private protected override HttpRequestMessage CreateGetByIdRequest(AppSettings settings, string sourceId)
     {

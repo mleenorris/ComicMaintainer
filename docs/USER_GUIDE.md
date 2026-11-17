@@ -72,6 +72,13 @@ Both volume values can be edited in **View/Edit**, or for many files at once in 
 and **Volume start year** the year. On the series page, a volume that some issues name by number and others by start
 year is shown once, as `Vol. 2 (2016)`, once one issue has both.
 
+A volume known only by its start year can get its number from ComicVine. On the series page, choose **Actions** >
+**Find Volume Numbers**. For each such volume, ComicVine's volumes with the same name and publisher are counted by start
+year: Batman (2016) is DC's third `Batman`, after those of 1940 and 2011, so it is Vol. 3. Volumes of a single issue,
+such as one-shots, are not counted. The dialog lists the volumes it counted, with links to ComicVine, so you can check
+them. Nothing changes until you choose **Set Vol. N**, which writes the number into `<Volume>` of that volume's issues.
+This needs a ComicVine API key.
+
 A file renamed before this version may have lost its volume from its name. If its `<Title>` still holds the old file
 name, such as `All New X-Men v2 008 (2016)`, the volume and cover year are read from there. A real story title is never
 read this way: the title has to start with the series name and contain the issue number.

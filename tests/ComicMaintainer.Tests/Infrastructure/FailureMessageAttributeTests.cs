@@ -65,6 +65,7 @@ public class FailureMessageAttributeTests
     [InlineData(typeof(MetadataController), nameof(MetadataController.RefreshSelected), "Error queuing metadata refresh")]
     [InlineData(typeof(MetadataController), nameof(MetadataController.Search), "Error searching external metadata")]
     [InlineData(typeof(MetadataController), nameof(MetadataController.SetAliases), "Error updating aliases")]
+    [InlineData(typeof(MetadataController), nameof(MetadataController.VolumeNumber), "Error looking up the volume number")]
     [InlineData(typeof(MetadataController), nameof(MetadataController.SetPreferredLanguage), "Error setting preferred language")]
     [InlineData(typeof(MetadataController), nameof(MetadataController.SetSeriesName), "Error setting series name")]
     [InlineData(typeof(OverviewController), nameof(OverviewController.Get), "Error building overview")]

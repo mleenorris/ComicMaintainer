@@ -318,6 +318,51 @@ public class ComicVineSeriesMetadataServiceTests
                $"{{\"id\":{v.Id},\"name\":\"Green Lantern\",\"start_year\":\"{v.StartYear}\",\"publisher\":{{\"name\":\"DC Comics\"}}}}"))
            + "]}";
 
+    [Fact]
+    public async Task SearchVolumesAsync_ReadsPagesUntilAShortOne()
+    {
+        var requests = new List<string>();
+        static string Page(int count, int firstYear)
+            => "{\"status_code\":1,\"results\":[" + string.Join(",", Enumerable.Range(0, count)
+                .Select(i => $"{{\"name\":\"Batman\",\"start_year\":\"{firstYear + i}\",\"publisher\":{{\"name\":\"DC Comics\"}}}}")) + "]}";
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri!.ToString();
+            requests.Add(uri);
+            return JsonResponse(uri.Contains("&page=2") ? Page(3, 1900) : Page(50, 1940));
+        });
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableExternalSeriesMetadata = true,
+            ComicVineApiKey = "test-key",
+            ComicVineBaseUrl = "https://comicvine.example/api"
+        });
+
+        var volumes = await service.SearchVolumesAsync(" Batman ");
+
+        Assert.Equal(53, volumes.Count);
+        Assert.Equal(2, requests.Count);
+        Assert.All(requests, uri => Assert.Contains("query=Batman", uri));
+        Assert.Equal(1940, volumes[0].StartYear);
+        Assert.Equal("DC Comics", volumes[0].Publisher);
+    }
+
+    [Theory]
+    [InlineData(null, "Batman")]
+    [InlineData("test-key", " ")]
+    public async Task SearchVolumesAsync_NotConfiguredOrNoTitle_AsksNothing(string? apiKey, string title)
+    {
+        var handler = new StubHttpMessageHandler(_ => throw new InvalidOperationException("no request expected"));
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableExternalSeriesMetadata = true,
+            ComicVineApiKey = apiKey,
+            ComicVineBaseUrl = "https://comicvine.example/api"
+        });
+
+        Assert.Empty(await service.SearchVolumesAsync(title));
+    }
+
     private static HttpResponseMessage JsonResponse(string json)
         => new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 

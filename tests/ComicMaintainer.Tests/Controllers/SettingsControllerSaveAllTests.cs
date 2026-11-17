@@ -49,6 +49,7 @@ public sealed class SettingsControllerSaveAllTests
         var request = new SettingsController.AllSettingsRequest
         {
             FilenameFormat = "{series}",
+            FolderFormat = "{series} ({volume_year})",
             LogMaxMB = 1.5,
             IssueNumberPadding = 3,
             DatabaseCleanup = new DatabaseCleanupUpdate(IntervalHours: 6),
@@ -73,6 +74,7 @@ public sealed class SettingsControllerSaveAllTests
         _settingsService.Verify(s => s.UpdateSettingsAsync(It.IsAny<SettingsUpdate>(), It.IsAny<CancellationToken>()), Times.Once());
         _settingsService.VerifyNoOtherCalls();
         Assert.Equal("{series}", saved!.FilenameFormat);
+        Assert.Equal("{series} ({volume_year})", saved.FolderFormat);
         Assert.Equal(BytesPerMb + (BytesPerMb / 2), saved.LogMaxBytes);
         Assert.Equal(3, saved.IssueNumberPadding);
         Assert.Equal(6, saved.DatabaseCleanup!.IntervalHours);

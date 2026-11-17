@@ -43,6 +43,7 @@ test('saving sends every group in one request with the edited values', async () 
     const page = await bootSettings();
     routeSave(page);
     page.input('#filenameFormat', '  {series} #{issue}  ');
+    page.input('#folderFormat', '  {series} ({volume_year})  ');
     page.input('#logMaxSize', '7.5');
     page.input('#issueNumberPadding', '2');
     page.input('#dbCleanupInterval', '0');
@@ -100,6 +101,7 @@ test('saving sends every group in one request with the edited values', async () 
     ]);
     assert.deepEqual(saveBody(page, since), {
         filenameFormat: '{series} #{issue}',
+        folderFormat: '{series} ({volume_year})',
         logMaxMB: 7.5,
         issueNumberPadding: 2,
         databaseCleanup: {
@@ -332,6 +334,11 @@ test('the email rate limit is left out when its controls are missing', async () 
 // [description, edits, expected message]
 const INVALID_FORMS = [
     ['blank filename format', { filenameFormat: '   ' }, 'Filename format cannot be empty'],
+    ['folder format without the series', { folderFormat: '{publisher}' }, 'Folder format must contain {series}'],
+    ['folder format naming nested folders', { folderFormat: '{publisher}/{series}' },
+        'Folder format names one folder, so it cannot contain / or \\'],
+    ['folder format with a backslash', { folderFormat: '{series}\\{volume_year}' },
+        'Folder format names one folder, so it cannot contain / or \\'],
     ['missing log size', { logMaxSize: '' }, 'Log max size must be a positive number'],
     ['zero log size', { logMaxSize: '0' }, 'Log max size must be a positive number'],
     ['missing padding', { issueNumberPadding: '' }, 'Issue number padding must be between 0 and 10'],

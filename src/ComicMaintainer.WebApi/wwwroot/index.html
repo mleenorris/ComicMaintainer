@@ -1216,6 +1216,13 @@
                                 <strong>Current format:</strong> <span id="currentFormat" style="font-family: monospace;"></span>
                             </small>
                         </div>
+                        <div class="form-group" style="margin-top: 15px;">
+                            <label for="folderFormat">Series Folder Template</label>
+                            <input type="text" id="folderFormat" name="folderFormat" placeholder="Empty: files stay in their folders" autocomplete="off" aria-describedby="folderFormatHint">
+                            <small class="form-hint" id="folderFormatHint">
+                                Leave empty to keep files where they are. When set, processing moves each file into this folder in the watched folder, for example <code>{series} ({volume_year})</code> or <code>{series}</code>. It must contain <code>{series}</code> and name one folder. Placeholders: <code>{series}</code>, <code>{volume_year}</code>, <code>{volume_number}</code>, <code>{volume_label}</code>, <code>{volume}</code>, <code>{format}</code>, <code>{annual}</code> and <code>{publisher}</code>. A file whose new place is taken is flagged as a duplicate and stays where it is. Files already processed move when they are processed or renamed again.
+                            </small>
+                        </div>
                     </section>
                     <section class="settings-card" id="settings-padding" aria-labelledby="settings-padding-title">
                         <header class="settings-card-header">

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Models;
@@ -26,6 +27,10 @@ public class ComicFileProcessor
 
     private static readonly Regex ExtraWhitespacePattern =
         new(@"\s+", RegexOptions.Compiled);
+
+    /// <summary>A colon that ends a title part, "Solo Leveling: Ragnarok", with the spaces around it.</summary>
+    private static readonly Regex ColonBeforeSpacePattern =
+        new(@"\s*:(?:\s+|$)", RegexOptions.Compiled);
 
     /// <summary>Brackets left empty by a placeholder that rendered nothing: "()", "[ ]".</summary>
     private static readonly Regex EmptyBracketsPattern =
@@ -151,7 +156,6 @@ public class ComicFileProcessor
         }
 
         // Build replacement dictionary
-        var series = SeriesParts(tags, sourceFileName);
         if (string.IsNullOrWhiteSpace(issueNumber))
         {
             // No number: "Chapter " before {issue} would be left bare ("All-New X-Men -
@@ -164,37 +168,13 @@ public class ComicFileProcessor
             issueNoPad = issueFormatted;
         }
 
-        var replacements = new Dictionary<string, string>
-        {
-            ["series"] = series.Title,
-            ["format"] = series.Kind ?? "",
-            ["annual"] = series.Kind == IssueFormat.Annual ? IssueFormat.Annual : "",
-            ["volume_label"] = series.Volume?.Label ?? "",
-            ["volume_number"] = series.Volume is { IsYear: false } number ? number.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "",
-            ["volume_year"] = series.VolumeYear?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "",
-            ["issue"] = issueFormatted,
-            ["issue_no_pad"] = issueNoPad,
-            ["title"] = tags.Title ?? "",
-            ["volume"] = tags.Volume ?? "",
-            ["year"] = tags.Year?.ToString() ?? "",
-            ["publisher"] = tags.Publisher ?? ""
-        };
+        var replacements = SeriesPlaceholders(tags, sourceFileName);
+        replacements["issue"] = issueFormatted;
+        replacements["issue_no_pad"] = issueNoPad;
+        replacements["title"] = tags.Title ?? "";
+        replacements["year"] = tags.Year?.ToString() ?? "";
 
-        // Replace placeholders
-        var result = template;
-        foreach (var (key, value) in replacements)
-        {
-            result = result.Replace($"{{{key}}}", value);
-        }
-
-        // Clean up any remaining unreplaced placeholders
-        result = UnreplacedPlaceholderPattern.Replace(result, "");
-
-        // Clean up what an empty placeholder left: "()", " - - ", a trailing " -", extra spaces
-        result = EmptyBracketsPattern.Replace(result, "");
-        result = ExtraWhitespacePattern.Replace(result, " ");
-        result = RepeatedSeparatorPattern.Replace(result, "");
-        result = DanglingSeparatorPattern.Replace(result, "").Trim();
+        var result = Render(template, replacements);
 
         // Ensure proper extension
         if (!result.EndsWith(".cbz", StringComparison.OrdinalIgnoreCase) && 
@@ -204,6 +184,73 @@ public class ComicFileProcessor
         }
 
         return SanitizeFileName(result);
+    }
+
+    /// <summary>
+    /// Renders the series folder a file belongs in from <paramref name="template"/> (the
+    /// <see cref="AppSettings.FolderFormat"/>), or null when the result names no folder: it
+    /// holds no letter or digit, as when the series is unknown.
+    /// </summary>
+    /// <remarks>
+    /// The placeholders are those of <see cref="FormatFilename"/> that describe the series
+    /// rather than one issue: <c>{series}</c>, <c>{volume_label}</c>, <c>{volume_number}</c>,
+    /// <c>{volume_year}</c>, <c>{volume}</c>, <c>{format}</c>, <c>{annual}</c> and
+    /// <c>{publisher}</c>. Issue placeholders such as <c>{issue}</c> or <c>{year}</c> would give
+    /// every issue a folder of its own, so they render nothing. The result is one folder name:
+    /// path separators are replaced like any other character a name cannot hold, and the dots
+    /// and spaces Windows drops from the end of a folder name are removed.
+    /// </remarks>
+    public static string? FormatFolderName(string template, ComicInfo tags, string? sourceFileName = null)
+    {
+        var name = Render(template, SeriesPlaceholders(tags, sourceFileName));
+        name = SanitizeFileName(name).TrimEnd('.', ' ').Trim();
+        return name.Any(char.IsLetterOrDigit) ? name : null;
+    }
+
+    /// <summary>
+    /// The placeholder values that describe the series of <paramref name="tags"/>, shared by
+    /// file and folder names (see <see cref="SeriesParts"/>).
+    /// </summary>
+    private static Dictionary<string, string> SeriesPlaceholders(ComicInfo tags, string? sourceFileName)
+    {
+        var series = SeriesParts(tags, sourceFileName);
+        return new Dictionary<string, string>
+        {
+            ["series"] = series.Title,
+            ["format"] = series.Kind ?? "",
+            ["annual"] = series.Kind == IssueFormat.Annual ? IssueFormat.Annual : "",
+            ["volume_label"] = series.Volume?.Label ?? "",
+            ["volume_number"] = series.Volume is { IsYear: false } number ? number.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "",
+            ["volume_year"] = series.VolumeYear?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "",
+            ["volume"] = tags.Volume ?? "",
+            ["publisher"] = tags.Publisher ?? ""
+        };
+    }
+
+    /// <summary>
+    /// Fills <paramref name="template"/>'s placeholders from <paramref name="replacements"/>,
+    /// drops the ones it has no value for, and cleans up what an empty one left behind.
+    /// </summary>
+    private static string Render(string template, IReadOnlyDictionary<string, string> replacements)
+    {
+        var result = template;
+        foreach (var (key, value) in replacements)
+        {
+            result = result.Replace($"{{{key}}}", value);
+        }
+
+        // Clean up any remaining unreplaced placeholders
+        result = UnreplacedPlaceholderPattern.Replace(result, "");
+
+        // A value can hold characters a name cannot ("Solo Leveling: Ragnarok"). They are
+        // replaced before the clean-up, so the " - " a colon becomes is tidied with the rest.
+        result = SanitizeFileName(result);
+
+        // Clean up what an empty placeholder left: "()", " - - ", a trailing " -", extra spaces
+        result = EmptyBracketsPattern.Replace(result, "");
+        result = ExtraWhitespacePattern.Replace(result, " ");
+        result = RepeatedSeparatorPattern.Replace(result, "");
+        return DanglingSeparatorPattern.Replace(result, "").Trim();
     }
 
     /// <summary>
@@ -294,15 +341,57 @@ public class ComicFileProcessor
         return char.IsWhiteSpace(rest[^1]) && rest.Any(char.IsLetterOrDigit) ? rest.TrimEnd() : title;
     }
 
+    /// <summary>
+    /// Replaces the characters a file or folder name cannot hold on Windows, macOS or Linux
+    /// with ones that read the same way, so "Solo Leveling: Ragnarok" is filed as
+    /// "Solo Leveling - Ragnarok" rather than "Solo Leveling_ Ragnarok".
+    /// </summary>
+    /// <remarks>
+    /// A colon followed by a space becomes " - "; any other colon, a slash, a backslash and
+    /// a pipe become "-"; a double quote becomes a single one; <c>? * &lt; &gt;</c> and
+    /// control characters are left out. A name that would be left with nothing but its
+    /// extension keeps an underscore for each character instead, so it still has a name.
+    /// </remarks>
     public static string SanitizeFileName(string fileName)
     {
-        var sanitized = fileName;
-        foreach (var invalidChar in CrossPlatformInvalidFileNameChars)
+        if (fileName.IndexOfAny(CrossPlatformInvalidFileNameChars) < 0)
         {
-            sanitized = sanitized.Replace(invalidChar, '_');
+            return fileName;
         }
 
-        return sanitized;
+        var builder = new StringBuilder(fileName.Length + 8);
+        foreach (var character in ColonBeforeSpacePattern.Replace(fileName, " - "))
+        {
+            if (Array.IndexOf(CrossPlatformInvalidFileNameChars, character) < 0)
+            {
+                builder.Append(character);
+                continue;
+            }
+
+            switch (character)
+            {
+                case ':' or '/' or '\\' or '|':
+                    builder.Append('-');
+                    break;
+                case '"':
+                    builder.Append('\'');
+                    break;
+            }
+        }
+
+        var sanitized = ExtraWhitespacePattern.Replace(builder.ToString(), " ");
+        if (Path.GetFileNameWithoutExtension(sanitized).Trim().Length > 0)
+        {
+            return sanitized;
+        }
+
+        var underscored = fileName;
+        foreach (var invalidChar in CrossPlatformInvalidFileNameChars)
+        {
+            underscored = underscored.Replace(invalidChar, '_');
+        }
+
+        return underscored;
     }
 
     /// <summary>
@@ -420,15 +509,23 @@ public class ComicFileProcessor
     /// Normalize series name from folder name
     /// Converted from Python's series normalization logic
     /// </summary>
+    /// <remarks>
+    /// An underscore is read back as the colon it stands for in folders named by other tools
+    /// (Suwayomi saves "Solo Leveling: Ragnarok" as "Solo Leveling_ Ragnarok"), and a capital
+    /// a title-caser put after an apostrophe is lowered (see <see cref="ApostropheCasing"/>).
+    /// </remarks>
     /// <param name="folderName">The folder name to normalize</param>
-    /// <param name="forComparison">If true, also applies comparison-specific transformations</param>
+    /// <param name="forComparison">
+    /// If true, also applies comparison-specific transformations: a curly apostrophe counts
+    /// as a straight one, so "Michael Turner’s Soulfire" matches "Michael Turner's Soulfire".
+    /// </param>
     public static string NormalizeSeriesName(string folderName, bool forComparison = false)
     {
-        var seriesName = folderName.Replace('_', ':');
-        
+        var seriesName = ApostropheCasing.Repair(folderName.Replace('_', ':'))!;
+
         if (forComparison)
         {
-            seriesName = seriesName.Replace("'", "\u0027");
+            seriesName = seriesName.Replace('’', '\'');
             seriesName = Regex.Replace(seriesName, @"\(\*\)|\[\*\]", "");
             seriesName = seriesName.Trim();
         }

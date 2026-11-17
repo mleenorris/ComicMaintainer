@@ -311,6 +311,40 @@ public sealed class SettingsServiceSaveAllTests : IDisposable
     }
 
     [Theory]
+    [InlineData("  {series} ({volume_year})  ", "{series} ({volume_year})")]
+    [InlineData("{publisher} - {series}", "{publisher} - {series}")]
+    // Empty turns folder moves off again.
+    [InlineData("   ", "")]
+    [InlineData("", "")]
+    public async Task UpdateSettingsAsync_SavesTheFolderFormatTrimmed(string format, string expected)
+    {
+        await _service.UpdateSettingsAsync(new SettingsUpdate { FolderFormat = format });
+
+        Assert.Equal(expected, SavedSection().GetProperty("FolderFormat").GetString());
+    }
+
+    [Fact]
+    public async Task UpdateSettingsAsync_FolderFormatLeftOut_IsNotWritten()
+    {
+        await _service.UpdateSettingsAsync(new SettingsUpdate { IssueNumberPadding = 3 });
+
+        Assert.False(SavedSection().TryGetProperty("FolderFormat", out _));
+    }
+
+    [Theory]
+    [InlineData("{publisher} ({volume_year})", "Folder format must contain {series}")]
+    [InlineData("{publisher}/{series}", "Folder format names one folder, so it cannot contain / or \\")]
+    [InlineData("{series}\\{volume_year}", "Folder format names one folder, so it cannot contain / or \\")]
+    public async Task UpdateSettingsAsync_InvalidFolderFormat_SavesNothing(string format, string reason)
+    {
+        var ex = await Assert.ThrowsAsync<SettingsValidationException>(
+            () => _service.UpdateSettingsAsync(EveryGroup() with { FolderFormat = format }));
+
+        Assert.Equal(reason, ex.Reason);
+        Assert.False(File.Exists(_settingsPath));
+    }
+
+    [Theory]
     [InlineData(true)]
     [InlineData(false)]
     public async Task UpdateSettingsAsync_SavesFillComicInfoFromProviders(bool enabled)

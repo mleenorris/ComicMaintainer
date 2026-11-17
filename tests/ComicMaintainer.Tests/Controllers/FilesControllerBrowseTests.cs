@@ -356,6 +356,8 @@ public sealed class FilesControllerBrowseTests
         Assert.Same(folders.Folders, Prop(ok.Value, "folders"));
         Assert.Equal("saga", Prop(ok.Value, "combine_group_key"));
         Assert.Equal(Path.Join(_root, "Saga B"), Prop(ok.Value, "suggested_destination_directory"));
+        // The series page offers to merge them.
+        Assert.Equal(true, Prop(ok.Value, "combinable"));
     }
 
     [Fact]
@@ -379,6 +381,7 @@ public sealed class FilesControllerBrowseTests
         Assert.Equal("saga", Prop(ok.Value, "id"));
         Assert.Null(Prop(ok.Value, "combine_group_key"));
         Assert.Null(Prop(ok.Value, "suggested_destination_directory"));
+        Assert.Equal(false, Prop(ok.Value, "combinable"));
     }
 
     // --------------------------------------------------------------- GetFileCounts

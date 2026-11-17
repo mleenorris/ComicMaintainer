@@ -255,10 +255,87 @@ public partial class ComicProcessorService
         // The file now holds its target name, so it is no longer a duplicate of another file.
         await ClearDuplicateFlagAsync(newPath, bookkeeping);
 
+        // A move into another series folder names the folders too, or the entry would read
+        // as a rename to the same name.
+        var oldFolder = Path.GetDirectoryName(oldPath);
+        var movedFolder = !string.Equals(oldFolder, Path.GetDirectoryName(newPath), StringComparison.Ordinal);
         await LogHistoryWithChangesAsync(newPath, "Rename", true, null,
-            Path.GetFileName(oldPath), Path.GetFileName(newPath), metadata, metadata, bookkeeping);
+            movedFolder ? WithFolderName(oldPath) : Path.GetFileName(oldPath),
+            movedFolder ? WithFolderName(newPath) : Path.GetFileName(newPath),
+            metadata, metadata, bookkeeping);
+
+        if (movedFolder)
+        {
+            RemoveFolderIfEmptied(oldFolder);
+        }
 
         _notifications.LibraryChanged();
+    }
+
+    /// <summary>"Folder/File.cbz": the name of <paramref name="path"/> with that of its folder.</summary>
+    private static string WithFolderName(string path) =>
+        $"{Path.GetFileName(Path.GetDirectoryName(path))}/{Path.GetFileName(path)}";
+
+    /// <summary>
+    /// Removes <paramref name="directory"/>, which a file just left for its series folder, when
+    /// nothing worth keeping is left in it. It uses the folder combine's clean-up
+    /// (<see cref="FolderCombineSourceCleaner"/>): only a folder holding nothing but disposable
+    /// entries (its cover image, its ComicInfo.xml, operating-system metadata) is removed,
+    /// never a link or one of the library's configured folders, and anything that appears
+    /// meanwhile keeps it. A folder that still holds a comic is left without a full check:
+    /// the other files of a series moved one by one leave it in turn.
+    /// </summary>
+    private void RemoveFolderIfEmptied(string? directory)
+    {
+        // Only a folder inside the watched folder is tidied, never the watched folder itself.
+        var settings = _settings;
+        if (string.IsNullOrEmpty(directory)
+            || string.IsNullOrWhiteSpace(settings.WatchedDirectory)
+            || !LibraryPathValidator.IsLexicallyWithin(directory, settings.WatchedDirectory)
+            || string.Equals(
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory)),
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(settings.WatchedDirectory)),
+                LibraryPathValidator.PathComparison))
+        {
+            return;
+        }
+
+        try
+        {
+            if (!Directory.Exists(directory) || Directory.EnumerateFiles(directory).Any(IsComicArchive))
+            {
+                return;
+            }
+
+            var protectedDirectories = new[]
+                {
+                    settings.WatchedDirectory,
+                    settings.DuplicateDirectory,
+                    settings.SuwayomiDownloadsDirectory,
+                    settings.SuwayomiImportDirectory
+                }
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(path => path!)
+                .ToList();
+            var cleanup = _libraryMutationLock.Execute(() => FolderCombineSourceCleaner.Remove(directory, protectedDirectories));
+            if (cleanup.Removable)
+            {
+                _logger.LogInformation("Removed the folder {Directory}: its files moved to their series folders",
+                    LoggingHelper.SanitizePathForLog(directory));
+            }
+            else
+            {
+                _logger.LogDebug("Kept the folder {Directory}: {Reason}",
+                    LoggingHelper.SanitizePathForLog(directory),
+                    LoggingHelper.SanitizeForLog(FolderCombineSourceCleaner.DescribeKeptFolder(cleanup)));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The file has moved; a folder that cannot be checked is simply kept.
+            _logger.LogDebug(ex, "Could not check the folder {Directory} after moving a file out of it",
+                LoggingHelper.SanitizePathForLog(directory));
+        }
     }
 
     /// <summary>
@@ -299,6 +376,11 @@ public partial class ComicProcessorService
     /// </summary>
     private string RenameOnDisk(SafeFileHandle? directoryHandle, string sourcePath, string targetPath)
     {
+        if (!string.Equals(Path.GetDirectoryName(sourcePath), Path.GetDirectoryName(targetPath), StringComparison.Ordinal))
+        {
+            return MoveToSeriesFolder(sourcePath, targetPath);
+        }
+
         if (!IsCaseOnlyRename(sourcePath, targetPath) || !File.Exists(targetPath))
         {
             return MoveFileInRenameDirectory(directoryHandle, sourcePath, targetPath);
@@ -331,6 +413,130 @@ public partial class ComicProcessorService
 
             throw;
         }
+    }
+
+    /// <summary>
+    /// Moves <paramref name="sourcePath"/> into the series folder <paramref name="targetPath"/>
+    /// is in (see <see cref="SeriesFolderFor"/>), creating the folder when it does not exist yet,
+    /// and returns the moved file's physical path. Like a rename, the move never replaces another
+    /// file: it throws instead. The library mutation lock is held throughout, so a folder combine
+    /// never removes the folder between its creation and the move.
+    /// </summary>
+    private string MoveToSeriesFolder(string sourcePath, string targetPath)
+    {
+        var targetDirectory = Path.GetDirectoryName(targetPath)
+            ?? throw new IOException("Cannot determine the target folder.");
+        return _libraryMutationLock.Execute(() =>
+        {
+            var created = !Directory.Exists(targetDirectory);
+            Directory.CreateDirectory(targetDirectory);
+            try
+            {
+                // The folder must be a real folder inside the library: a link put in its place
+                // would carry the file somewhere else.
+                if (!TryResolveAllowedPath(targetDirectory, out var resolvedDirectory)
+                    || !string.Equals(
+                        Path.TrimEndingDirectorySeparator(resolvedDirectory),
+                        Path.TrimEndingDirectorySeparator(targetDirectory),
+                        LibraryPathValidator.PathComparison))
+                {
+                    throw new IOException("The series folder is not a folder inside the library.");
+                }
+
+                File.Move(sourcePath, targetPath, overwrite: false);
+                return targetPath;
+            }
+            catch (Exception) when (created)
+            {
+                // Don't leave behind an empty folder made only for this file.
+                RemoveCreatedFolder(targetDirectory);
+                throw;
+            }
+        });
+    }
+
+    private void RemoveCreatedFolder(string directory)
+    {
+        try
+        {
+            // Not recursive: a file put in it meanwhile keeps it.
+            Directory.Delete(directory, recursive: false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "Could not remove the folder {Directory} after a failed move",
+                LoggingHelper.SanitizePathForLog(directory));
+        }
+    }
+
+    /// <summary>
+    /// The series folder, directly under the watched folder, that <paramref name="originalPath"/>
+    /// belongs in under <see cref="Configuration.AppSettings.FolderFormat"/>, or null to leave the
+    /// file in its folder: no folder format is set, the file is outside the watched folder or in
+    /// the duplicates folder, or the format renders no name (see
+    /// <see cref="ComicFileProcessor.FormatFolderName"/>).
+    /// </summary>
+    /// <remarks>
+    /// An existing folder whose name differs only in case is used as it is, so a file system
+    /// that ignores case does not see a move into the folder the file is already in, and one
+    /// that keeps case apart does not get a second folder for the series.
+    /// </remarks>
+    private string? SeriesFolderFor(ComicInfo comicInfo, string originalPath)
+    {
+        var settings = _settings;
+        if (string.IsNullOrWhiteSpace(settings.FolderFormat) || string.IsNullOrWhiteSpace(settings.WatchedDirectory))
+        {
+            return null;
+        }
+
+        // originalPath is a physical path, so the folder is placed under the watched folder's
+        // physical path too; GetAllowedLogicalPath maps the moved file back.
+        var root = LibraryPathValidator.ResolveRealPath(Path.GetFullPath(settings.WatchedDirectory));
+        if (!LibraryPathValidator.IsWithin(originalPath, root)
+            || (!string.IsNullOrWhiteSpace(settings.DuplicateDirectory)
+                && LibraryPathValidator.IsWithin(originalPath, settings.DuplicateDirectory)))
+        {
+            return null;
+        }
+
+        var folderName = ComicFileProcessor.FormatFolderName(settings.FolderFormat, comicInfo, Path.GetFileName(originalPath));
+        return folderName is null ? null : ExistingFolderNamed(root, folderName);
+    }
+
+    /// <summary>
+    /// The folder <paramref name="folderName"/> in <paramref name="root"/>: one of that exact
+    /// name, else one whose name differs only in case, else the path of a new one.
+    /// </summary>
+    private string ExistingFolderNamed(string root, string folderName)
+    {
+        try
+        {
+            string? differentCase = null;
+            foreach (var directory in Directory.EnumerateDirectories(root))
+            {
+                var name = Path.GetFileName(directory);
+                if (string.Equals(name, folderName, StringComparison.Ordinal))
+                {
+                    return directory;
+                }
+
+                if (differentCase is null && string.Equals(name, folderName, StringComparison.OrdinalIgnoreCase))
+                {
+                    differentCase = directory;
+                }
+            }
+
+            if (differentCase is not null)
+            {
+                return differentCase;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "Could not list the folders of {Directory}", LoggingHelper.SanitizePathForLog(root));
+        }
+
+        return Path.Join(root, folderName);
     }
 
     /// <summary>
@@ -434,7 +640,6 @@ public partial class ComicProcessorService
     {
         try
         {
-            var directory = Path.GetDirectoryName(originalPath) ?? _settings.WatchedDirectory;
             var extension = Path.GetExtension(originalPath);
 
             // Convert ComicMetadata to ComicInfo for use with ComicFileProcessor
@@ -445,6 +650,11 @@ public partial class ComicProcessorService
                 // In-memory only: the copy renders the name, the file's tags are untouched.
                 comicInfo.Volume = volume.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
+
+            // With a folder format the file goes to its series folder; without one it stays put.
+            var directory = SeriesFolderFor(comicInfo, originalPath)
+                ?? Path.GetDirectoryName(originalPath)
+                ?? _settings.WatchedDirectory;
 
             // An issue written as "Annual 1" is named by its number: the series names the Annual.
             var issue = AnnualIssue.IssueNumber(metadata.Issue);

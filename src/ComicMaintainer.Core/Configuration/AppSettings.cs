@@ -50,6 +50,15 @@ public class AppSettings
     private string _filenameFormat = DefaultFilenameFormat;
 
     /// <summary>
+    /// The series folder template, such as <c>{series} ({volume_year})</c>. When set, processing
+    /// and renaming move a file into the folder it renders, directly under
+    /// <see cref="WatchedDirectory"/>, so every series keeps one consistently named folder
+    /// (see <c>ComicFileProcessor.FormatFolderName</c> for the placeholders). Empty, the
+    /// default, leaves every file in the folder it is in.
+    /// </summary>
+    public string FolderFormat { get; set; } = string.Empty;
+
+    /// <summary>
     /// Number of digits the <c>{issue}</c> placeholder is zero-padded to, from 0 to
     /// <see cref="MaxIssueNumberPadding"/>. Filenames clamp configured values outside that range.
     /// </summary>

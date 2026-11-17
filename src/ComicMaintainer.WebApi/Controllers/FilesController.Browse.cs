@@ -269,6 +269,9 @@ public partial class FilesController
         // card.
         string? combineGroupKey = null;
         string? suggestedDestination = null;
+        // True only when the folder-combine service itself lists the folders as one group,
+        // not for the synthetic key: the series page then suggests merging them.
+        var combinable = false;
         if (result.Folders.Count >= 2)
         {
             try
@@ -283,6 +286,7 @@ public partial class FilesController
                 {
                     combineGroupKey = match.GroupKey;
                     suggestedDestination = match.SuggestedDestinationDirectory;
+                    combinable = true;
                 }
                 else
                 {
@@ -310,7 +314,8 @@ public partial class FilesController
             title = result.Title,
             folders = result.Folders,
             combine_group_key = combineGroupKey,
-            suggested_destination_directory = suggestedDestination
+            suggested_destination_directory = suggestedDestination,
+            combinable
         });
     }
 

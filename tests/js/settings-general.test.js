@@ -23,6 +23,7 @@ function formValues(page) {
     return {
         filenameFormat: value('filenameFormat'),
         currentFormat: text('currentFormat'),
+        folderFormat: value('folderFormat'),
         theme: value('themeSelect'),
         rename: checked('watcherEnableRenameCheckbox'),
         normalize: checked('watcherEnableNormalizeCheckbox'),
@@ -107,6 +108,7 @@ test('the settings page fills every group from GET /api/settings', async () => {
     assert.deepEqual(formValues(page), {
         filenameFormat: '{series} v{volume} #{issue}',
         currentFormat: '{series} v{volume} #{issue}',
+        folderFormat: '{series} ({volume_year})',
         theme: 'light',
         rename: true,
         normalize: false,
@@ -219,6 +221,7 @@ test('unset optional settings fall back to defaults and first-time hints', async
     const page = await bootSettings({
         settings: {
             filename_format: '',
+            folder_format: null,
             enable_external_series_metadata: false,
             comicvine_api_key_set: false,
             comicvine_base_url: '',
@@ -262,6 +265,7 @@ test('unset optional settings fall back to defaults and first-time hints', async
 
     const values = formValues(page);
     assert.equal(values.filenameFormat, '');
+    assert.equal(values.folderFormat, '', 'no folder format: files stay where they are');
     assert.equal(values.currentFormat, '{series} {format} {volume_label} - Chapter {issue}', 'the built-in default format is shown');
     assert.equal(values.comicVineApiKey, '');
     assert.equal(values.comicVineApiKeyHint,

@@ -287,6 +287,7 @@ showMessage('Default preferred language updated', 'success');
 
                 document.getElementById('filenameFormat').value = settingsData.filename_format || '';
                 document.getElementById('currentFormat').textContent = settingsData.filename_format || '{series} {format} {volume_label} - Chapter {issue}';
+                document.getElementById('folderFormat').value = settingsData.folder_format || '';
                 
                 // Load current theme
                 const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
@@ -1307,6 +1308,7 @@ errorEl.textContent = 'An error occurred. Please try again.';
         async function saveFilenameFormat() {
             if (!settingsLoaded || !userCapabilities.canAdminister) return;
             const format = document.getElementById('filenameFormat').value.trim();
+            const folderFormat = document.getElementById('folderFormat').value.trim();
             const logMaxSize = parseFloat(document.getElementById('logMaxSize').value);
             const issueNumberPadding = document.getElementById('issueNumberPadding').valueAsNumber;
             const dbCleanupInterval = parseInt(document.getElementById('dbCleanupInterval').value);
@@ -1363,6 +1365,10 @@ errorEl.textContent = 'An error occurred. Please try again.';
             // user is told which field to fix.
             const checks = [
                 [!format, 'Filename format cannot be empty'],
+                // Empty turns folder moves off; a format without {series} would
+                // put the whole library in a few folders.
+                [folderFormat && !folderFormat.includes('{series}'), 'Folder format must contain {series}'],
+                [/[\\/]/.test(folderFormat), 'Folder format names one folder, so it cannot contain / or \\'],
                 [isNaN(logMaxSize) || logMaxSize <= 0, 'Log max size must be a positive number'],
                 // The server keeps the size in bytes as a 32-bit integer.
                 [logMaxSize > SETTINGS_SERVER_LIMITS.logMaxSizeMB, `Log max size must be ${SETTINGS_SERVER_LIMITS.logMaxSizeMB} MB or less`],
@@ -1412,6 +1418,7 @@ errorEl.textContent = 'An error occurred. Please try again.';
             // value and a text field sent empty is cleared.
             const settingsUpdate = {
                 filenameFormat: format,
+                folderFormat,
                 logMaxMB: logMaxSize,
                 issueNumberPadding,
                 databaseCleanup: {

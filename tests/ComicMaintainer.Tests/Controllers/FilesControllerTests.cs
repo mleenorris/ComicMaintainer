@@ -2374,6 +2374,8 @@ public class FilesControllerTests
         var dest = destProp!.GetValue(okResult.Value) as string;
         // Highest file count wins as the default suggestion.
         Assert.Equal("/library/X1", dest);
+        // Not one of the combine service's groups: the series page shows no merge banner.
+        Assert.Equal(false, okResult.Value.GetType().GetProperty("combinable")!.GetValue(okResult.Value));
     }
 
     [Fact]

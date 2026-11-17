@@ -165,11 +165,11 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     public async Task ProcessFileAsync_TemplateWithItsOwnVolumePlaceholder_IsNotGivenASecondOne()
     {
         _settings.FilenameFormat = "{series} v{volume} #{issue}";
-        var path = WriteArchive("Green Lantern", "x.cbz", VolumeInfo("1990", "1"));
+        var path = WriteArchive("Green Lantern", "x.cbz", VolumeInfo("3", "1"));
 
         Assert.True(await _service.ProcessFileAsync(path));
 
-        Assert.True(File.Exists(Path.Join(_root, "Green Lantern", "Green Lantern v1990 #0001.cbz")));
+        Assert.True(File.Exists(Path.Join(_root, "Green Lantern", "Green Lantern v3 #0001.cbz")));
     }
 
     [Fact]
@@ -217,17 +217,35 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
         _fileStore.Verify(f => f.SetVolumeYearAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    [Fact]
-    public async Task ProcessFileAsync_YearInVolume_IsKeptAndAlsoStoredAsTheStartYear()
+    [Theory]
+    // <Volume> holds only the volume number: a start year there moves to the database, and the
+    // element is removed when no name gives the number...
+    [InlineData("1990", "x.cbz", null, "Green Lantern (1990) - Chapter 0001.cbz")]
+    [InlineData("(1990)", "x.cbz", null, "Green Lantern (1990) - Chapter 0001.cbz")]
+    // ...or replaced by the number a name gives.
+    [InlineData("1990", "Green Lantern v3 001.cbz", "3", "Green Lantern Vol. 3 - Chapter 0001.cbz")]
+    public async Task ProcessFileAsync_YearInVolume_MovesToTheStartYear_LeavingOnlyANumber(
+        string volume, string fileName, string? expectedVolume, string expectedFileName)
     {
-        var path = WriteArchive("Green Lantern", "x.cbz", VolumeInfo("1990", "1"));
+        var path = WriteArchive("Green Lantern", fileName, VolumeInfo(volume, "1"));
 
         Assert.True(await _service.ProcessFileAsync(path));
 
         var archive = Directory.GetFiles(Path.Join(_root, "Green Lantern")).Single();
-        Assert.Equal("Green Lantern (1990) - Chapter 0001.cbz", Path.GetFileName(archive));
-        Assert.Equal("1990", ReadComicInfo(archive).Element("Volume")?.Value);
+        Assert.Equal(expectedFileName, Path.GetFileName(archive));
+        Assert.Equal(expectedVolume, ReadComicInfo(archive).Element("Volume")?.Value);
         _fileStore.Verify(f => f.SetVolumeYearAsync(path, 1990, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_VolumeNumberAlreadySet_IsKept()
+    {
+        var path = WriteArchive("Green Lantern", "Green Lantern v3 001.cbz", VolumeInfo("2", "1"));
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var archive = Directory.GetFiles(Path.Join(_root, "Green Lantern")).Single();
+        Assert.Equal("2", ReadComicInfo(archive).Element("Volume")?.Value);
     }
 
     [Fact]

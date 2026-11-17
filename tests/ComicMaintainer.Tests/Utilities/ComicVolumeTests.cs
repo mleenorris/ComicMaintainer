@@ -12,6 +12,8 @@ public class ComicVolumeTests
     [InlineData("volume 12", 12, false)]
     [InlineData("1990", 1990, true)]
     [InlineData(" 2005 ", 2005, true)]
+    [InlineData("(2015)", 2015, true)]
+    [InlineData("[2015]", 2015, true)]
     public void FromTag_ReadsNumbersAndStartYears(string tag, int value, bool isYear)
     {
         Assert.Equal(new ComicVolume(value, isYear), ComicVolume.FromTag(tag));
@@ -25,6 +27,7 @@ public class ComicVolumeTests
     [InlineData("1500")]
     [InlineData("Annual")]
     [InlineData("2.5")]
+    [InlineData("(2)")]
     public void FromTag_IgnoresUnsetAndImplausibleValues(string? tag)
     {
         Assert.Null(ComicVolume.FromTag(tag));

@@ -56,8 +56,10 @@ archive, a failed write or no series, counts as failed with a reason.
 Normalize writes the series, title and number. It keeps a real chapter title, and only fills a missing title or fixes an
 old generated `Chapter N`. Everything else in `ComicInfo.xml` stays as it was, except for these fills:
 
-- **Volume number.** An empty `<Volume>` gets the volume number when the series, file or folder name gives one: a
-  `Vol. 2` or `v2` token gives `2`. A volume that is already set is never replaced.
+- **Volume number.** `<Volume>` holds only the volume number. An empty one gets the number when the series, file or
+  folder name gives one: a `Vol. 2` or `v2` token gives `2`. One that holds a year instead (`1990` or `(1990)`, as
+  ComicTagger and older versions wrote it) has the year moved to the start year below, and gets the number from the
+  names or is removed. A number that is already set is never replaced.
 - **Volume start year.** ComicInfo has no element for the year a volume started, so ComicMaintainer keeps it in its
   own database. `The Astonishing X-Men (1995)` started in 1995 and `(1999)` is volume 2's start. The year is read from
   a `<Volume>` that holds one, as ComicTagger can write it, or from the series, file or folder name. It is never written

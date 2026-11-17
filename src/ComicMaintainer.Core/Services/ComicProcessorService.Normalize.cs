@@ -233,7 +233,7 @@ public partial class ComicProcessorService
         }
 
         // A volume or cover year named by the series, file, title or folder name still has to be written.
-        if (VolumeToFill(metadata, filePath) is not null
+        if (VolumeToWrite(metadata, filePath) is not null
             || VolumeYearToFill(metadata, filePath) is not null
             || YearToFill(metadata, filePath) is not null)
         {
@@ -448,10 +448,10 @@ public partial class ComicProcessorService
 
         // Read from the series as the file had it: resolving the series above may have
         // dropped its "(1995)".
-        if (VolumeToFill(metadata, filePath) is { } volume)
+        if (VolumeToWrite(metadata, filePath) is { } volume)
         {
-            _logger.LogDebug("Setting the volume number from the series, file, title or folder name: {Volume}", LoggingHelper.SanitizeForLog(volume));
-            normalizedMetadata.Volume = volume;
+            _logger.LogDebug("Setting the volume number from the series, file, title or folder name: {Volume}", LoggingHelper.SanitizeForLog(volume.Number ?? "(none)"));
+            normalizedMetadata.Volume = volume.Number;
         }
 
         if (VolumeYearToFill(metadata, filePath) is { } volumeYear)
@@ -544,16 +544,25 @@ public partial class ComicProcessorService
     /// </summary>
     private const int UnknownYear = 1970;
 
+    /// <summary>The <c>&lt;Volume&gt;</c> normalize writes: a volume number, or null to remove the element.</summary>
+    private readonly record struct VolumeWrite(string? Number);
+
     /// <summary>
-    /// The volume number normalize writes into an empty <c>&lt;Volume&gt;</c>, or null: the first
-    /// number the issue's names give (<c>Saga Vol. 2</c>, <c>All New X-Men v2 008</c>; see
-    /// <see cref="VolumesFromNames"/>). <c>&lt;Volume&gt;</c> holds the volume number, as Komga and
-    /// Kavita read it; a start year goes to <see cref="VolumeYearToFill"/> instead. A volume already
-    /// set is never replaced: only a missing one, or ComicInfo's "unset" (-1 or 0), is filled.
+    /// The <c>&lt;Volume&gt;</c> normalize writes, or null to leave it as it is. <c>&lt;Volume&gt;</c>
+    /// holds only the volume number, as Komga and Kavita read it, so:
+    /// <list type="bullet">
+    /// <item>an empty one, or ComicInfo's "unset" (-1 or 0), gets the first number the issue's names
+    /// give (<c>Saga Vol. 2</c>, <c>All New X-Men v2 008</c>; see <see cref="VolumesFromNames"/>);</item>
+    /// <item>one holding a start year (<c>1990</c>, <c>(1990)</c>), as ComicTagger and older versions
+    /// wrote it, gets that number too, or is removed when no name gives one. The year itself is kept
+    /// in the database (see <see cref="VolumeYearToFill"/>);</item>
+    /// <item>a number already set is never replaced.</item>
+    /// </list>
     /// </summary>
-    private static string? VolumeToFill(ComicMetadata metadata, string filePath)
+    private static VolumeWrite? VolumeToWrite(ComicMetadata metadata, string filePath)
     {
-        if (!IsVolumeUnset(metadata.Volume))
+        var holdsYear = ComicVolume.FromTag(metadata.Volume) is { IsYear: true };
+        if (!holdsYear && !IsVolumeUnset(metadata.Volume))
         {
             return null;
         }
@@ -562,7 +571,12 @@ public partial class ComicProcessorService
             .Where(volume => !volume.IsYear)
             .Cast<ComicVolume?>()
             .FirstOrDefault();
-        return number?.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (number is { } found)
+        {
+            return new VolumeWrite(found.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        return holdsYear ? new VolumeWrite(null) : null;
     }
 
     /// <summary>
@@ -605,7 +619,7 @@ public partial class ComicProcessorService
     /// <summary>
     /// The ComicInfo.xml elements a normalize write changes: the ones normalize owns, plus
     /// <c>&lt;Volume&gt;</c>, <c>&lt;Year&gt;</c> and <c>&lt;Format&gt;</c> when normalize filled them
-    /// (see <see cref="VolumeToFill"/>, <see cref="YearToFill"/> and <see cref="FormatToFill"/>), so
+    /// (see <see cref="VolumeToWrite"/>, <see cref="YearToFill"/> and <see cref="FormatToFill"/>), so
     /// a file whose volume, year and format were not touched keeps those elements exactly as they were.
     /// </summary>
     private static ComicMetadataFieldFlags NormalizeWriteFields(ComicMetadata before, ComicMetadata normalized)

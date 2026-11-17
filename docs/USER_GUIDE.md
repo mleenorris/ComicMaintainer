@@ -58,7 +58,9 @@ old generated `Chapter N`. It also fills an empty `<Volume>` when the series, fi
 example, `The Astonishing X-Men (1995)` gets `1995`, the year that volume started, and `(1999)` gets `1999`. A
 `Vol. 2` or `v2` token gives `2`. A volume that is already set is never replaced. The volume's start year never goes
 into `<Year>`, but an empty `<Year>` gets the issue's cover year: a year in brackets after the issue number, as in
-`Saga 001 (2012)`. Everything else in `ComicInfo.xml` stays as it was.
+`Saga 001 (2012)`. A `<Year>` of 1970 counts as empty: some downloaders write it when the date is unknown, so the
+cover year replaces it, and it is kept only when no cover year is found. Everything else in `ComicInfo.xml` stays as it
+was.
 
 A file renamed before this version may have lost its volume from its name. If its `<Title>` still holds the old file
 name, such as `All New X-Men v2 008 (2016)`, the volume and cover year are read from there. A real story title is never

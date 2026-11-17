@@ -252,6 +252,31 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessFileAsync_UnknownYear1970_IsReplacedByTheCoverYearInTheTitle()
+    {
+        var path = WriteArchive("All-New X-Men", "All-New X-Men - Chapter 0009.cbz",
+            "<ComicInfo><Series>All-New X-Men</Series><Number>9</Number><Title>All New X-Men v2 009 (2016)</Title><Year>1970</Year></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var archive = Directory.GetFiles(Path.Join(_root, "All-New X-Men")).Single();
+        Assert.Equal("2016", ReadComicInfo(archive).Element("Year")?.Value);
+    }
+
+    [Fact]
+    public async Task Normalize_UnknownYear1970_IsKeptWhenNoNameGivesACoverYear()
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("Saga", "Saga - Chapter 0001.cbz",
+            "<ComicInfo><Series>Saga</Series><Number>1</Number><Title>Chapter 1</Title><Year>1970</Year></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        Assert.Equal("1970", ReadComicInfo(path).Element("Year")?.Value);
+        Assert.Equal(path, Directory.GetFiles(Path.Join(_root, "Saga")).Single());
+    }
+
+    [Fact]
     public async Task ProcessFileAsync_RenameOnly_StillNamesTheVolumeFromTheTitle()
     {
         _settings.WatcherEnableNormalize = false;
@@ -283,6 +308,8 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     // Filled only when unset; a set year is kept even when the name says otherwise.
     [InlineData("", "2012")]
     [InlineData("<Year>2013</Year>", "2013")]
+    // 1970, the "date unknown" year some downloaders write, counts as unset.
+    [InlineData("<Year>1970</Year>", "2012")]
     public async Task Normalize_CoverYearInTheFileName_FillsOnlyAnEmptyYear(string yearElement, string expected)
     {
         _settings.WatcherEnableRename = false;

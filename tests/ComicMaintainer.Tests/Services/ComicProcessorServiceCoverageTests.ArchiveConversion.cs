@@ -663,15 +663,18 @@ public partial class ComicProcessorServiceCoverageTests
     }
 
     [Fact]
-    public async Task GetMetadataAsync_Cbz_IsNeverOverlaidWithStoredValues()
+    public async Task GetMetadataAsync_Cbz_IsNeverOverlaidWithStoredEdits_OnlyWithTheVolumeStartYear()
     {
         var service = CreateService();
         var cbz = WriteCbz("Series/book.cbz", Xml("Archive Series", "3", null));
         _fileStore.Setup(f => f.GetFileAsync(cbz, It.IsAny<CancellationToken>())).ReturnsAsync(PendingEdit(
-            cbz, new ComicMetadata { Series = "Edited Series" }, ComicMetadataFieldFlags.Series));
+            cbz, new ComicMetadata { Series = "Edited Series", VolumeYear = 2016 }, ComicMetadataFieldFlags.Series));
 
-        Assert.Equal("Archive Series", (await service.GetMetadataAsync(cbz))!.Series);
-        _fileStore.Verify(f => f.GetFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        var metadata = (await service.GetMetadataAsync(cbz))!;
+
+        Assert.Equal("Archive Series", metadata.Series);
+        Assert.Equal(2016, metadata.VolumeYear);
+        _fileStore.Verify(f => f.GetFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

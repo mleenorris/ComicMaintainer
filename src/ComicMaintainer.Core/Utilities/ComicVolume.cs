@@ -170,6 +170,10 @@ public readonly partial record struct ComicVolume(int Value, bool IsYear)
         return value is >= 1 and <= MaxVolumeNumber ? new ComicVolume(value, IsYear: false) : null;
     }
 
+    /// <summary>A start-year volume for <paramref name="year"/>; null outside 1900-2199.</summary>
+    public static ComicVolume? FromYear(int year)
+        => year is >= MinYear and <= MaxYear ? new ComicVolume(year, IsYear: true) : null;
+
     private static ComicVolume? FromYear(string digits)
         => int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var year)
            && year is >= MinYear and <= MaxYear

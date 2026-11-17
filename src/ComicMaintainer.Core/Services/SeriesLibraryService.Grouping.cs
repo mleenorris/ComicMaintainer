@@ -399,7 +399,8 @@ public partial class SeriesLibraryService
                 Normalized = file.IsNormalized,
                 Duplicate = file.IsDuplicate,
                 Read = bakeReadState && file.IsRead,
-                Format = IssueFormat.Of(metadata.Format, metadata.Series, metadata.Issue, file.FileName, metadata.Title)
+                Format = IssueFormat.Of(metadata.Format, metadata.Series, metadata.Issue, file.FileName, metadata.Title),
+                VolumeYear = metadata.VolumeYear
             });
         }
 
@@ -417,6 +418,7 @@ public partial class SeriesLibraryService
         var ownerByFilePath = new Dictionary<string, SeriesAccumulator>(StringComparer.Ordinal);
         foreach (var accumulator in collapsed.Values)
         {
+            LinkVolumeNumbersAndYears(accumulator.Issues);
             accumulator.SortedIssues = SortIssues(accumulator.Issues);
             foreach (var issue in accumulator.Issues.Where(issue => !string.IsNullOrEmpty(issue.FilePath)))
             {

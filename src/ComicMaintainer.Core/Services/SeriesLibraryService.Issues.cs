@@ -221,7 +221,10 @@ public partial class SeriesLibraryService
                 Normalized = issue.Normalized,
                 Duplicate = issue.Duplicate,
                 Read = issue.Read,
-                Format = issue.Format
+                Format = issue.Format,
+                VolumeYear = issue.VolumeYear,
+                LinkedVolume = issue.LinkedVolume,
+                LinkedVolumeYear = issue.LinkedVolumeYear
             };
         }
 
@@ -285,6 +288,60 @@ public partial class SeriesLibraryService
     internal static IReadOnlyList<VolumeNumbering.VolumeGroup<SeriesIssueDto>>? RestartingVolumes(
         IEnumerable<SeriesIssueDto> issues)
         => VolumeNumbering.SeparateRuns(issues, issue => issue.VolumeInfo, ResolveIssueNumber, issue => issue.Format);
+
+    /// <summary>
+    /// Links the volume numbers and start years the issues of one series name. The volume number
+    /// is in ComicInfo and the start year in the database, and not every issue has both: when
+    /// one issue names volume 2 with start year 2016, an issue that names only 2016 is listed as
+    /// volume 2, and one that names only volume 2 gets 2016. A year or number linked to more than
+    /// one counterpart is left alone.
+    /// </summary>
+    internal static void LinkVolumeNumbersAndYears(IEnumerable<SeriesIssueDto> issues)
+    {
+        var list = issues as IReadOnlyCollection<SeriesIssueDto> ?? issues.ToList();
+        var numbersByYear = new Dictionary<int, HashSet<int>>();
+        var yearsByNumber = new Dictionary<int, HashSet<int>>();
+        foreach (var issue in list)
+        {
+            issue.LinkedVolume = null;
+            issue.LinkedVolumeYear = null;
+            if (issue.OwnVolume is { IsYear: false } number && issue.VolumeYear is { } year)
+            {
+                Add(numbersByYear, year, number.Value);
+                Add(yearsByNumber, number.Value, year);
+            }
+        }
+
+        if (numbersByYear.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var issue in list)
+        {
+            switch (issue.OwnVolume)
+            {
+                case { IsYear: true } own when numbersByYear.TryGetValue(own.Value, out var numbers) && numbers.Count == 1:
+                    issue.LinkedVolume = new ComicVolume(numbers.Single(), IsYear: false);
+                    issue.LinkedVolumeYear = own.Value;
+                    break;
+                case { IsYear: false } own when issue.VolumeYear is null
+                                                && yearsByNumber.TryGetValue(own.Value, out var years) && years.Count == 1:
+                    issue.LinkedVolumeYear = years.Single();
+                    break;
+            }
+        }
+
+        static void Add(Dictionary<int, HashSet<int>> map, int key, int value)
+        {
+            if (!map.TryGetValue(key, out var set))
+            {
+                map[key] = set = [];
+            }
+
+            set.Add(value);
+        }
+    }
 
     private static string ExtractIssueSortKey(string? issue)
         => string.IsNullOrWhiteSpace(issue) ? "~" : issue;

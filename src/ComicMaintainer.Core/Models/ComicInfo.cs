@@ -24,6 +24,13 @@ public class ComicInfo
     [XmlElement("Volume")]
     public string? Volume { get; set; }
 
+    /// <summary>
+    /// The year the volume started, which the application keeps outside ComicInfo.xml (see
+    /// <see cref="ComicMetadata.VolumeYear"/>). Never serialized.
+    /// </summary>
+    [XmlIgnore]
+    public int? VolumeYear { get; set; }
+
     [XmlElement("AlternateSeries")]
     public string? AlternateSeries { get; set; }
 
@@ -159,6 +166,7 @@ public class ComicInfo
             Year = metadata.Year,
             Summary = metadata.Summary,
             Format = metadata.Format,
+            VolumeYear = metadata.VolumeYear,
             Writer = metadata.Authors.FirstOrDefault()
         };
     }

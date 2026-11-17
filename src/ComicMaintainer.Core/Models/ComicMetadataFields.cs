@@ -19,7 +19,8 @@ public static class ComicMetadataFields
         ComicMetadataFieldFlags.Summary |
         ComicMetadataFieldFlags.Authors |
         ComicMetadataFieldFlags.Tags |
-        ComicMetadataFieldFlags.Format;
+        ComicMetadataFieldFlags.Format |
+        ComicMetadataFieldFlags.VolumeYear;
 
     /// <summary>
     /// The fields <paramref name="metadata"/> carries a value for: non-null strings and year,
@@ -40,6 +41,7 @@ public static class ComicMetadataFields
         if (metadata.Authors.Count > 0) flags |= ComicMetadataFieldFlags.Authors;
         if (metadata.Tags.Count > 0) flags |= ComicMetadataFieldFlags.Tags;
         if (metadata.Format is not null) flags |= ComicMetadataFieldFlags.Format;
+        if (metadata.VolumeYear.HasValue) flags |= ComicMetadataFieldFlags.VolumeYear;
         return flags;
     }
 
@@ -62,6 +64,7 @@ public static class ComicMetadataFields
             "authors" or "writer" or "writers" => ComicMetadataFieldFlags.Authors,
             "tags" => ComicMetadataFieldFlags.Tags,
             "format" => ComicMetadataFieldFlags.Format,
+            "volume_year" or "volumeyear" => ComicMetadataFieldFlags.VolumeYear,
             _ => ComicMetadataFieldFlags.None
         };
     }
@@ -109,5 +112,6 @@ public static class ComicMetadataFields
         if (fields.HasFlag(ComicMetadataFieldFlags.Authors)) target.Authors = new List<string>(source.Authors);
         if (fields.HasFlag(ComicMetadataFieldFlags.Tags)) target.Tags = new List<string>(source.Tags);
         if (fields.HasFlag(ComicMetadataFieldFlags.Format)) target.Format = source.Format;
+        if (fields.HasFlag(ComicMetadataFieldFlags.VolumeYear)) target.VolumeYear = source.VolumeYear;
     }
 }

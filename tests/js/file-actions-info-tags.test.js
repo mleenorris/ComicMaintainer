@@ -34,6 +34,7 @@ function comicMetadata(overrides = {}) {
         title: 'Chapter One',
         issue: '1',
         volume: '2012',
+        volumeYear: 2012,
         format: null,
         publisher: 'Image',
         year: 2012,
@@ -166,8 +167,8 @@ test('View/Edit loads the issue tags into the editor', async t => {
     assert.equal(page.$('#modalTitle').textContent, `Edit Tags - ${FIRST}`);
     // The Writer input shows the file's authors, which the server returns as "authors".
     assert.deepEqual(
-        ['title', 'series', 'issue', 'volume', 'format', 'publisher', 'year', 'writer', 'summary'].map(id => page.$(`#${id}`).value),
-        ['Chapter One', 'Saga', '1', '2012', '', 'Image', '2012', 'Brian K. Vaughan', 'Alana and Marko flee.']
+        ['title', 'series', 'issue', 'volume', 'volume_year', 'format', 'publisher', 'year', 'writer', 'summary'].map(id => page.$(`#${id}`).value),
+        ['Chapter One', 'Saga', '1', '2012', '2012', '', 'Image', '2012', 'Brian K. Vaughan', 'Alana and Marko flee.']
     );
     // There are no inputs for tags the server does not model.
     assert.equal(page.$('#month'), null);
@@ -249,6 +250,7 @@ test('Save sends the edited tags as an update-metadata job', async t => {
     await page.waitFor(() => isModalOpen(page, 'tagModal'));
     page.input('#title', 'The Will');
     page.input('#format', 'Annual');
+    page.input('#volume_year', ' 2013 ');
     page.input('#year', '2013 (reprint)');
     page.input('#publisher', '   ');
     page.click('#tagModal .modal-footer .btn-primary');
@@ -261,8 +263,8 @@ test('Save sends the edited tags as an update-metadata job', async t => {
     // alone; the emptied Publisher is sent as null to remove it, and Year as a number.
     assert.deepEqual(call.body, {
         Files: [FIRST],
-        Metadata: { Title: 'The Will', Format: 'Annual', Publisher: null, Year: 2013 },
-        Fields: ['title', 'format', 'publisher', 'year']
+        Metadata: { Title: 'The Will', VolumeYear: 2013, Format: 'Annual', Publisher: null, Year: 2013 },
+        Fields: ['title', 'volumeYear', 'format', 'publisher', 'year']
     });
     assert.deepEqual(messageTexts(page, 'info'), ['Started updating metadata for file in background']);
     assert.equal(page.$('#progressTitle').textContent, 'Updating Metadata...');
@@ -422,6 +424,7 @@ test('Update on a selection opens the batch editor and sends the filled tags', a
     page.input('#batch_series', 'Saga Deluxe');
     page.input('#batch_volume', ' 2 ');
     page.input('#batch_format', 'Special');
+    page.input('#batch_volume_year', 'unknown');
     page.input('#batch_year', '2014');
     page.input('#batch_publisher', ' ');
     page.click('#batchModal .modal-footer .btn-primary');

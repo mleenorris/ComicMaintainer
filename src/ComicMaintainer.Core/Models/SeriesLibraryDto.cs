@@ -59,11 +59,46 @@ public class SeriesIssueDto
     public bool Annual => Format == Utilities.IssueFormat.Annual;
 
     /// <summary>
-    /// The issue's volume, from its <see cref="Volume"/> tag or else its file name (see
-    /// <see cref="Utilities.ComicVolume.Resolve"/>); null when neither names one.
+    /// The year the issue's volume started, as the application stores it (see
+    /// <see cref="ComicMetadata.VolumeYear"/>); null when not stored.
+    /// </summary>
+    [JsonPropertyName("volume_year")]
+    public int? VolumeYear { get; set; }
+
+    /// <summary>
+    /// The volume number another issue of the series links to this issue's start year (see
+    /// <c>SeriesLibraryService.LinkVolumeNumbersAndYears</c>), when this issue names only the year.
     /// </summary>
     [JsonIgnore]
-    public Utilities.ComicVolume? VolumeInfo => Utilities.ComicVolume.Resolve(Volume, seriesName: null, FileName);
+    public Utilities.ComicVolume? LinkedVolume { get; set; }
+
+    /// <summary>
+    /// The start year another issue of the series links to this issue's volume number, when
+    /// this issue names only the number.
+    /// </summary>
+    [JsonIgnore]
+    public int? LinkedVolumeYear { get; set; }
+
+    /// <summary>
+    /// The volume the issue itself names: its <see cref="Volume"/> tag or else its file name (see
+    /// <see cref="Utilities.ComicVolume.Resolve"/>), else its stored <see cref="VolumeYear"/>.
+    /// </summary>
+    [JsonIgnore]
+    public Utilities.ComicVolume? OwnVolume
+        => Utilities.ComicVolume.Resolve(Volume, seriesName: null, FileName)
+           ?? (VolumeYear is { } year ? Utilities.ComicVolume.FromYear(year) : null);
+
+    /// <summary>
+    /// The issue's volume: the number when it, or another issue of the same volume, names one,
+    /// else the start year; null when unknown.
+    /// </summary>
+    [JsonIgnore]
+    public Utilities.ComicVolume? VolumeInfo => LinkedVolume ?? OwnVolume;
+
+    /// <summary>The year the issue's volume started, when known; null otherwise.</summary>
+    [JsonIgnore]
+    public int? VolumeStartYear
+        => VolumeYear ?? (OwnVolume is { IsYear: true } own ? own.Value : LinkedVolumeYear);
 
     /// <summary>
     /// Identity of the issue's volume (<c>y1990</c>, <c>v2</c>), so the series page can show
@@ -72,9 +107,14 @@ public class SeriesIssueDto
     [JsonPropertyName("volume_key")]
     public string? VolumeKey => VolumeInfo?.Key;
 
-    /// <summary>The issue's volume as the series page names it (<c>1990</c>, <c>Vol. 2</c>); null when unknown.</summary>
+    /// <summary>
+    /// The issue's volume as the series page names it: <c>Vol. 2 (2016)</c> when both the number
+    /// and the start year are known, else <c>Vol. 2</c> or <c>1990</c>; null when unknown.
+    /// </summary>
     [JsonPropertyName("volume_label")]
-    public string? VolumeLabel => VolumeInfo?.DisplayName;
+    public string? VolumeLabel => VolumeInfo is { IsYear: false } number && VolumeStartYear is { } year
+        ? number.DisplayName + " (" + year.ToString(System.Globalization.CultureInfo.InvariantCulture) + ")"
+        : VolumeInfo?.DisplayName;
 
     /// <summary>
     /// A field-for-field copy. The series library shares one instance per issue between

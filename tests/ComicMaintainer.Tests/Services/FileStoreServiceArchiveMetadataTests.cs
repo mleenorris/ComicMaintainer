@@ -276,6 +276,29 @@ public sealed class FileStoreServiceArchiveMetadataTests : IAsyncLifetime
         Assert.Equal(new[] { "Favourite" }, inMemory.Tags);
     }
 
+    [Fact]
+    public async Task SetVolumeYearAsync_IsKeptWhenTheArchiveIsRecordedAgain()
+    {
+        var path = await TrackAsync("Saga/Saga 001.cbz");
+
+        Assert.True(await _store.SetVolumeYearAsync(path, 2012));
+        Assert.True(await _store.SetVolumeYearAsync(path, 2012));
+        await _store.RecordArchiveMetadataAsync(path, Archive("Saga", "1", "Chapter One"));
+
+        Assert.Equal(2012, (await RowAsync(path)).Metadata!.VolumeYear);
+        Assert.Equal(2012, (await _store.GetFileAsync(path))!.Metadata!.VolumeYear);
+
+        Assert.True(await _store.SetVolumeYearAsync(path, null));
+        Assert.Null((await RowAsync(path)).Metadata!.VolumeYear);
+        Assert.Equal("Saga", (await RowAsync(path)).Metadata!.Series);
+    }
+
+    [Fact]
+    public async Task SetVolumeYearAsync_UntrackedFile_IsFalse()
+    {
+        Assert.False(await _store.SetVolumeYearAsync($"{Library}/Saga/missing.cbz", 2012));
+    }
+
     private static ComicMetadata Archive(string series, string issue, string title) => new()
     {
         Series = series,

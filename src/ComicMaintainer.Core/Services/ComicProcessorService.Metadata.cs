@@ -82,9 +82,19 @@ public partial class ComicProcessorService
                     Issue = IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(fallbackFilePath))
                 };
 
-            return new ArchiveMetadataRead(ComicFileExtensions.IsWritableArchive(resolvedPath)
+            if (metadata is null)
+            {
+                return default;
+            }
+
+            // One look at the stored record: a CBR, RAR or ZIP shows the edits kept in the
+            // database, and every file shows its volume's start year, which only the database keeps.
+            var tracked = await GetTrackedFileAsync(fallbackFilePath, cancellationToken);
+            var effective = ComicFileExtensions.IsWritableArchive(resolvedPath)
                 ? metadata
-                : await ApplyPendingDatabaseEditAsync(fallbackFilePath, metadata, cancellationToken));
+                : ApplyPendingDatabaseEdit(metadata, PendingEditOf(tracked));
+            effective.VolumeYear = tracked?.Metadata?.VolumeYear;
+            return new ArchiveMetadataRead(effective);
         }
         catch (ArchiveLimitExceededException ex)
         {
@@ -164,14 +174,14 @@ public partial class ComicProcessorService
     /// turned off does), otherwise null. Failures to read the store count as no pending edit.
     /// </summary>
     private async Task<ComicFile?> GetPendingDatabaseEditAsync(string filePath, CancellationToken cancellationToken)
+        => PendingEditOf(await GetTrackedFileAsync(filePath, cancellationToken));
+
+    /// <summary>The tracked file at <paramref name="filePath"/>, or null; failures to read the store count as untracked.</summary>
+    private async Task<ComicFile?> GetTrackedFileAsync(string filePath, CancellationToken cancellationToken)
     {
         try
         {
-            var tracked = await _fileStore.GetFileAsync(filePath, cancellationToken);
-            return tracked is { Metadata: { IsUserEdited: true, UserLockedFieldsMask: not 0 } } &&
-                   tracked.MetadataVersion > tracked.WrittenMetadataVersion
-                ? tracked
-                : null;
+            return await _fileStore.GetFileAsync(filePath, cancellationToken);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
         {
@@ -180,22 +190,20 @@ public partial class ComicProcessorService
         }
     }
 
-    /// <summary>
-    /// Returns <paramref name="metadata"/> with the fields of pending user edits stored in the
-    /// database (see <see cref="GetPendingDatabaseEditAsync"/>) put over the archive's values, so
-    /// an edit kept in the database is what the file shows.
-    /// </summary>
-    private async Task<ComicMetadata?> ApplyPendingDatabaseEditAsync(
-        string filePath,
-        ComicMetadata? metadata,
-        CancellationToken cancellationToken)
-    {
-        if (metadata is null)
-        {
-            return null;
-        }
+    /// <summary><paramref name="tracked"/> when it holds user edits not yet written into its archive, otherwise null.</summary>
+    private static ComicFile? PendingEditOf(ComicFile? tracked)
+        => tracked is { Metadata: { IsUserEdited: true, UserLockedFieldsMask: not 0 } } &&
+           tracked.MetadataVersion > tracked.WrittenMetadataVersion
+            ? tracked
+            : null;
 
-        var pending = await GetPendingDatabaseEditAsync(filePath, cancellationToken);
+    /// <summary>
+    /// Returns <paramref name="metadata"/> with the fields of the <paramref name="pending"/> user
+    /// edits stored in the database (see <see cref="PendingEditOf"/>) put over the archive's
+    /// values, so an edit kept in the database is what the file shows.
+    /// </summary>
+    private static ComicMetadata ApplyPendingDatabaseEdit(ComicMetadata metadata, ComicFile? pending)
+    {
         if (pending?.Metadata is not { } stored)
         {
             return metadata;
@@ -294,6 +302,14 @@ public partial class ComicProcessorService
                     "Cannot update metadata: file is not a supported comic archive: {FilePath}",
                     LoggingHelper.SanitizePathForLog(filePath));
                 return MetadataWriteResult.Failed(filePath);
+            }
+
+            // The volume's start year lives in the database only: store it, and write the rest.
+            if (fields.HasFlag(ComicMetadataFieldFlags.VolumeYear))
+            {
+                await _fileStore.SetVolumeYearAsync(filePath, metadata.VolumeYear, cancellationToken);
+                fields &= ~ComicMetadataFieldFlags.VolumeYear;
+                _notifications.LibraryChanged();
             }
 
             if (fields == ComicMetadataFieldFlags.None && providerFill is null)

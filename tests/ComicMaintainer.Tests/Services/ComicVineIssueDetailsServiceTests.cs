@@ -394,7 +394,7 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
 
         var candidates = await CreateService().GetCoverCandidatesAsync("/c/Batman/Batman (2016) - Chapter 0002.cbz");
 
-        Assert.Equal((BatmanVolume, 102, (string?)null), (candidates!.VolumeId, candidates.MatchedIssueId, candidates.Reason));
+        Assert.Equal((BatmanVolume, 102, null), (candidates!.VolumeId, candidates.MatchedIssueId, candidates.Reason));
         Assert.Equal(["2", "10", "1/2"], candidates.Covers.Select(c => c.IssueNumber));
         Assert.Equal(new CoverCandidate(102, "2", "Two", "2016-08-15", "https://cv.example/102.jpg", null, "https://cv.example/102"), candidates.Covers[0]);
         Assert.Null(await CreateService().GetCoverCandidatesAsync("/c/missing.cbz"));

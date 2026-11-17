@@ -454,8 +454,8 @@ public class ComicVineSeriesMetadataServiceTests
         var issues = ComicVineSeriesMetadataService.ParseIssueList(answer.RootElement);
 
         Assert.Equal(("https://cv.example/1-original.jpg", "https://cv.example/1-medium.jpg"), (issues[0].CoverUrl, issues[0].CoverThumbUrl));
-        Assert.Equal(("https://cv.example/2-super.jpg", (string?)null), (issues[1].CoverUrl, issues[1].CoverThumbUrl));
-        Assert.Equal(((string?)null, (string?)null), (issues[2].CoverUrl, issues[2].CoverThumbUrl));
+        Assert.Equal(("https://cv.example/2-super.jpg", null), (issues[1].CoverUrl, issues[1].CoverThumbUrl));
+        Assert.Equal((null, null), (issues[2].CoverUrl, issues[2].CoverThumbUrl));
     }
 
     [Fact]

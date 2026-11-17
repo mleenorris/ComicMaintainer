@@ -1185,12 +1185,12 @@
                             </small>
                             <ul style="margin: 10px 0 10px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.6;">
                                 <li><code>{series}</code> - Series name, without its volume or "Annual"</li>
-                                <li><code>{format}</code> - "Annual" or "Special", from the issue's Format tag (an Annual is also recognized by its series, number or file name); empty for regular issues</li>
+                                <li><code>{format}</code> - "Annual", "Special" or "Giant-Size", from the issue's Format tag (also recognized by the series, number, file name or title); empty for regular issues</li>
                                 <li><code>{annual}</code> - "Annual" for an Annual only; empty for other issues, Specials included</li>
                                 <li><code>{volume_label}</code> - The volume: Vol. 2 when its number is known, else its start year, e.g., (1990); empty when unknown</li>
                                 <li><code>{volume_number}</code> - The volume number alone, e.g., 2; empty when unknown</li>
                                 <li><code>{volume_year}</code> - The year the volume started, e.g., 1990; empty when unknown</li>
-                                <li><code>{issue}</code> - Issue number (padded based on settings, default 4 digits, e.g., 0001, or 0071.4 for decimals)</li>
+                                <li><code>{issue}</code> - Issue number (padded based on settings, default 4 digits, e.g., 0001, or 0071.4 for decimals). An issue with no number uses its title instead, and the "Chapter " before it is dropped</li>
                                 <li><code>{issue_no_pad}</code> - Issue number (no padding, e.g., 1, or 71.4 for decimals)</li>
                                 <li><code>{title}</code> - Issue title</li>
                                 <li><code>{volume}</code> - Volume as tagged in ComicInfo, e.g., 2</li>
@@ -1573,10 +1573,11 @@
                     </div>
                     <div class="form-group">
                         <label for="format">Format</label>
-                        <input type="text" id="format" name="format" list="issueFormatOptions" autocomplete="off" placeholder="Annual or Special; empty for a regular issue">
+                        <input type="text" id="format" name="format" list="issueFormatOptions" autocomplete="off" placeholder="Annual, Special or Giant-Size; empty for a regular issue">
                         <datalist id="issueFormatOptions">
                             <option value="Annual"></option>
                             <option value="Special"></option>
+                            <option value="Giant-Size"></option>
                         </datalist>
                     </div>
                     <div class="form-group">
@@ -1631,7 +1632,7 @@
                     </div>
                     <div class="form-group">
                         <label for="batch_format">Format</label>
-                        <input type="text" id="batch_format" name="format" list="issueFormatOptions" autocomplete="off" placeholder="Annual or Special">
+                        <input type="text" id="batch_format" name="format" list="issueFormatOptions" autocomplete="off" placeholder="Annual, Special or Giant-Size">
                     </div>
                     <div class="form-group">
                         <label for="batch_publisher">Publisher</label>

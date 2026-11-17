@@ -91,9 +91,20 @@ the old file name `All New X-Men Annual 001 (2015)` or `#Annual 2021` that some 
 file has been renamed, the title is all that still marks it. Normalize writes `<Format>Annual</Format>` into an Annual
 whose `<Format>` is empty. Annuals stay in the Green Lantern series, in their own "Annual" section with their own missing issues.
 
-Specials work the same way, but only by `<Format>`: set **Format** to `Special` in **View/Edit**, or for many files at
-once in **Update**. Specials get their own "Special" section, after the Annuals. Any other `<Format>` value, such as
-`TPB`, is kept but does not change how the issue is listed or named.
+Specials work the same way. Set **Format** to `Special` in **View/Edit**, or for many files at once in **Update**. A
+title can also mark one: "Special" right before the issue number (`Special 1`), or, for an issue with no number, "Special"
+alone or before a separator (`All New X-Men .Special – One Down`). Specials get their own "Special" section, after the
+Annuals.
+
+Giant-Size issues have their own numbering too. `<Format>` is `Giant-Size`; `Giant` and `Giant Size` are read as it. A
+file is one when its series or file name starts or ends with "Giant-Size" or "Giant Size" (`Giant-Size X-Men`), or its
+title has "Giant" right before the issue number (`Giant 2025`, `#Giant 2025 2`). "Giant" alone in a series name, such
+as `Giant Days`, does not count. Normalize writes `<Format>Giant-Size</Format>` or `<Format>Special</Format>` into an
+empty `<Format>`. Giant-Size issues get their own "Giant-Size" section, after the Specials.
+
+Any other `<Format>` value, such as `TPB`, is kept but does not change how the issue is listed or named.
+
+A story title that only contains one of these words, such as "The Annual Party" or "A Special Day", never counts.
 
 ### Rename
 
@@ -105,19 +116,26 @@ rewrites the archive. The default format is `{series} {format} {volume_label} - 
 | Green Lantern (1990) #1 | `Green Lantern (1990) - Chapter 0001.cbz` |
 | Green Lantern Annual (1990) #1 | `Green Lantern Annual (1990) - Chapter 0001.cbz` |
 | Green Lantern #1, Format `Special` | `Green Lantern Special - Chapter 0001.cbz` |
+| X-Men #2025, title `Giant 2025` | `X-Men Giant-Size - Chapter 2025.cbz` |
 | Saga, volume unknown, #1 | `Saga - Chapter 0001.cbz` |
+| All-New X-Men, no number, title `.Special – One Down` | `All-New X-Men Special - One Down.cbz` |
 
-`{series}` is the series name alone. Its volume, "Annual" and "Special" appear only where the format places them:
+`{series}` is the series name alone. Its volume and kind appear only where the format places them:
 
 - `{volume_label}` is the volume number, `Vol. 2`, when it is known, else the start year, `(1990)`. They come from
   ComicInfo `<Volume>`, the stored start year, the series name, the file name (a `v2` token, or a year before the
   issue number), an old file name left in `<Title>`, and the folder name.
 - `{volume_number}` is the number alone, `2`, and `{volume_year}` the start year alone, `1990`.
-- `{format}` is `Annual` for an Annual and `Special` for a Special.
-- `{annual}` is `Annual` for an Annual only. Prefer `{format}`, which covers Specials too.
+- `{format}` is `Annual`, `Special` or `Giant-Size`.
+- `{annual}` is `Annual` for an Annual only. Prefer `{format}`, which covers the other kinds too.
 
 Each renders empty when it does not apply, and any brackets or ` - ` separator around it go with it. The old defaults,
 `{series} - Chapter {issue}` and `{series} {annual} {volume_label} - Chapter {issue}`, are read as the new one.
+
+An issue with no number never gets a name ending in a bare "Chapter". The word before `{issue}` (`Chapter`, `Ch.`,
+`Issue`, `#`) is dropped, and `{issue}` becomes the issue's title. The series name and kind an old file name left at the
+start of the title are taken off. When there is no title either, the file keeps its name. A file an older version named
+`... - Chapter.cbz` loses the bare "Chapter" when it is processed again.
 
 > **Using this for comic books? Keep `{volume_label}` and `{format}` in your format.** American comics restart their
 > numbering with each volume, and Annuals and Specials have their own numbering. Without these placeholders, Green
@@ -201,6 +219,11 @@ kept.
 Filter by all, unmarked, marked, duplicates, renamed, normalized, read, unread, matched, unmatched or missing issues. The
 **Genre** and **Status** menus use the series' provider match, and a series shows these once its match has been refreshed.
 Each menu can also find series with no such data.
+
+Missing issues are the gaps from #1 up to the highest issue number. A number far beyond the rest is left out of that, so
+Nightwing #1,000,000 does not make a million issues missing. The numbers are split wherever one is more than 1000 above
+the one before it (or 5 per issue in the run, when that is more). The largest group is the run; groups above it leave no
+gap. The series page, the missing filter and the Missing Issues Check all use this rule.
 
 Read state is per user. **Mark All Read** and **Mark All Unread** apply to the whole library for your account.
 

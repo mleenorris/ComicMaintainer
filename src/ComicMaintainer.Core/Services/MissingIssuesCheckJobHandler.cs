@@ -200,10 +200,12 @@ public class MissingIssuesCheckJobHandler : IScheduledJobFindingsHandler
 
     /// <summary>
     /// Returns the whole issue numbers missing between #1 and the highest
-    /// whole issue number present. Mirrors the series-detail view's
+    /// whole issue number of the run's main cluster: a number far beyond the
+    /// rest, such as #1000000, is an outlier and leaves no gap before it (see
+    /// <see cref="IssueNumberGaps"/>). Mirrors the series-detail view's
     /// <c>computeMissingIssueNumbers</c> so the scheduled check reports (and
     /// downloads) exactly the placeholders the user sees: only plain
-    /// non-negative integers count as present; decimals ("1.5") and labels
+    /// positive integers count as present; decimals ("1.5") and labels
     /// ("Annual") are ignored.
     /// </summary>
     public static List<int> ComputeMissingIssueNumbers(
@@ -227,7 +229,6 @@ public class MissingIssuesCheckJobHandler : IScheduledJobFindingsHandler
         ArgumentNullException.ThrowIfNull(issueNumbers);
 
         var present = new HashSet<int>();
-        var max = 0;
         foreach (var text in issueNumbers.Select(raw => raw?.Trim()))
         {
             if (string.IsNullOrEmpty(text) || !text.All(char.IsAsciiDigit))
@@ -235,14 +236,16 @@ public class MissingIssuesCheckJobHandler : IScheduledJobFindingsHandler
                 continue;
             }
             if (!int.TryParse(text, System.Globalization.NumberStyles.None,
-                    System.Globalization.CultureInfo.InvariantCulture, out var n))
+                    System.Globalization.CultureInfo.InvariantCulture, out var n) || n < 1)
             {
                 continue;
             }
             present.Add(n);
-            if (n > max) max = n;
         }
 
+        // A number far beyond the rest of the run (Nightwing #1,000,000) leaves no gap before
+        // it: gaps count up to the run's main cluster only (see IssueNumberGaps).
+        var max = (int)(IssueNumberGaps.HighestCounted(present.Select(n => (long)n)) ?? 0);
         if (max > MaxIssueNumberRange)
         {
             missing = new List<int>();

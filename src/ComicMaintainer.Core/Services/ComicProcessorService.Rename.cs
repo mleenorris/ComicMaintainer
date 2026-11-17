@@ -409,6 +409,17 @@ public partial class ComicProcessorService
             // An issue written as "Annual 1" is named by its number: the series names the Annual.
             var issue = AnnualIssue.IssueNumber(metadata.Issue);
 
+            // With no number, a title names the issue in place of it (see FormatFilename). With
+            // neither, the template can only give the series' name, which every such issue would
+            // share, so the current name is kept: it is the best name there is. A name an earlier
+            // rename left ending in a bare "- Chapter" is the exception, and is renamed.
+            if (string.IsNullOrWhiteSpace(issue)
+                && ComicFileProcessor.TitleInPlaceOfNumber(comicInfo.Title, comicInfo.Series) is null
+                && !ComicFileProcessor.EndsInBareIssuePrefix(Path.GetFileNameWithoutExtension(originalPath)))
+            {
+                return originalPath;
+            }
+
             // Use ComicFileProcessor.FormatFilename to properly handle decimal issue numbers
             var filename = ComicFileProcessor.FormatFilename(
                 _settings.FilenameFormat,

@@ -89,9 +89,17 @@ ComicVine knows each issue's title, cover date, summary, writers and story arcs.
 - a missing summary, or one that is only the series' synopsis;
 - missing writers, and an empty Story Arc and Web link.
 
-A field you changed yourself is never touched. Each issue is matched to ComicVine through its series and the year its
-volume started, as for volume numbers. An issue whose volume start year is not known uses the series' own ComicVine
-match. Annuals, Specials and duplicates are left out.
+A field you changed yourself is never touched. Each issue is matched to a ComicVine volume through its series:
+
+- by the year its volume started, as for volume numbers;
+- else by its volume number: Vol. 2 is the publisher's second volume of that name, one-shots not counted;
+- else, when it knows neither, by the series' own ComicVine match. Matching the series to ComicVine takes effect the next
+  time.
+
+Annuals, Specials and duplicates are left out. An issue that cannot be matched counts as failed in the job, with the
+reason, such as `ComicVine has no Batman Vol. 7`. Set its volume number or start year with **Update**, or match the series
+to ComicVine, and run it again. A volume ComicVine did not have is searched for again each time you run **Fetch Issue
+Details**; the scheduled job waits 30 days before searching again.
 
 ComicVine allows about 200 requests an hour. Titles, cover dates and summaries come 100 issues to a request, but writers
 and story arcs take a request per issue. A job asks for at most 250. Issues it did not reach get their writers and story

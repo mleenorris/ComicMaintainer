@@ -268,7 +268,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.SeriesKey).IsRequired().HasMaxLength(512);
             entity.Property(e => e.VolumeName).HasMaxLength(512);
             entity.Property(e => e.Publisher).HasMaxLength(256);
-            entity.HasIndex(e => new { e.SeriesKey, e.StartYear }).IsUnique();
+            entity.HasIndex(e => new { e.SeriesKey, e.StartYear, e.VolumeNumber }).IsUnique();
             entity.HasIndex(e => e.VolumeId);
         });
 

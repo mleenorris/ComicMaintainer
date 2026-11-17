@@ -6,7 +6,7 @@ namespace ComicMaintainer.Tests.Utilities;
 public class VolumeOrdinalTests
 {
     private static ExternalSeriesMetadata Volume(string name, int? year, string? publisher = "DC Comics", int? issues = 50)
-        => new() { CanonicalTitle = name, StartYear = year, Publisher = publisher, TotalChapters = issues, Source = "ComicVine" };
+        => new() { CanonicalTitle = name, StartYear = year, Publisher = publisher, TotalChapters = issues, Source = "ComicVine", SourceId = $"{publisher}-{year}" };
 
     // What ComicVine's search answers for "Batman": DC's volumes, other names, a foreign
     // edition, a one-shot and a volume without a year.
@@ -62,6 +62,34 @@ public class VolumeOrdinalTests
         var suggestion = VolumeOrdinal.Suggest([Volume("Saga", 2012), Volume("Saga", 2005, issues: null)], "Saga", 2012);
 
         Assert.Equal(2, suggestion?.Number);
+    }
+
+    [Theory]
+    // DC's "Batman" volumes by start year, the one-shot of 1989 left out.
+    [InlineData(1, 1940)]
+    [InlineData(2, 2011)]
+    [InlineData(3, 2016)]
+    [InlineData(4, 2025)]
+    [InlineData(5, null)]
+    [InlineData(0, null)]
+    public void Numbered_FindsTheNthVolumeOfTheMostFrequentPublisher(int number, int? expectedYear)
+    {
+        var volume = VolumeOrdinal.Numbered(Batman, "Batman", number);
+
+        Assert.Equal(expectedYear, volume?.StartYear);
+        if (volume is not null)
+        {
+            Assert.Equal("DC Comics", volume.Publisher);
+        }
+    }
+
+    [Fact]
+    public void Numbered_CountsThePublisherOfTheSeriesOwnMatch()
+    {
+        Assert.Equal("Panini Comics", VolumeOrdinal.Numbered(Batman, "Batman", 1, knownVolumeId: "Panini Comics-2016")?.Publisher);
+        Assert.Equal("DC Comics", VolumeOrdinal.Numbered(Batman, "Batman", 1, knownVolumeId: "not-among-them")?.Publisher);
+        Assert.Null(VolumeOrdinal.Numbered(Batman, "!!", 1));
+        Assert.Null(VolumeOrdinal.Numbered([], "Batman", 1));
     }
 
     [Theory]

@@ -2,8 +2,9 @@ namespace ComicMaintainer.Core.Data;
 
 /// <summary>
 /// Which ComicVine volume the issues of one series volume belong to: the files whose series
-/// is <see cref="SeriesKey"/> and whose volume started in <see cref="StartYear"/> (0 when it is
-/// not known). A link with no <see cref="VolumeId"/> records that ComicVine has no such volume,
+/// is <see cref="SeriesKey"/> and whose volume started in <see cref="StartYear"/>, or, when that
+/// is not known, whose volume number is <see cref="VolumeNumber"/>; both are 0 for files that
+/// know neither. A link with no <see cref="VolumeId"/> records that ComicVine has no such volume,
 /// so it is not searched for again on every run.
 /// </summary>
 public class ComicVineVolumeLinkEntity
@@ -15,6 +16,9 @@ public class ComicVineVolumeLinkEntity
 
     /// <summary>The year the volume started, or 0 for files that do not know it.</summary>
     public int StartYear { get; set; }
+
+    /// <summary>The volume number, for files that know it but not the start year; otherwise 0.</summary>
+    public int VolumeNumber { get; set; }
 
     /// <summary>ComicVine's id of the volume; null when none was found.</summary>
     public int? VolumeId { get; set; }

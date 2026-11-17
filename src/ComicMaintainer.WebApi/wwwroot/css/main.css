@@ -1605,6 +1605,55 @@
             overflow-wrap: anywhere;
         }
 
+        /* Replace Cover: the issue's cover now, and ComicVine's covers to choose from. */
+        .replace-cover-current {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .replace-cover-current img {
+            width: 96px;
+            aspect-ratio: 2 / 3;
+            object-fit: cover;
+            border-radius: var(--radius-sm);
+            background: var(--bg-tertiary, var(--bg-secondary));
+        }
+
+        .replace-cover-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 10px;
+            max-height: 55vh;
+            overflow-y: auto;
+        }
+
+        .replace-cover-option {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 4px;
+            border: 2px solid transparent;
+            border-radius: var(--radius-sm);
+            background: none;
+            color: inherit;
+            font-size: 12px;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .replace-cover-option img {
+            width: 100%;
+            aspect-ratio: 2 / 3;
+            object-fit: cover;
+            border-radius: var(--radius-sm);
+        }
+
+        .replace-cover-option.selected {
+            border-color: var(--accent-primary);
+        }
+
         .series-detail-chip--status {
             border-color: var(--accent-primary);
             color: var(--accent-text);

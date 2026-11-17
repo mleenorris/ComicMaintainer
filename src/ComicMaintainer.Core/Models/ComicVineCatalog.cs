@@ -3,14 +3,16 @@ namespace ComicMaintainer.Core.Models;
 /// <summary>A ComicVine answer and the number of requests it took.</summary>
 public sealed record ComicVineResult<T>(T Value, int Requests);
 
-/// <summary>An issue as a volume's issue list gives it.</summary>
+/// <summary>An issue as a volume's issue list gives it, with its cover's full-size and screen-size images.</summary>
 public sealed record ComicVineIssueSummary(
     int Id,
     string IssueNumber,
     string? Name,
     string? CoverDate,
     string? Summary,
-    string? SiteUrl);
+    string? SiteUrl,
+    string? CoverUrl = null,
+    string? CoverThumbUrl = null);
 
 /// <summary>A story arc an issue is part of.</summary>
 public sealed record ComicVineArcReference(int Id, string Name);
@@ -72,3 +74,28 @@ public sealed record StoryArcReadingOrder(
     string? Summary,
     string? SiteUrl,
     IReadOnlyList<StoryArcEntry> Issues);
+
+/// <summary>A cover ComicVine has for an issue of the file's volume.</summary>
+public sealed record CoverCandidate(
+    int IssueId,
+    string IssueNumber,
+    string? Name,
+    string? CoverDate,
+    string CoverUrl,
+    string? ThumbUrl,
+    string? SiteUrl);
+
+/// <summary>
+/// The covers a file's cover can be replaced with: those of every issue of its ComicVine volume
+/// that has one, in issue order, with <see cref="MatchedIssueId"/> the issue the file was matched
+/// to. <see cref="Reason"/> says why there is no match, or no cover for it.
+/// </summary>
+public sealed record CoverCandidates(
+    int? VolumeId,
+    string? VolumeName,
+    int? MatchedIssueId,
+    string? Reason,
+    IReadOnlyList<CoverCandidate> Covers);
+
+/// <summary>What replacing a file's cover with a ComicVine cover did; <see cref="Error"/> says why it failed.</summary>
+public sealed record IssueCoverReplaceResult(bool Succeeded, bool Changed, string? Error);

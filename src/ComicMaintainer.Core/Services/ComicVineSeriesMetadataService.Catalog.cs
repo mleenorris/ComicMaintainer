@@ -16,7 +16,7 @@ public partial class ComicVineSeriesMetadataService
     /// <summary>The most issues ComicVine returns to one list request.</summary>
     private const int IssuePageSize = 100;
 
-    private const string IssueListFields = "id,issue_number,name,cover_date,deck,description,site_detail_url";
+    private const string IssueListFields = "id,issue_number,name,cover_date,deck,description,site_detail_url,image";
     private const string IssueDetailFields = "id,person_credits,story_arc_credits";
     private const string StoryArcFields = "id,name,deck,description,site_detail_url,issues";
 
@@ -119,13 +119,16 @@ public partial class ComicVineSeriesMetadataService
                 continue;
             }
 
+            var (cover, thumbnail) = ReadCoverUrls(item);
             issues.Add(new ComicVineIssueSummary(
                 id,
                 number,
                 ReadString(item, "name")?.Trim() is { Length: > 0 } name ? name : null,
                 ReadString(item, "cover_date")?.Trim() is { Length: > 0 } date ? date : null,
                 ExtractSynopsis(item),
-                ProviderMetadataText.HttpUrl(ReadString(item, "site_detail_url"))));
+                ProviderMetadataText.HttpUrl(ReadString(item, "site_detail_url")),
+                cover,
+                thumbnail));
         }
 
         return issues;
@@ -184,6 +187,25 @@ public partial class ComicVineSeriesMetadataService
         }
 
         return new ComicVineStoryArc(id, name, ExtractSynopsis(item), ProviderMetadataText.HttpUrl(ReadString(item, "site_detail_url")), issues);
+    }
+
+    /// <summary>
+    /// An issue's cover: the largest image ComicVine has, which replaces an archive's cover, and
+    /// one about a screen high, which the cover picker shows. Only http(s) addresses are kept.
+    /// </summary>
+    private static (string? Cover, string? Thumbnail) ReadCoverUrls(JsonElement item)
+    {
+        if (!item.TryGetProperty("image", out var image) || image.ValueKind != JsonValueKind.Object)
+        {
+            return (null, null);
+        }
+
+        string? First(params string[] keys) => keys
+            .Select(key => ProviderMetadataText.HttpUrl(ReadString(image, key)))
+            .FirstOrDefault(url => url is not null);
+
+        return (First("original_url", "super_url", "screen_large_url", "screen_url", "medium_url"),
+                First("medium_url", "screen_url", "small_url", "thumb_url"));
     }
 
     private static IReadOnlyList<ComicVineArcReference> ReadArcReferences(JsonElement item, string property)

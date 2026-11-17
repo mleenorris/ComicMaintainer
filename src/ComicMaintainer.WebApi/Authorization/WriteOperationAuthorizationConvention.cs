@@ -39,6 +39,8 @@ public class WriteOperationAuthorizationConvention : IActionModelConvention
         ["Metadata"] = AuthorizationPolicies.CanModifyLibrary,
         ["Status"] = AuthorizationPolicies.CanModifyLibrary,
         ["SeriesImages"] = AuthorizationPolicies.CanModifyLibrary,
+        // Replacing a cover rewrites the archive.
+        ["Covers"] = AuthorizationPolicies.CanModifyLibrary,
         ["Watcher"] = AuthorizationPolicies.CanModifyLibrary,
         ["Email"] = AuthorizationPolicies.CanModifyLibrary,
         ["Suwayomi"] = AuthorizationPolicies.CanModifyLibrary,

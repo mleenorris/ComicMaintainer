@@ -281,6 +281,8 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.CoverDate).HasMaxLength(10);
             entity.Property(e => e.Summary).HasMaxLength(4000);
             entity.Property(e => e.SiteUrl).HasMaxLength(512);
+            entity.Property(e => e.CoverUrl).HasMaxLength(512);
+            entity.Property(e => e.CoverThumbUrl).HasMaxLength(512);
             entity.Property(e => e.Writers).HasMaxLength(1024);
             entity.Property(e => e.StoryArcsJson).HasMaxLength(4000);
             entity.HasIndex(e => e.VolumeId);

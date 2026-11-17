@@ -2332,6 +2332,30 @@
          </div>
      </div>
 
+     <!-- Replace Cover Modal -->
+     <div class="modal" id="replaceCoverModal" role="dialog" aria-modal="true" aria-labelledby="replaceCoverModalTitle" aria-hidden="true">
+         <div class="modal-content" style="max-width: 860px;">
+             <div class="modal-header">
+                 <h2 id="replaceCoverModalTitle">Replace Cover</h2>
+                 <button class="close-btn" onclick="closeReplaceCoverModal()">&times;</button>
+             </div>
+             <div class="modal-body">
+                 <div class="replace-cover-current">
+                     <img id="replaceCoverCurrentImage" alt="Current cover" decoding="async">
+                     <p class="combine-folders-meta">
+                         The issue's cover now. Choose a cover from ComicVine to put in its place: it becomes page 1 of the CBZ, and every other page is kept.
+                     </p>
+                 </div>
+                 <p class="combine-folders-meta" id="replaceCoverNote"></p>
+                 <div id="replaceCoverList"></div>
+             </div>
+             <div class="modal-footer">
+                 <button class="btn btn-primary" id="replaceCoverApplyBtn" onclick="applyReplaceCover()" data-requires-write disabled>Replace Cover</button>
+                 <button class="btn" onclick="closeReplaceCoverModal()">Cancel</button>
+             </div>
+         </div>
+     </div>
+
      <!-- Story Arc Modal -->
      <div class="modal" id="storyArcModal" role="dialog" aria-modal="true" aria-labelledby="storyArcModalTitle" aria-hidden="true">
          <div class="modal-content" style="max-width: 720px;">

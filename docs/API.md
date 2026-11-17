@@ -30,6 +30,7 @@ Related documents:
 - [Comic reader](#comic-reader)
 - [Reader progress, preferences and sessions](#reader-progress-preferences-and-sessions)
 - [Series metadata](#series-metadata)
+- [Covers](#covers)
 - [Series images](#series-images)
 - [Email delivery](#email-delivery)
 - [Suwayomi](#suwayomi)
@@ -924,6 +925,17 @@ Preferences are `{"defaultReaderMode","readingDirection","tapZonesEnabled","auto
 ```
 
 with status `503`. The text is fixed wording built from the provider name and the kind of failure. Records that were already matched are left alone.
+
+## Covers
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/covers/candidates` | Signed in | The ComicVine covers an issue's cover can be replaced with |
+| `POST` | `/api/covers/replace` | Library write | Replace an issue's cover with one of them |
+
+**`GET /api/covers/candidates?filePath=`** matches the file to its ComicVine volume and issue, as issue details do, and returns `{"volume_id","volume_name","matched_issue_id","reason","covers":[{"issue_id","issue_number","name","cover_date","cover_url","thumb_url","site_url","matched"}]}`. `covers` holds every issue of the volume that has a cover, in issue order; `matched` marks the file's own issue. `cover_url` is the full-size image and `thumb_url` one about a screen high, or `null`. `reason` says why there is no match or no cover, and is `null` otherwise; the volume is then `null` and `covers` empty when the volume itself was not found. It answers `400` without a `filePath` and `404` for a file not in the library.
+
+**`POST /api/covers/replace`** takes `{"filePath","comicVineIssueId"}`, an issue the candidates listed. The server downloads that issue's stored cover, never an address from the request, with the same checks as provider images, and makes it page 1 of the CBZ. The page keeps its name with the image's extension, and every other entry is kept. It answers `{"replaced":true}`, `{"replaced":false}` when page 1 already was that image, or `400 {"error"}`: not a CBZ, no pages, no cover for that issue, or a failed download.
 
 ## Series images
 

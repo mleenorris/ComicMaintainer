@@ -202,6 +202,31 @@ public class SeriesImageStoreCoverageTests : IDisposable
         Assert.Equal(0, handler.RequestCount);
     }
 
+    [Fact]
+    public async Task FetchImageAsync_ReturnsTheImage_AndStoresNothing()
+    {
+        var png = CreatePng();
+        var (store, handler) = CreateStore(respond: _ => ImageResponse(png, "image/png"));
+
+        var (bytes, contentType) = await store.FetchImageAsync("https://8.8.8.8/covers/1.png");
+
+        Assert.Equal(png, bytes);
+        Assert.Equal("image/png", contentType);
+        Assert.Equal(1, handler.RequestCount);
+        Assert.False(Directory.Exists(_cacheDir) && Directory.EnumerateFiles(_cacheDir).Any());
+    }
+
+    [Fact]
+    public async Task FetchImageAsync_GetsTheSameChecksAsADownload()
+    {
+        var (store, handler) = CreateStore(respond: _ => ImageResponse(CreatePng(), "image/jpeg"));
+
+        await Assert.ThrowsAsync<ArgumentException>(() => store.FetchImageAsync(" "));
+        Assert.Contains("non-public address", (await Assert.ThrowsAsync<InvalidOperationException>(() => store.FetchImageAsync("http://127.0.0.1/x.png"))).Message);
+        Assert.Contains("magic-byte", (await Assert.ThrowsAsync<InvalidOperationException>(() => store.FetchImageAsync("https://8.8.8.8/x.jpg"))).Message);
+        Assert.Equal(1, handler.RequestCount);
+    }
+
     // ---- redirects ---------------------------------------------------------
     // The client follows no redirects (PublicNetworkGuard.CreateHandler); the store follows them itself so that a
     // public URL cannot bounce the request to the LAN, the Docker network or a metadata endpoint.

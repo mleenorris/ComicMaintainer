@@ -235,6 +235,14 @@ namespace ComicMaintainer.Core.Migrations
                         .HasMaxLength(10)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CoverThumbUrl")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CoverUrl")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("DetailsUtc")
                         .HasColumnType("TEXT");
 

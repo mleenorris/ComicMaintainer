@@ -1157,6 +1157,9 @@
                                             <button class="dropdown-item" data-requires-write onclick="removeFileMetadata('${escapeJs(issue.file_path)}'); closeAllDropdowns();" title="Open the archive, delete the embedded ComicInfo.xml, and mark the file as unprocessed so it can be re-processed.">
                                                 ${uiIcon('eraser')} Remove Metadata
                                             </button>
+                                            <button class="dropdown-item" data-requires-write onclick="openReplaceCoverModal('${escapeJs(issue.file_path)}'); closeAllDropdowns();" title="Replace this issue's cover with its cover from ComicVine">
+                                                ${uiIcon('image')} Replace Cover…
+                                            </button>
                                             <div class="dropdown-divider" data-requires-write></div>
                                             <button class="dropdown-item" data-requires-write onclick="deleteSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
                                                 ${uiIcon('trash')} Delete
@@ -1483,6 +1486,127 @@
                 return;
             }
             return startDuplicateRecheck(paths);
+        }
+
+        // ── Replacing an issue's cover with ComicVine's ──────────────────
+        //
+        // "Replace Cover…" lists the covers ComicVine has for the issue's
+        // volume (GET /api/covers/candidates), with the issue's own selected,
+        // and makes the chosen one page 1 of the CBZ (POST /api/covers/replace).
+        let replaceCoverCurrent = null;
+
+        async function openReplaceCoverModal(filePath) {
+            const current = { filePath, selected: null };
+            replaceCoverCurrent = current;
+            const list = document.getElementById('replaceCoverList');
+            const note = document.getElementById('replaceCoverNote');
+            const apply = document.getElementById('replaceCoverApplyBtn');
+            const now = document.getElementById('replaceCoverCurrentImage');
+            note.textContent = '';
+            apply.disabled = true;
+            now.removeAttribute('src');
+            now.dataset.protectedImage = filePath;
+            now.dataset.protectedImageLoaded = '';
+            renderHtml(list, html`<div class="loading"><div class="spinner"></div><p>Asking ComicVine...</p></div>`);
+            document.getElementById('replaceCoverModal').classList.add('active');
+            hydrateProtectedImages(document.getElementById('replaceCoverModal'));
+
+            let data;
+            try {
+                data = await apiFetch(`/api/covers/candidates?filePath=${encodeURIComponent(filePath)}`);
+            } catch (error) {
+                if (error.authHandled || replaceCoverCurrent !== current) return;
+                list.textContent = `ComicVine could not be asked: ${error.message}`;
+                return;
+            }
+            if (replaceCoverCurrent !== current) return;
+
+            const covers = Array.isArray(data.covers) ? data.covers : [];
+            const from = data.volume_name ? `Covers of ${data.volume_name} on ComicVine.` : '';
+            note.textContent = [from, data.reason || ''].filter(Boolean).join(' ');
+            if (!covers.length) {
+                list.textContent = 'ComicVine has no covers to choose from.';
+                return;
+            }
+            renderHtml(list, html`<div class="replace-cover-grid">${covers.map(replaceCoverOption)}</div>`);
+            if (covers.some(cover => cover.issue_id === data.matched_issue_id)) {
+                selectReplaceCover(data.matched_issue_id);
+            }
+        }
+
+        // One cover to choose: its image (ComicVine's screen-sized copy when
+        // there is one), issue number and name.
+        function replaceCoverOption(cover) {
+            const label = `#${cover.issue_number}${cover.name ? ` ${cover.name}` : ''}`;
+            return html`
+                <button type="button" class="replace-cover-option" data-issue-id="${cover.issue_id}" aria-pressed="false" title="${label}" onclick="selectReplaceCover(${Number(cover.issue_id)})">
+                    <img src="${cover.thumb_url || cover.cover_url}" alt="Cover of ${label}" loading="lazy" referrerpolicy="no-referrer">
+                    <span>${label}${cover.matched ? ' (this issue)' : ''}</span>
+                </button>`;
+        }
+
+        function selectReplaceCover(issueId) {
+            if (!replaceCoverCurrent) return;
+            replaceCoverCurrent.selected = issueId;
+            for (const option of document.querySelectorAll('#replaceCoverList .replace-cover-option')) {
+                const chosen = Number(option.dataset.issueId) === issueId;
+                option.classList.toggle('selected', chosen);
+                option.setAttribute('aria-pressed', String(chosen));
+            }
+            document.getElementById('replaceCoverApplyBtn').disabled = false;
+        }
+
+        function closeReplaceCoverModal() {
+            document.getElementById('replaceCoverModal').classList.remove('active');
+            replaceCoverCurrent = null;
+        }
+
+        async function applyReplaceCover() {
+            const current = replaceCoverCurrent;
+            if (!current || !current.selected) return;
+            const apply = document.getElementById('replaceCoverApplyBtn');
+            apply.disabled = true;
+            let data;
+            try {
+                data = await apiFetch('/api/covers/replace', {
+                    method: 'POST',
+                    body: { FilePath: current.filePath, ComicVineIssueId: current.selected },
+                    errorMessage: 'Failed to replace the cover'
+                });
+            } catch (error) {
+                if (error.authHandled) return;
+                showMessage('Failed to replace the cover: ' + error.message, 'error');
+                apply.disabled = false;
+                return;
+            }
+            closeReplaceCoverModal();
+            if (!data.replaced) {
+                showMessage('The issue already has that cover', 'info');
+                return;
+            }
+            showMessage('Cover replaced', 'success');
+            await refreshFileCover(current.filePath);
+        }
+
+        // Shows a file's new cover. The browser keeps covers for an hour and
+        // the page keeps each as a blob, so the cover is fetched again past
+        // the browser's copy, and every image of it is drawn again.
+        async function refreshFileCover(filePath) {
+            try {
+                await apiFetch(getSeriesCoverPath(filePath), { json: false, cache: 'reload' });
+            } catch (error) {
+                // The images below ask for it again anyway.
+            }
+            if (protectedImageUrls.has(filePath)) {
+                URL.revokeObjectURL(protectedImageUrls.get(filePath));
+                protectedImageUrls.delete(filePath);
+            }
+            for (const image of document.querySelectorAll('img[data-protected-image]')) {
+                if (image.dataset.protectedImage !== filePath) continue;
+                image.dataset.protectedImageLoaded = '';
+                image.removeAttribute('src');
+            }
+            hydrateProtectedImages(document);
         }
 
         // Expands/collapses a clamped synopsis block.

@@ -600,11 +600,15 @@ public partial class ComicProcessorService
             return tagged.Value;
         }
 
-        var year = VolumesFromNames(metadata.Series, metadata.Title, metadata.Issue, filePath)
-            .Where(volume => volume.IsYear)
-            .Cast<ComicVolume?>()
-            .FirstOrDefault();
-        return year?.Value;
+        foreach (var volume in VolumesFromNames(metadata.Series, metadata.Title, metadata.Issue, filePath))
+        {
+            if (volume.IsYear)
+            {
+                return volume.Value;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>True for a blank <c>&lt;Volume&gt;</c> or ComicInfo's "unset" (-1 or 0).</summary>

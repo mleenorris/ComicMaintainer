@@ -1,0 +1,74 @@
+namespace ComicMaintainer.Core.Models;
+
+/// <summary>A ComicVine answer and the number of requests it took.</summary>
+public sealed record ComicVineResult<T>(T Value, int Requests);
+
+/// <summary>An issue as a volume's issue list gives it.</summary>
+public sealed record ComicVineIssueSummary(
+    int Id,
+    string IssueNumber,
+    string? Name,
+    string? CoverDate,
+    string? Summary,
+    string? SiteUrl);
+
+/// <summary>A story arc an issue is part of.</summary>
+public sealed record ComicVineArcReference(int Id, string Name);
+
+/// <summary>An issue's writers and story arcs, from the issue's own page.</summary>
+public sealed record ComicVineIssueDetails(
+    int Id,
+    IReadOnlyList<string> Writers,
+    IReadOnlyList<ComicVineArcReference> StoryArcs);
+
+/// <summary>An issue of a story arc, as the arc lists it.</summary>
+public sealed record ComicVineArcIssue(int Id, string? Name, string? IssueNumber, string? Volume);
+
+/// <summary>A story arc and its issues, in ComicVine's order.</summary>
+public sealed record ComicVineStoryArc(
+    int Id,
+    string Name,
+    string? Summary,
+    string? SiteUrl,
+    IReadOnlyList<ComicVineArcIssue> Issues);
+
+/// <summary>What one run of fetching issue details from ComicVine did.</summary>
+/// <param name="Files">Files looked at.</param>
+/// <param name="Filled">Files whose tags got ComicVine's details.</param>
+/// <param name="Unchanged">Files matched to a ComicVine issue that needed nothing new.</param>
+/// <param name="NoVolume">Files whose series volume is not on ComicVine, or not known.</param>
+/// <param name="NoIssue">Files whose volume ComicVine has but not their issue number.</param>
+/// <param name="Skipped">Duplicates, Annuals and Specials, and files without a series or number.</param>
+/// <param name="Failed">Files that could not be written or looked up.</param>
+/// <param name="Requests">ComicVine requests made.</param>
+/// <param name="StoppedEarly">True when the run used up its requests, or ComicVine stopped answering, before every file was done.</param>
+public sealed record ComicVineDetailsRunSummary(
+    int Files,
+    int Filled,
+    int Unchanged,
+    int NoVolume,
+    int NoIssue,
+    int Skipped,
+    int Failed,
+    int Requests,
+    bool StoppedEarly)
+{
+    public override string ToString()
+        => $"ComicVine issue details: {Filled} files filled, {Unchanged} unchanged, {NoVolume} without a ComicVine volume, " +
+           $"{NoIssue} without a matching issue, {Skipped} skipped, {Failed} failed; {Requests} requests" +
+           (StoppedEarly ? "; the rest continue next run" : string.Empty) + ".";
+}
+
+/// <summary>A story arc some issues of a series are part of.</summary>
+public sealed record SeriesStoryArc(int Id, string Name, IReadOnlyList<string> FilePaths);
+
+/// <summary>An issue of a story arc, and the library file that holds it, if any.</summary>
+public sealed record StoryArcEntry(int Id, string? Name, string? IssueNumber, string? Volume, string? FilePath);
+
+/// <summary>A story arc's issues in reading order, as ComicVine lists them.</summary>
+public sealed record StoryArcReadingOrder(
+    int Id,
+    string Name,
+    string? Summary,
+    string? SiteUrl,
+    IReadOnlyList<StoryArcEntry> Issues);

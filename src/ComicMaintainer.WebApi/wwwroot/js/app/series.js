@@ -297,6 +297,9 @@
                 } else {
                     const data = await response.json();
                     entry.issues = Array.isArray(data.issues) ? data.issues : [];
+                    // A list that replaced another may have changed (a job filled its issues):
+                    // read their story arcs again.
+                    if (previous) seriesStoryArcsCache.delete(seriesId);
                     entry.total = typeof data.issue_count === 'number'
                         ? data.issue_count
                         : entry.issues.length;
@@ -1273,6 +1276,120 @@
             }
         }
 
+        // ── Issue details and story arcs from ComicVine ──────────────────
+        //
+        // "Fetch Issue Details" fills the series' issues with ComicVine's
+        // titles, cover dates, summaries, writers and story arcs, in a job
+        // (POST /api/metadata/issue-details/series/{id}). The story arcs the
+        // issues are part of are listed under the synopsis; each opens its
+        // reading order (GET /api/metadata/story-arcs/{id}).
+
+        // seriesId -> { loading: true } while asked, then { arcs: [...] }.
+        const seriesStoryArcsCache = new Map();
+        // The story arc the modal is showing, so a late answer for another is dropped.
+        let storyArcModalCurrent = null;
+
+        async function fetchSeriesIssueDetails(seriesId, seriesTitle) {
+            if (!jobProgress.canStartJob()) return;
+            showProgressModal('Fetching issue details from ComicVine...');
+            try {
+                const data = await apiFetch(`/api/metadata/issue-details/series/${encodeURIComponent(seriesId)}`, {
+                    method: 'POST',
+                    errorMessage: 'Failed to start fetching issue details'
+                });
+                showMessage(`Fetching ComicVine issue details for ${data.total_items} issue${data.total_items === 1 ? '' : 's'} of ${seriesTitle}`, 'info');
+                await trackJobStatus(data.job_id, 'Fetching Issue Details...');
+            } catch (error) {
+                if (error.authHandled) return;
+                showMessage('Failed to fetch issue details: ' + error.message, 'error');
+                closeProgressModal();
+            }
+        }
+
+        // The story arcs of a series, under its synopsis; asked for the first
+        // time the series is shown (and after its issues reload).
+        function renderSeriesStoryArcs(seriesId) {
+            const entry = seriesStoryArcsCache.get(seriesId);
+            if (!entry) {
+                loadSeriesStoryArcs(seriesId);
+                return '';
+            }
+            if (!entry.arcs || !entry.arcs.length) return '';
+            const chips = entry.arcs.map(arc => {
+                const count = Array.isArray(arc.file_paths) ? arc.file_paths.length : 0;
+                return `<button type="button" class="series-detail-chip series-story-arc-chip" onclick="openStoryArcModal(${Number(arc.id)})">${escapeHtml(arc.name)} · ${count} issue${count === 1 ? '' : 's'}</button>`;
+            }).join('');
+            return `<div class="series-detail-details series-story-arcs"><span class="series-detail-meta">Story arcs:</span> ${chips}</div>`;
+        }
+
+        async function loadSeriesStoryArcs(seriesId) {
+            const entry = { loading: true };
+            seriesStoryArcsCache.set(seriesId, entry);
+            let arcs = [];
+            try {
+                const data = await apiFetch(`/api/metadata/story-arcs/series/${encodeURIComponent(seriesId)}`);
+                arcs = Array.isArray(data.arcs) ? data.arcs : [];
+            } catch (error) {
+                // Story arcs are extra: a series without them still shows.
+                if (!error.authHandled) console.warn('Could not load the story arcs of the series:', error);
+            }
+            // Dropped when the issues reloaded meanwhile: that load asks again.
+            if (seriesStoryArcsCache.get(seriesId) !== entry) return;
+            seriesStoryArcsCache.set(seriesId, { arcs });
+            if (arcs.length && currentSeriesDetailId === seriesId) renderSeriesDetail(seriesId);
+        }
+
+        async function openStoryArcModal(storyArcId) {
+            const list = document.getElementById('storyArcIssues');
+            const summary = document.getElementById('storyArcSummary');
+            const link = document.getElementById('storyArcLink');
+            const title = document.getElementById('storyArcModalTitle');
+            title.textContent = 'Story Arc';
+            summary.textContent = '';
+            link.style.display = 'none';
+            renderHtml(list, html`<div class="loading"><div class="spinner"></div><p>Loading the story arc...</p></div>`);
+            storyArcModalCurrent = storyArcId;
+            document.getElementById('storyArcModal').classList.add('active');
+
+            let data;
+            try {
+                data = await apiFetch(`/api/metadata/story-arcs/${storyArcId}`);
+            } catch (error) {
+                if (error.authHandled || storyArcModalCurrent !== storyArcId) return;
+                list.textContent = error.status === 404
+                    ? 'ComicVine has no such story arc.'
+                    : `The story arc could not be loaded: ${error.message}`;
+                return;
+            }
+            if (storyArcModalCurrent !== storyArcId) return;
+
+            const issues = Array.isArray(data.issues) ? data.issues : [];
+            const owned = issues.filter(issue => issue.file_path).length;
+            title.textContent = data.name;
+            summary.textContent = `${data.summary ? `${data.summary} ` : ''}You have ${owned} of its ${issues.length} issue${issues.length === 1 ? '' : 's'}.`;
+            const site = seriesSiteLink(data.site_url);
+            if (site) {
+                link.href = site;
+                link.style.display = '';
+            }
+            renderHtml(list, issues.length ? html`<ol class="story-arc-issues">${issues.map(storyArcIssueItem)}</ol>` : html`<p>ComicVine lists no issues for this story arc.</p>`);
+        }
+
+        // One issue of a story arc: its volume, number and name, with Read when
+        // the library has it.
+        function storyArcIssueItem(issue) {
+            const number = issue.issue_number ? ` #${issue.issue_number}` : '';
+            const name = `${issue.volume || 'Unknown volume'}${number}${issue.name ? ` · ${issue.name}` : ''}`;
+            return issue.file_path
+                ? html`<li class="story-arc-issue">${name} <button type="button" class="btn btn-small" onclick="readComic('${jsArg(issue.file_path)}')">Read</button></li>`
+                : html`<li class="story-arc-issue story-arc-issue--missing">${name} <span class="series-detail-meta">Not in your library</span></li>`;
+        }
+
+        function closeStoryArcModal() {
+            document.getElementById('storyArcModal').classList.remove('active');
+            storyArcModalCurrent = null;
+        }
+
         // Expands/collapses a clamped synopsis block.
         function toggleSeriesSynopsis(btn) {
             const block = btn.closest('[data-synopsis-block]');
@@ -1371,6 +1488,7 @@
                                 ${series.metadata_source ? html`<div class="series-detail-meta">Source: ${series.metadata_source}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
                                 ${rawHtml(renderSeriesDetails(series))}
                                 ${rawHtml(renderSeriesSynopsis(series))}
+                                ${rawHtml(renderSeriesStoryArcs(series.id))}
                                 <div class="series-detail-actions">
                                     ${issues.length ? html`<button type="button" class="btn btn-small btn-primary" onclick="readComic('${jsArg(issues[0].file_path)}')">${uiIcon('book-open')} Read First Issue</button>` : ''}
                                     <div class="file-actions-dropdown series-actions-dropdown" data-requires-write>
@@ -1386,6 +1504,9 @@
                                             </button>
                                             <button class="dropdown-item" data-requires-write onclick="openVolumeNumbersModal('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Ask ComicVine for the number of each volume known only by the year it started">
                                                 ${uiIcon('globe')} Find Volume Numbers
+                                            </button>
+                                            <button class="dropdown-item" data-requires-write onclick="fetchSeriesIssueDetails('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Fill issue titles, cover dates, summaries, writers and story arcs from ComicVine into fields that are empty">
+                                                ${uiIcon('globe')} Fetch Issue Details
                                             </button>
                                             <div class="dropdown-divider" data-requires-write></div>
                                             <button class="dropdown-item" data-requires-write onclick="refreshSeriesMetadataDirect('${jsArg(series.title)}'); closeAllDropdowns();">

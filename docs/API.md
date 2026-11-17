@@ -660,6 +660,9 @@ Preferences are `{"defaultReaderMode","readingDirection","tapZonesEnabled","auto
 | `GET` | `/api/metadata/providers` | Signed in | Health of each provider |
 | `GET` | `/api/metadata/search` | Signed in | Search providers |
 | `GET` | `/api/metadata/volume-number` | Signed in | Suggest a volume's number from ComicVine |
+| `POST` | `/api/metadata/issue-details/series/{seriesId}` | Library write | Fill a series' issues from ComicVine, as a job |
+| `GET` | `/api/metadata/story-arcs/series/{seriesId}` | Signed in | The story arcs a series' issues are part of |
+| `GET` | `/api/metadata/story-arcs/{storyArcId}` | Signed in | A story arc's issues in reading order |
 | `POST` | `/api/metadata/refresh-all` | Library write | Queue a refresh of every series |
 | `POST` | `/api/metadata/match-unmatched` | Library write | Queue a lookup for unmatched series |
 | `POST` | `/api/metadata/refresh-selected` | Library write | Queue a refresh of listed series |
@@ -726,7 +729,13 @@ Preferences are `{"defaultReaderMode","readingDirection","tapZonesEnabled","auto
 
 `volumes` lists the volumes counted, ending with the one that started in `year` (`matched`). `number` is `null` and `volumes` empty when ComicVine has no such volume or is not configured. A missing `title`, or a `year` outside 1900 to 2199, answers `400`.
 
-**Provider outages.** When nothing was found and a provider could not answer, `POST /api/metadata/refresh/{seriesTitle}`, `GET /api/metadata/search` and `GET /api/metadata/volume-number` answer:
+**`POST /api/metadata/issue-details/series/{seriesId}`** starts a job over the series' files and answers `{"job_id","total_items"}`, or `404` for an unknown series. Follow the job like any other. Each file gets ComicVine's title, cover year and month, summary, writers, story arcs and page, only where its own are empty or placeholders. The job makes at most 250 ComicVine requests; the `comicvine-issue-details` scheduled job continues from there.
+
+**`GET /api/metadata/story-arcs/series/{seriesId}`** returns `{"arcs":[{"id","name","file_paths"}]}`, sorted by name: each story arc the series' filled issues are part of, with those files. It reads only what has been fetched and asks ComicVine nothing.
+
+**`GET /api/metadata/story-arcs/{storyArcId}`** returns `{"id","name","summary","site_url","issues":[{"id","name","issue_number","volume","file_path"}]}`. `issues` is in ComicVine's order, and `file_path` is the library file holding the issue, or `null`. The arc is fetched from ComicVine the first time and stored. It answers `404` when ComicVine has no such arc.
+
+**Provider outages.** When nothing was found and a provider could not answer, `POST /api/metadata/refresh/{seriesTitle}`, `GET /api/metadata/search`, `GET /api/metadata/volume-number` and `GET /api/metadata/story-arcs/{storyArcId}` answer:
 
 ```json
 { "error": "MangaDex did not answer in time", "providers": ["MangaDex"], "retry_after_seconds": 30 }
@@ -845,7 +854,7 @@ Most failures are `400 {"error":"..."}` with a fixed reason. A thumbnail that ca
 | `POST` | `/api/scheduled-jobs/{jobKey}/run` | Admin | Run it now |
 | `GET` | `/api/scheduled-jobs/metadata-audit/findings` | Admin | Findings from the metadata audit |
 
-Job keys are `database-backup`, `file-naming-audit`, `library-scan`, `metadata-audit`, `metadata-backfill`, `missing-issues-check`, `series-language-audit` and `suwayomi-download-import`.
+Job keys are `comicvine-issue-details`, `database-backup`, `file-naming-audit`, `library-scan`, `metadata-audit`, `metadata-backfill`, `missing-issues-check`, `series-language-audit` and `suwayomi-download-import`. The options of `comicvine-issue-details` are `{"maxRequests":150}`: the ComicVine requests one run may make.
 
 A job is `{"jobKey","displayName","description","enabled","intervalMinutes","lastRunUtc","nextRunUtc","lastDurationMs","lastStatus","lastMessage","optionsJson"}`. `PUT` takes `{"enabled","intervalMinutes","optionsJson"}`; `intervalMinutes` must be positive when enabled. `run` answers `202 {"jobKey","queued"}`.
 

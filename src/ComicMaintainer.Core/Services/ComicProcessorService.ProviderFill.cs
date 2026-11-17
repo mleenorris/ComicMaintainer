@@ -83,6 +83,22 @@ public partial class ComicProcessorService
         || string.Equals(record.LookupStatus, "not_found", StringComparison.OrdinalIgnoreCase)
         || string.Equals(record.LookupStatus, "error", StringComparison.OrdinalIgnoreCase);
 
+    /// <inheritdoc />
+    public Task<MetadataWriteResult> WriteProviderDetailsAsync(
+        string filePath,
+        ComicMetadata metadata,
+        ComicMetadataFieldFlags fields,
+        ProviderComicInfoFields fill,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        ArgumentNullException.ThrowIfNull(fill);
+        return RunExclusiveAsync(
+            filePath,
+            token => UpdateMetadataCoreAsync(filePath, metadata, fields, token, providerFill: fill.IsEmpty ? null : fill),
+            cancellationToken);
+    }
+
     /// <summary>
     /// Fills the empty ComicInfo fields of a file normalize has nothing to change in, so a file
     /// that was already tagged still gets the provider's details the next time it is processed.

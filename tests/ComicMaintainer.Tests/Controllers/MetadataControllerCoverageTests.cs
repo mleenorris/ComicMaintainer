@@ -53,6 +53,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
             _fileStore.Object,
             _retag.Object,
             Mock.Of<IComicVineVolumeSearch>(),
+            Mock.Of<IComicVineIssueDetailsService>(),
             lifetime)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }

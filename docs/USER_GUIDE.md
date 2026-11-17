@@ -79,6 +79,30 @@ such as one-shots, are not counted. The dialog lists the volumes it counted, wit
 them. Nothing changes until you choose **Set Vol. N**, which writes the number into `<Volume>` of that volume's issues.
 This needs a ComicVine API key.
 
+### Issue details and story arcs from ComicVine
+
+ComicVine knows each issue's title, cover date, summary, writers and story arcs. On the series page, choose **Actions** >
+**Fetch Issue Details** to fill them in. It runs as a job, with progress like any other. It only fills in:
+
+- a title that only names the issue, such as `Chapter 8`, `#8` or an old file name. A real title is kept;
+- a missing cover year, or the `1970` some downloaders write when they do not know it, and the cover month;
+- a missing summary, or one that is only the series' synopsis;
+- missing writers, and an empty Story Arc and Web link.
+
+A field you changed yourself is never touched. Each issue is matched to ComicVine through its series and the year its
+volume started, as for volume numbers. An issue whose volume start year is not known uses the series' own ComicVine
+match. Annuals, Specials and duplicates are left out.
+
+ComicVine allows about 200 requests an hour. Titles, cover dates and summaries come 100 issues to a request, but writers
+and story arcs take a request per issue. A job asks for at most 250. Issues it did not reach get their writers and story
+arcs from the **ComicVine Issue Details** scheduled job, which does the whole library a batch at a time once you turn it
+on. Its `maxRequests` option sets how many requests each run may use.
+
+The series page lists the story arcs its issues are part of, under the synopsis. Choose one to see the arc's reading
+order across every series, as ComicVine lists it. Issues you have can be read from there, and the others are marked
+**Not in your library**. The arcs are also written into each file's `<StoryArc>`, which Komga and Kavita use to build
+reading lists.
+
 A file renamed before this version may have lost its volume from its name. If its `<Title>` still holds the old file
 name, such as `All New X-Men v2 008 (2016)`, the volume and cover year are read from there. A real story title is never
 read this way: the title has to start with the series name and contain the issue number.
@@ -256,6 +280,7 @@ Administrators manage jobs on the **Scheduled Jobs** page.
 | Series Language Audit | Off, daily | Reports series tags that do not match the preferred language |
 | Missing Issues Check | Off, daily | Reports gaps in issue numbering. With `autoDownload`, queues matches through Suwayomi |
 | Metadata Backfill | Off, every 15 minutes | Writes metadata edits stored in the database into the archives. A CBR, RAR or ZIP stays queued while conversion is off |
+| ComicVine Issue Details | Off, hourly | Fills issue titles, cover dates, summaries, writers and story arcs from ComicVine. See [Issue details and story arcs from ComicVine](#issue-details-and-story-arcs-from-comicvine) |
 
 ## Users
 

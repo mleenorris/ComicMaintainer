@@ -234,6 +234,8 @@ async function bootSeriesPage({ series = seriesSummary(), issues = [seriesIssue(
                 total_pages: 1,
                 per_page: issues.length
             },
+            // The series page asks for the story arcs of its issues; none by default.
+            [`GET /api/metadata/story-arcs/series/${encodeURIComponent(series.id)}`]: { arcs: [] },
             ...routes
         }
     });

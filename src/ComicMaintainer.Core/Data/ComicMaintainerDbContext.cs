@@ -34,6 +34,10 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<ErrorReportEntity> ErrorReports { get; set; } = null!;
     public DbSet<RevokedTokenEntity> RevokedTokens { get; set; } = null!;
     public DbSet<LibraryScanEntity> LibraryScans { get; set; } = null!;
+    public DbSet<ComicVineVolumeLinkEntity> ComicVineVolumeLinks { get; set; } = null!;
+    public DbSet<ComicVineIssueEntity> ComicVineIssues { get; set; } = null!;
+    public DbSet<ComicVineStoryArcEntity> ComicVineStoryArcs { get; set; } = null!;
+    public DbSet<ComicVineFileStateEntity> ComicVineFileStates { get; set; } = null!;
     public DbSet<ComicMaintainer.Core.Notifications.NotificationDeliveryEntity> NotificationDeliveries { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -253,6 +257,50 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.LastStatus).IsRequired().HasMaxLength(32);
             entity.Property(e => e.LastMessage).HasMaxLength(1024);
             entity.Property(e => e.CronExpression).HasMaxLength(128);
+        });
+
+        // ComicVine's volumes, issues and story arcs, as fetched for the library's issues
+        // (ComicVineIssueDetailsService). One link per series volume; issues are looked up by
+        // their volume.
+        modelBuilder.Entity<ComicVineVolumeLinkEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.SeriesKey).IsRequired().HasMaxLength(512);
+            entity.Property(e => e.VolumeName).HasMaxLength(512);
+            entity.Property(e => e.Publisher).HasMaxLength(256);
+            entity.HasIndex(e => new { e.SeriesKey, e.StartYear }).IsUnique();
+            entity.HasIndex(e => e.VolumeId);
+        });
+
+        modelBuilder.Entity<ComicVineIssueEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.IssueNumber).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Name).HasMaxLength(512);
+            entity.Property(e => e.CoverDate).HasMaxLength(10);
+            entity.Property(e => e.Summary).HasMaxLength(4000);
+            entity.Property(e => e.SiteUrl).HasMaxLength(512);
+            entity.Property(e => e.Writers).HasMaxLength(1024);
+            entity.Property(e => e.StoryArcsJson).HasMaxLength(4000);
+            entity.HasIndex(e => e.VolumeId);
+        });
+
+        modelBuilder.Entity<ComicVineStoryArcEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(512);
+            entity.Property(e => e.Summary).HasMaxLength(4000);
+            entity.Property(e => e.SiteUrl).HasMaxLength(512);
+            entity.Property(e => e.IssuesJson).IsRequired();
+        });
+
+        modelBuilder.Entity<ComicVineFileStateEntity>(entity =>
+        {
+            entity.HasKey(e => e.FilePath);
+            entity.Property(e => e.FilePath).HasMaxLength(2048);
+            entity.HasIndex(e => e.IssueId);
         });
 
         // Configure MetadataAuditFindingEntity

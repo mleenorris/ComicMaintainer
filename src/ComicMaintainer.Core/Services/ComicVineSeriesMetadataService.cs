@@ -26,7 +26,7 @@ namespace ComicMaintainer.Core.Services;
 /// Throttling answers (HTTP 420/429) and API error envelopes
 /// (<c>status_code</c> other than 1) are failures, not empty results.
 /// </remarks>
-public class ComicVineSeriesMetadataService : ExternalSeriesMetadataProviderBase, IComicVineVolumeSearch
+public partial class ComicVineSeriesMetadataService : ExternalSeriesMetadataProviderBase, IComicVineVolumeSearch, IComicVineCatalogClient
 {
     /// <summary>
     /// The health probe spends a search request from the hourly budget, so its

@@ -573,7 +573,10 @@ test('Reset Processed Status reports an unknown series, server errors and networ
 test('metadata actions without a series or a job do nothing', async t => {
     t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
     const page = await bootSeries();
-    const metadataRequests = () => page.fetchCalls.filter(call => /^\/api\/(metadata|status)\//.test(call.path)).length;
+    // The series page reads its story arcs when it opens; nothing else may be asked.
+    const metadataRequests = () => page.fetchCalls
+        .filter(call => /^\/api\/(metadata|status)\//.test(call.path) && !call.path.startsWith('/api/metadata/story-arcs/'))
+        .length;
 
     await page.run(`Promise.all([
         refreshSeriesMetadataDirect(''),

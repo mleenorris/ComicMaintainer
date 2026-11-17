@@ -125,6 +125,8 @@ public static class ComicInfoXml
         FillIfEmpty(root, "Genre", values.Genre);
         FillIfEmpty(root, "Web", values.Web);
         FillIfEmpty(root, "Manga", values.Manga, unsetValue: "Unknown");
+        FillIfEmpty(root, "StoryArc", values.StoryArc);
+        FillIfEmpty(root, "Month", values.Month is >= 1 and <= 12 ? values.Month.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : null, unsetValue: "-1");
         return document;
     }
 

@@ -71,6 +71,18 @@ public interface IComicProcessorService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Writes an issue's details from a metadata provider into the archive in one rewrite: the
+    /// <paramref name="fields"/> of <paramref name="metadata"/>, as <see cref="WriteMetadataAsync"/>
+    /// does, and <paramref name="fill"/> into the ComicInfo elements that are still empty.
+    /// </summary>
+    Task<MetadataWriteResult> WriteProviderDetailsAsync(
+        string filePath,
+        ComicMetadata metadata,
+        ComicMetadataFieldFlags fields,
+        ProviderComicInfoFields fill,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Remove the ComicInfo.xml entry from a comic archive, leaving the file
     /// without any embedded metadata. Succeeds, leaving the archive untouched
     /// (<see cref="MetadataWriteOutcome.Unchanged"/>), when it had no

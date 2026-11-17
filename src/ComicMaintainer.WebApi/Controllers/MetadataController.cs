@@ -23,6 +23,7 @@ public class MetadataController : ControllerBase
     private readonly ISeriesLanguagePreferenceRetagService _languageRetag;
     private readonly IHostApplicationLifetime? _applicationLifetime;
     private readonly IComicVineVolumeSearch _volumeSearch;
+    private readonly IComicVineIssueDetailsService _issueDetails;
     private readonly ILogger<MetadataController> _logger;
 
     public MetadataController(
@@ -35,6 +36,7 @@ public class MetadataController : ControllerBase
         IFileStoreService fileStore,
         ISeriesLanguagePreferenceRetagService languageRetag,
         IComicVineVolumeSearch volumeSearch,
+        IComicVineIssueDetailsService issueDetails,
         IHostApplicationLifetime? applicationLifetime = null)
     {
         _library = library;
@@ -47,6 +49,7 @@ public class MetadataController : ControllerBase
         _languageRetag = languageRetag;
         _applicationLifetime = applicationLifetime;
         _volumeSearch = volumeSearch;
+        _issueDetails = issueDetails;
     }
 
     /// <summary>
@@ -446,6 +449,86 @@ public class MetadataController : ControllerBase
                 LoggingHelper.SanitizeForLog(title), LoggingHelper.SanitizeForLog(ex.Message));
             return ProvidersUnavailable(ex);
         }
+    }
+
+    /// <summary>
+    /// Starts a job that fills the issues of series <paramref name="seriesId"/> with ComicVine's
+    /// details (see <see cref="IComicVineIssueDetailsService"/>). Answers <c>{"job_id","total_items"}</c>,
+    /// followed like any job.
+    /// </summary>
+    [HttpPost("issue-details/series/{seriesId}")]
+    [FailureMessage("Error starting the ComicVine issue details job")]
+    public async Task<ActionResult<object>> FetchIssueDetails(string seriesId, CancellationToken cancellationToken)
+    {
+        var paths = await SeriesFilePathsAsync(seriesId, cancellationToken);
+        if (paths is null)
+        {
+            return NotFound(new { error = "Series not found" });
+        }
+
+        var jobId = _issueDetails.StartJob(paths);
+        return Ok(new { job_id = jobId, total_items = paths.Count });
+    }
+
+    /// <summary>The story arcs the issues of series <paramref name="seriesId"/> are part of, as ComicVine's details named them.</summary>
+    [HttpGet("story-arcs/series/{seriesId}")]
+    [FailureMessage("Error reading the series' story arcs")]
+    public async Task<ActionResult<object>> SeriesStoryArcs(string seriesId, CancellationToken cancellationToken)
+    {
+        var paths = await SeriesFilePathsAsync(seriesId, cancellationToken);
+        if (paths is null)
+        {
+            return NotFound(new { error = "Series not found" });
+        }
+
+        var arcs = await _issueDetails.GetStoryArcsAsync(paths, cancellationToken);
+        return Ok(new { arcs = arcs.Select(arc => new { id = arc.Id, name = arc.Name, file_paths = arc.FilePaths }) });
+    }
+
+    /// <summary>A story arc's issues in reading order, each with the library file that holds it.</summary>
+    [HttpGet("story-arcs/{storyArcId:int}")]
+    [FailureMessage("Error reading the story arc")]
+    public async Task<ActionResult<object>> StoryArc(int storyArcId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var arc = await _issueDetails.GetStoryArcAsync(storyArcId, cancellationToken);
+            if (arc is null)
+            {
+                return NotFound(new { error = "Story arc not found" });
+            }
+
+            return Ok(new
+            {
+                id = arc.Id,
+                name = arc.Name,
+                summary = arc.Summary,
+                site_url = arc.SiteUrl,
+                issues = arc.Issues.Select(issue => new
+                {
+                    id = issue.Id,
+                    name = issue.Name,
+                    issue_number = issue.IssueNumber,
+                    volume = issue.Volume,
+                    file_path = issue.FilePath
+                })
+            });
+        }
+        catch (ExternalMetadataUnavailableException ex)
+        {
+            _logger.LogWarning(LoggingHelper.WithWebsitePrefix("Story arc {StoryArcId} lookup failed: {Reason}"),
+                storyArcId, LoggingHelper.SanitizeForLog(ex.Message));
+            return ProvidersUnavailable(ex);
+        }
+    }
+
+    /// <summary>Every file of series <paramref name="seriesId"/>; null when there is no such series.</summary>
+    private async Task<IReadOnlyList<string>?> SeriesFilePathsAsync(string seriesId, CancellationToken cancellationToken)
+    {
+        var found = await _library.GetSeriesIssuesForIdsAsync([seriesId], cancellationToken);
+        return found.TryGetValue(seriesId, out var series)
+            ? series.Issues.Select(issue => issue.FilePath).Where(path => !string.IsNullOrWhiteSpace(path)).ToList()
+            : null;
     }
 
     private static object VolumeNumberEntry(ExternalSeriesMetadata volume, bool counted, bool matched) => new

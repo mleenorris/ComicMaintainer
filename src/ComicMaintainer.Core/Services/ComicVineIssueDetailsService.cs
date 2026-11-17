@@ -475,7 +475,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                     return (null, false);
                 }
 
-                if (link is not null && link.VolumeId?.ToString(CultureInfo.InvariantCulture) == volume?.SourceId)
+                if (link is not null && link.VolumeId?.ToString(CultureInfo.InvariantCulture) == volume.SourceId)
                 {
                     return (link, false);
                 }

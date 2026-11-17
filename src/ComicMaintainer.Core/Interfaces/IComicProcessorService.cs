@@ -141,4 +141,27 @@ public interface IComicProcessorService
     /// in the database are still updated to match the new folder.
     /// </summary>
     Task<Guid> NormalizeAndRenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Re-checks files flagged as duplicates as a batch job (operation
+    /// <see cref="DuplicateRecheck.OperationName"/>). For each file it works out the name
+    /// processing would give it now. When no other file has that name the flag is cleared and
+    /// the file is processed, forced, so it gets its proper name and tags. When another file
+    /// still has it, the file is left as it is and fails with
+    /// <see cref="DuplicateRecheck.StillDuplicateError"/>, naming that file.
+    /// </summary>
+    Task<Guid> RecheckDuplicatesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Works out the name processing would give a file now, and which other file already has
+    /// it, without changing anything.
+    /// </summary>
+    Task<DuplicateClash> FindDuplicateClashAsync(string filePath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gives a duplicate the name the file it clashes with has, and flags that other file as the
+    /// duplicate instead: the other file is renamed aside (its name with " (duplicate)" added)
+    /// and the duplicate is processed, forced. No file is deleted.
+    /// </summary>
+    Task<DuplicateSwapResult> SwapDuplicateAsync(string filePath, CancellationToken cancellationToken = default);
 }

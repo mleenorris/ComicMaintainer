@@ -342,20 +342,11 @@ public partial class ComicProcessorService
         ComicMetadata metadata,
         CancellationToken cancellationToken)
     {
-        if (metadata == null || !string.IsNullOrEmpty(metadata.Issue))
+        var parsedChapter = metadata == null ? null : RecoverMarkedChapter(filePath, metadata);
+        if (parsedChapter is null)
         {
             return filePath;
         }
-
-        var originalNameStem = Path.GetFileNameWithoutExtension(filePath);
-        var parsedChapter = IssueNumberParser.ParseMarked(originalNameStem);
-        if (string.IsNullOrEmpty(parsedChapter))
-        {
-            return filePath;
-        }
-
-        metadata.Issue = parsedChapter;
-        metadata.Title = NormalizedTitleFor(metadata.Title, parsedChapter);
 
         if (!_settings.WatcherEnableNormalize)
         {
@@ -370,7 +361,7 @@ public partial class ComicProcessorService
             "Recovering chapter number '{Chapter}' from filename into metadata for {FilePath}; setting Issue and Title='{Title}'.",
             parsedChapter,
             LoggingHelper.SanitizePathForLog(filePath),
-            LoggingHelper.SanitizeForLog(metadata.Title));
+            LoggingHelper.SanitizeForLog(metadata!.Title));
 
         var write = await UpdateMetadataCoreAsync(
             filePath,
@@ -386,6 +377,30 @@ public partial class ComicProcessorService
         }
 
         return write.FilePath;
+    }
+
+    /// <summary>
+    /// The in-memory half of <see cref="EnsureChapterMetadataPreservedAsync"/>: puts an explicitly
+    /// marked chapter of the file name into <paramref name="metadata"/> when it has no number, and
+    /// returns it, or null when there was nothing to recover. Working out a file's processed name
+    /// without processing it uses this alone, so both arrive at the same name.
+    /// </summary>
+    private static string? RecoverMarkedChapter(string filePath, ComicMetadata metadata)
+    {
+        if (!string.IsNullOrEmpty(metadata.Issue))
+        {
+            return null;
+        }
+
+        var parsedChapter = IssueNumberParser.ParseMarked(Path.GetFileNameWithoutExtension(filePath));
+        if (string.IsNullOrEmpty(parsedChapter))
+        {
+            return null;
+        }
+
+        metadata.Issue = parsedChapter;
+        metadata.Title = NormalizedTitleFor(metadata.Title, parsedChapter);
+        return parsedChapter;
     }
 
     ///<summary>

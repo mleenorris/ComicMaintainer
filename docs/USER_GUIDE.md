@@ -186,6 +186,26 @@ flagged.
 
 Library-wide jobs leave out files marked as duplicates. To act on one, select it.
 
+A flag stays after its cause is gone. For example, an Annual once took a regular issue's name. Annuals are now named as
+Annuals, but the real issue is still flagged. **Re-check** finds these:
+
+- **Re-check All** in **Review Duplicates** checks every duplicate. **Re-check Duplicates** in a series' **Actions** menu
+  checks that series' duplicates.
+- For each file, it works out the name processing would give it now.
+- If no other file has that name, the flag is cleared and the file is processed. It gets its proper name and tags.
+- If another file still has it, nothing changes. The job's results name the other file.
+- When the job ends, a message counts the files cleared, still duplicate and failed.
+
+**Compare** (in **Review Duplicates**, or **Compare Duplicate** in an issue's menu) shows a duplicate next to the file that
+has its name: cover, pages, size, date and tags, plus the name processing would give each file. Rows that differ are
+highlighted.
+
+- **Keep Both** changes nothing.
+- **Swap** gives the duplicate the name. The other file gets ` (duplicate)` added to its name and is flagged instead.
+- If the name is free, **Re-check This File** clears the flag.
+
+None of these delete a file.
+
 ## Combine Folders
 
 **Combine Folders** merges folders that hold the same series. Pick the destination, and use **Preview Merge** to see what

@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
@@ -37,6 +38,10 @@ public class JobsController : ControllerBase
                 batch => batch.Processor.UpdateMetadataAsync(batch.Files, batch.Request.Metadata!, MetadataFields(batch.Request)),
                 ValidateMetadataEdit),
             ["delete"] = new(BatchScope.Selected, batch => batch.Processor.DeleteFilesAsync(batch.Files), ActsOnEntry: true),
+            ["recheck-duplicates"] = new(
+                BatchScope.Selected | BatchScope.All,
+                batch => batch.Processor.RecheckDuplicatesAsync(batch.Files),
+                DuplicatesOnly: true),
         };
 
     private readonly IComicProcessorService _processor;
@@ -223,7 +228,9 @@ public class JobsController : ControllerBase
     /// <summary>
     /// The one selection rule set of every batch operation. The library-wide scopes never
     /// include files marked as duplicates; files the caller names are taken as named, which is
-    /// how the duplicates view deletes them, but must be in the library.
+    /// how the duplicates view deletes them, but must be in the library. An operation on
+    /// duplicates only (re-checking them) takes just the flagged files, of the library or of
+    /// those named.
     /// </summary>
     private async Task<(IReadOnlyList<string> Files, string? Error)> SelectFilesAsync(
         BatchOperation operation,
@@ -231,6 +238,11 @@ public class JobsController : ControllerBase
         BatchJobRequest request,
         CancellationToken cancellationToken)
     {
+        if (operation.DuplicatesOnly)
+        {
+            return await SelectDuplicatesAsync(operation, scope, request, cancellationToken);
+        }
+
         switch (scope)
         {
             case BatchScope.All:
@@ -253,6 +265,37 @@ public class JobsController : ControllerBase
 
                 return (named, FindPathOutsideLibrary(named, operation) == null ? null : OutsideAllowedDirectoryError);
         }
+    }
+
+    private async Task<(IReadOnlyList<string> Files, string? Error)> SelectDuplicatesAsync(
+        BatchOperation operation,
+        BatchScope scope,
+        BatchJobRequest request,
+        CancellationToken cancellationToken)
+    {
+        var duplicates = (await _fileStore.GetFilteredFilesAsync("duplicates", cancellationToken))
+            .Select(f => f.FilePath)
+            .ToList();
+        if (scope == BatchScope.All)
+        {
+            return (duplicates, null);
+        }
+
+        var named = (request.Files ?? new List<string>())
+            .Where(file => !string.IsNullOrWhiteSpace(file))
+            .ToList();
+        if (named.Count == 0)
+        {
+            return (named, NoFilesSpecifiedError);
+        }
+
+        if (FindPathOutsideLibrary(named, operation) != null)
+        {
+            return (named, OutsideAllowedDirectoryError);
+        }
+
+        var flagged = duplicates.ToHashSet(StringComparer.Ordinal);
+        return (named.Where(flagged.Contains).Distinct(StringComparer.Ordinal).ToList(), null);
     }
 
     /// <summary>
@@ -320,6 +363,44 @@ public class JobsController : ControllerBase
         }
 
         return ComicMetadataFields.TryParse(request.Fields, out var fields, out _) ? fields : ComicMetadataFieldFlags.None;
+    }
+
+    /// <summary>
+    /// What a duplicate re-check job found: how many files were cleared of their flag, which
+    /// still clash and with what, and which could not be re-checked. <c>404</c> for any other job.
+    /// </summary>
+    [HttpGet("{jobId}/duplicate-recheck")]
+    [FailureMessage("Error reading the re-check results")]
+    public ActionResult<object> GetDuplicateRecheckSummary(Guid jobId)
+    {
+        var job = _jobRegistry.GetJob(jobId);
+        if (job == null || job.OperationName != DuplicateRecheck.OperationName)
+            return NotFound();
+
+        var clashes = new List<object>();
+        var failures = new List<object>();
+        foreach (var file in job.Files)
+        {
+            if (!job.Errors.TryGetValue(file, out var error))
+                continue;
+
+            if (DuplicateRecheck.ClashingPathOf(error) is { } clashingPath)
+                clashes.Add(new { file, clashes_with = clashingPath });
+            else
+                failures.Add(new { file, error });
+        }
+
+        return Ok(new
+        {
+            job_id = job.JobId.ToString(),
+            status = job.Status.ToString().ToLower(),
+            total_items = job.TotalFiles,
+            cleared = job.ProcessedFiles,
+            still_duplicate = clashes.Count,
+            failed = failures.Count,
+            clashes,
+            failures
+        });
     }
 
     // RESTful endpoint: GET /api/jobs - List all jobs
@@ -394,11 +475,16 @@ public class JobsController : ControllerBase
     /// The job affects the directory entry a path names rather than what it leads to, as
     /// deleting does, so named files are held to the stricter rule for entries.
     /// </param>
+    /// <param name="DuplicatesOnly">
+    /// The job is for files flagged as duplicates: its all scope means every flagged file, and
+    /// named files that are not flagged are left out.
+    /// </param>
     private sealed record BatchOperation(
         BatchScope Scopes,
         Func<BatchInvocation, Task<Guid>> Start,
         Func<BatchJobRequest, string?>? Validate = null,
-        bool ActsOnEntry = false);
+        bool ActsOnEntry = false,
+        bool DuplicatesOnly = false);
 
     private sealed record BatchInvocation(
         IComicProcessorService Processor,

@@ -1048,6 +1048,9 @@
                                             ${issue.duplicate
                                                 ? `<button class="dropdown-item" onclick="openDuplicateReviewModal('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
                                                     ${uiIcon('copy')} Review Duplicate
+                                                </button>
+                                                <button class="dropdown-item" onclick="openDuplicateCompareModal('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                                    ${uiIcon('copy')} Compare Duplicate
                                                 </button>`
                                                 : ''
                                             }
@@ -1273,6 +1276,20 @@
             }
         }
 
+        // Re-checks the issues of the open series flagged as duplicates (see
+        // startDuplicateRecheck), as listed on the series page.
+        function recheckSeriesDuplicates(seriesId, seriesTitle) {
+            const cached = seriesIssuesCache.get(seriesId);
+            const paths = (cached ? cached.issues : [])
+                .filter(issue => issue && issue.duplicate && issue.file_path)
+                .map(issue => issue.file_path);
+            if (!paths.length) {
+                showMessage(`No issue of ${seriesTitle} is flagged as a duplicate`, 'info');
+                return;
+            }
+            return startDuplicateRecheck(paths);
+        }
+
         // Expands/collapses a clamped synopsis block.
         function toggleSeriesSynopsis(btn) {
             const block = btn.closest('[data-synopsis-block]');
@@ -1386,6 +1403,9 @@
                                             </button>
                                             <button class="dropdown-item" data-requires-write onclick="openVolumeNumbersModal('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Ask ComicVine for the number of each volume known only by the year it started">
                                                 ${uiIcon('globe')} Find Volume Numbers
+                                            </button>
+                                            <button class="dropdown-item" data-requires-write onclick="recheckSeriesDuplicates('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Clear the flag of each duplicate issue whose processed name is free again, and process it">
+                                                ${uiIcon('rotate-ccw')} Re-check Duplicates
                                             </button>
                                             <div class="dropdown-divider" data-requires-write></div>
                                             <button class="dropdown-item" data-requires-write onclick="refreshSeriesMetadataDirect('${jsArg(series.title)}'); closeAllDropdowns();">

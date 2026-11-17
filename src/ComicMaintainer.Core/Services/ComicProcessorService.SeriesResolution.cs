@@ -22,8 +22,12 @@ public partial class ComicProcessorService
     /// takes issue #1's name nor its place, while it stays in the same series, and no Annual
     /// gets a series record of its own.
     /// </para>
+    /// <para>
+    /// <paramref name="mutateCache"/> is passed to the resolver: a processing preview passes
+    /// false, so it records no alias and persists no provider lookup.
+    /// </para>
     /// </summary>
-    private async Task<string> ResolveNormalizedSeriesAsync(ComicMetadata metadata, string filePath, CancellationToken cancellationToken)
+    private async Task<string> ResolveNormalizedSeriesAsync(ComicMetadata metadata, string filePath, bool mutateCache, CancellationToken cancellationToken)
     {
         var annual = AnnualIssue.IsAnnual(metadata.Series, metadata.Issue, Path.GetFileName(filePath));
         var lookup = metadata;
@@ -33,7 +37,7 @@ public partial class ComicProcessorService
             lookup.Series = AnnualIssue.WithoutAnnual(metadata.Series!);
         }
 
-        var resolution = await _seriesNameResolver.ResolveAsync(filePath, lookup, mutateCache: true, cancellationToken);
+        var resolution = await _seriesNameResolver.ResolveAsync(filePath, lookup, mutateCache, cancellationToken);
         var unresolved = string.IsNullOrWhiteSpace(resolution.ResolvedSeries)
             || resolution.WinningStep == SeriesNameResolutionStep.UnknownSentinel;
         if (unresolved && IsInLibraryRoot(filePath))

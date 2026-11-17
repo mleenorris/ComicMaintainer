@@ -29,6 +29,15 @@ public interface IComicProcessorService
     Task<Guid> ProcessFilesAsync(IEnumerable<string> filePaths, bool forceReprocess, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Works out what processing the file would do, as a forced reprocess under the current
+    /// settings, without changing anything: its new path, the tags it would change and whether
+    /// its new name is taken. Uses the same normalize and rename decisions as
+    /// <see cref="ProcessFileAsync(string, bool, CancellationToken)"/>. A file processing would
+    /// fail for comes back with its <see cref="ProcessingPreviewItem.Error"/> set.
+    /// </summary>
+    Task<ProcessingPreviewItem> PreviewProcessingAsync(string filePath, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Get metadata from a comic file
     /// </summary>
     Task<ComicMetadata?> GetMetadataAsync(string filePath, CancellationToken cancellationToken = default);

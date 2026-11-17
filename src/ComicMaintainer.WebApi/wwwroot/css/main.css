@@ -2857,6 +2857,84 @@
             margin-bottom: 6px;
         }
 
+        /* Preview Changes (process-preview.js): one section per series, one
+           row per file with its new name and tag changes. A file that would
+           not get its new name, or would fail, is marked at its edge. */
+        .process-preview-summary {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .process-preview-filter {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        .process-preview-list {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            margin-bottom: 12px;
+        }
+
+        .process-preview-series-title {
+            color: var(--text-primary);
+            font-size: 15px;
+            margin-bottom: 6px;
+            word-break: break-word;
+        }
+
+        .process-preview-item {
+            background: var(--bg-hover);
+            border-left: 3px solid transparent;
+            border-radius: 6px;
+            padding: 8px 10px;
+            margin-bottom: 6px;
+            font-size: 13px;
+            word-break: break-word;
+        }
+
+        .process-preview-item--clash {
+            border-left-color: var(--accent-highlight);
+        }
+
+        .process-preview-item--error {
+            border-left-color: var(--danger);
+        }
+
+        .process-preview-name {
+            display: flex;
+            align-items: baseline;
+            flex-wrap: wrap;
+            gap: 6px;
+            color: var(--text-primary);
+        }
+
+        .process-preview-tags {
+            margin: 6px 0 0 24px;
+            color: var(--text-secondary);
+        }
+
+        .process-preview-field {
+            font-weight: 600;
+        }
+
+        .process-preview-note {
+            margin: 6px 0 0 24px;
+            color: var(--text-muted);
+        }
+
+        .process-preview-note--clash,
+        .process-preview-note--error {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
         .combine-folders-suggestion {
             color: var(--text-secondary);
             font-size: 13px;

@@ -176,6 +176,33 @@ The **Writer** field is comma-separated authors. **Batch Update** applies only t
 through the API, list it in `Fields` with an empty value on `POST /api/files/tags` or
 `POST /api/jobs/update-metadata-selected`.
 
+### Preview changes
+
+Check what processing would do before it does it. Nothing is changed until you process the files.
+
+- **Process > Preview Process All** previews every file that is not a duplicate.
+- **Process > Preview Process Selected** previews the files you selected.
+- **Preview Changes** in a series' **Actions** menu previews that series.
+
+The preview runs in the background, like other jobs. When it ends, the results open, grouped by series. Each file shows:
+
+- its current name and its new name;
+- each tag that changes, with its old and new value. `VolumeYear` is kept in the app's database, not in the file;
+- a clash, when another file already has the new name or another file in the preview gets it first. Processing flags such a
+  file as a duplicate instead of renaming it;
+- a note when processing would fail for the file, or would leave its tags unwritten (a CBR, RAR or ZIP while conversion to
+  CBZ is off).
+
+**Only changes** is on at first. Turn it off to list the files processing would leave alone too.
+
+The preview follows your rename and normalize settings. It shows what reprocessing would do, so it includes files already
+marked processed.
+
+Files with changes are ticked, except clashes and files that would fail. Untick the files you want left alone, then
+choose **Process Ticked Files**. This reprocesses exactly the ticked files.
+
+The app keeps the five most recent previews until it restarts. If the library changes after a preview, run it again.
+
 ## Duplicates
 
 A file whose target name is taken is flagged as a duplicate. Nothing is overwritten, and nothing is moved. Find them with

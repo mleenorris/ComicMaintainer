@@ -33,6 +33,9 @@ public class WriteOperationAuthorizationConvention : IActionModelConvention
     {
         ["Files"] = AuthorizationPolicies.CanModifyLibrary,
         ["Jobs"] = AuthorizationPolicies.CanModifyLibrary,
+        // Starting a preview writes nothing, but it is a job over the library's archives, which
+        // only accounts that may process files can start.
+        ["ProcessPreview"] = AuthorizationPolicies.CanModifyLibrary,
         ["Metadata"] = AuthorizationPolicies.CanModifyLibrary,
         ["Status"] = AuthorizationPolicies.CanModifyLibrary,
         ["SeriesImages"] = AuthorizationPolicies.CanModifyLibrary,

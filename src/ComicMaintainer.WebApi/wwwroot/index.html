@@ -423,6 +423,14 @@
                                 <button class="action-dropdown-item" id="processSelectedItem" onclick="processSelectedFilesAsync(); closeAllActionDropdowns();" disabled>
                                     <svg class="icon" aria-hidden="true"><use href="#i-zap"/></svg> Process Selected
                                 </button>
+                                <div class="dropdown-divider"></div>
+                                <button class="action-dropdown-item" onclick="previewProcessAll(); closeAllActionDropdowns();" title="See what Process All would rename and retag, before anything is changed">
+                                    <svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg> Preview Process All
+                                </button>
+                                <button class="action-dropdown-item" id="previewSelectedItem" onclick="previewProcessSelected(); closeAllActionDropdowns();" title="See what processing the selected files would rename and retag, before anything is changed" disabled>
+                                    <svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg> Preview Process Selected
+                                </button>
+                                <div class="dropdown-divider"></div>
                                 <button class="action-dropdown-item" id="clearSelectedStatusItem" onclick="clearSelectedProcessedStatus(); closeAllActionDropdowns();" disabled title="Clear the renamed/normalized flags on the selected files so they can be re-processed">
                                     <svg class="icon" aria-hidden="true"><use href="#i-rotate-ccw"/></svg> Clear Processed Status
                                 </button>
@@ -1796,7 +1804,32 @@
             </div>
         </div>
     </div>
-    
+
+    <!-- Preview Changes Modal: the results of a processing preview. After the
+         progress modal, so it shows on top of it while that one closes. -->
+    <div class="modal" id="processPreviewModal" role="dialog" aria-modal="true" aria-labelledby="processPreviewModalTitle" aria-hidden="true">
+        <div class="modal-content" style="max-width: 900px;">
+            <div class="modal-header">
+                <h2 id="processPreviewModalTitle">Preview Changes</h2>
+                <button class="close-btn" onclick="closeProcessPreviewModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="combine-folders-meta">
+                    What processing would do. Nothing has been changed yet. Untick the files you want left alone, then process the rest.
+                </p>
+                <p id="processPreviewSummary" class="process-preview-summary" role="status" aria-live="polite"></p>
+                <label class="process-preview-filter"><input type="checkbox" id="processPreviewOnlyChanges" checked onchange="toggleProcessPreviewOnlyChanges()"> Only changes</label>
+                <div id="processPreviewList" class="process-preview-list"></div>
+                <div id="processPreviewEmptyState" class="duplicate-review-empty" style="display: none;"></div>
+                <button class="btn btn-small" id="processPreviewMoreBtn" onclick="loadMoreProcessPreview()" style="display: none;">Show more</button>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="processPreviewApplyBtn" onclick="applyProcessPreview()" data-requires-write disabled><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg> Process Ticked Files</button>
+                <button class="btn" onclick="closeProcessPreviewModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Reset Confirmation Modal -->
     <div class="modal" id="resetConfirmationModal" role="dialog" aria-modal="true" aria-labelledby="resetConfirmationModalTitle" aria-hidden="true">
         <div class="modal-content" style="max-width: 500px;">
@@ -2602,6 +2635,7 @@
     <script src="__BASE_PATH__/js/app/selection.js?v=__APP_VERSION__"></script>
     <script src="__BASE_PATH__/js/app/file-actions.js?v=__APP_VERSION__"></script>
     <script src="__BASE_PATH__/js/app/jobs.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/process-preview.js?v=__APP_VERSION__"></script>
     <script src="__BASE_PATH__/js/app/settings.js?v=__APP_VERSION__"></script>
     <script src="__BASE_PATH__/js/app/scheduled-jobs.js?v=__APP_VERSION__"></script>
     <script src="__BASE_PATH__/js/app/users.js?v=__APP_VERSION__"></script>

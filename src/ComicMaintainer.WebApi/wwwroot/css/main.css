@@ -2863,6 +2863,68 @@
             line-height: 1.5;
         }
 
+        /* Duplicate compare: the two files side by side, one column each on phones. */
+        .duplicate-compare-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 14px;
+        }
+
+        .duplicate-compare-side {
+            background: var(--bg-hover);
+            border-radius: 10px;
+            padding: 16px;
+            min-width: 0;
+        }
+
+        .duplicate-compare-side h3 {
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            word-break: break-word;
+        }
+
+        .duplicate-compare-cover {
+            display: block;
+            width: 100%;
+            max-width: 180px;
+            aspect-ratio: 2 / 3;
+            object-fit: cover;
+            border-radius: 6px;
+            background: var(--bg-secondary);
+            margin-bottom: 10px;
+        }
+
+        .duplicate-compare-path {
+            color: var(--text-muted);
+            font-size: 12px;
+            word-break: break-word;
+            margin-bottom: 10px;
+        }
+
+        .duplicate-compare-fields div {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 4px 6px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .duplicate-compare-fields dt {
+            color: var(--text-muted);
+        }
+
+        .duplicate-compare-fields dd {
+            color: var(--text-primary);
+            text-align: right;
+            word-break: break-word;
+        }
+
+        /* A field the two files disagree on: what tells them apart. */
+        .duplicate-compare-fields .duplicate-compare-differs {
+            background: rgba(243, 156, 18, 0.2);
+        }
+
         .combine-folders-summary {
             margin-bottom: 16px;
         }
@@ -2877,6 +2939,84 @@
             color: var(--text-muted);
             font-size: 13px;
             margin-bottom: 6px;
+        }
+
+        /* Preview Changes (process-preview.js): one section per series, one
+           row per file with its new name and tag changes. A file that would
+           not get its new name, or would fail, is marked at its edge. */
+        .process-preview-summary {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .process-preview-filter {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        .process-preview-list {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            margin-bottom: 12px;
+        }
+
+        .process-preview-series-title {
+            color: var(--text-primary);
+            font-size: 15px;
+            margin-bottom: 6px;
+            word-break: break-word;
+        }
+
+        .process-preview-item {
+            background: var(--bg-hover);
+            border-left: 3px solid transparent;
+            border-radius: 6px;
+            padding: 8px 10px;
+            margin-bottom: 6px;
+            font-size: 13px;
+            word-break: break-word;
+        }
+
+        .process-preview-item--clash {
+            border-left-color: var(--accent-highlight);
+        }
+
+        .process-preview-item--error {
+            border-left-color: var(--danger);
+        }
+
+        .process-preview-name {
+            display: flex;
+            align-items: baseline;
+            flex-wrap: wrap;
+            gap: 6px;
+            color: var(--text-primary);
+        }
+
+        .process-preview-tags {
+            margin: 6px 0 0 24px;
+            color: var(--text-secondary);
+        }
+
+        .process-preview-field {
+            font-weight: 600;
+        }
+
+        .process-preview-note {
+            margin: 6px 0 0 24px;
+            color: var(--text-muted);
+        }
+
+        .process-preview-note--clash,
+        .process-preview-note--error {
+            color: var(--text-primary);
+            font-weight: 600;
         }
 
         .combine-folders-suggestion {

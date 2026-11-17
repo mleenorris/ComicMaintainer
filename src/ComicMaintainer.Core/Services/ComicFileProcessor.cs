@@ -44,6 +44,28 @@ public class ComicFileProcessor
     private static readonly Regex DanglingSeparatorPattern =
         new(@"^\s*[-–—]\s+|\s+[-–—]\s*$", RegexOptions.Compiled);
 
+    // The words a template or file name puts before an issue number: "Chapter 12", "Ch. 12", "Issue 3", "#7".
+    private const string IssuePrefixWords = "chapter|chap|ch|issue|iss|no|nr|number|episode|ep|part|pt";
+
+    /// <summary>The prefix before <c>{issue}</c> in a template: "Chapter ", "Ch. ", "#".</summary>
+    private static readonly Regex IssuePlaceholderPrefixPattern =
+        new(@"(?:(?<![\p{L}\p{N}])(?:" + IssuePrefixWords + @")\.?\s*#?|#)\s*(?=\{issue(?:_no_pad)?\})",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>A file name ending in " - Chapter" with no number after it.</summary>
+    private static readonly Regex BareIssuePrefixPattern =
+        new(@"\s[-–—]\s*(?:(?:" + IssuePrefixWords + @")\.?|#)\s*$",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>A title normalize generates: "Chapter", "Chapter 5", "Chapter Unknown".</summary>
+    private static readonly Regex GeneratedTitlePattern =
+        new(@"^\s*chapter(?:\s+\S+)?\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>A kind label starting a title, alone or before a separator: "Special – ", "Giant-Size: ".</summary>
+    private static readonly Regex KindLabelPattern =
+        new(@"^(?:annual|special|giant(?:[\s_-]*sized?)?)(?![\p{L}\p{N}])\s*(?:[-–—:]|$)",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     /// <summary>
     /// Limits issue-number padding to 0..<see cref="AppSettings.MaxIssueNumberPadding"/>. Configured values
     /// are not range-checked, and the <c>"D{padding}"</c> format string turns a negative value into literal
@@ -67,12 +89,14 @@ public class ComicFileProcessor
     /// </param>
     /// <remarks>
     /// <c>{series}</c> is the series title alone. Its kind and volume go only where the template
-    /// places <c>{format}</c> ("Annual" or "Special", see <see cref="IssueFormat"/>; nothing for a
-    /// regular issue), <c>{annual}</c> ("Annual" for an Annual only) and <c>{volume_label}</c>
+    /// places <c>{format}</c> ("Annual", "Special" or "Giant-Size", see <see cref="IssueFormat"/>;
+    /// nothing for a regular issue), <c>{annual}</c> ("Annual" for an Annual only) and <c>{volume_label}</c>
     /// ("Vol. 2" when the volume number is known, else its start year "(1990)", or nothing).
     /// <c>{volume_number}</c> ("2") and <c>{volume_year}</c> ("1990") are each part alone.
     /// <c>{volume}</c> is the raw <c>&lt;Volume&gt;</c> value. Brackets and " - " separators a
-    /// placeholder left empty are removed with it.
+    /// placeholder left empty are removed with it. An issue with no number loses the prefix
+    /// before <c>{issue}</c> ("Chapter ", "#"), and <c>{issue}</c> renders its title instead
+    /// (see <see cref="TitleInPlaceOfNumber"/>), unless the template already holds <c>{title}</c>.
     /// </remarks>
     public static string FormatFilename(
         string template,
@@ -132,6 +156,18 @@ public class ComicFileProcessor
         }
 
         // Build replacement dictionary
+        if (string.IsNullOrWhiteSpace(issueNumber))
+        {
+            // No number: "Chapter " before {issue} would be left bare ("All-New X-Men -
+            // Chapter.cbz"), so it goes, and the issue's own title names it instead.
+            template = IssuePlaceholderPrefixPattern.Replace(template, string.Empty);
+            var standIn = template.Contains("{title}", StringComparison.Ordinal)
+                ? null
+                : TitleInPlaceOfNumber(tags.Title, tags.Series);
+            issueFormatted = standIn ?? string.Empty;
+            issueNoPad = issueFormatted;
+        }
+
         var replacements = SeriesPlaceholders(tags, sourceFileName);
         replacements["issue"] = issueFormatted;
         replacements["issue_no_pad"] = issueNoPad;
@@ -219,9 +255,9 @@ public class ComicFileProcessor
 
     /// <summary>
     /// The series split into what the <c>{series}</c>, <c>{format}</c> and <c>{volume_label}</c>
-    /// placeholders render: the title without its Annual or volume ("Green Lantern Annual
-    /// (1990)" gives "Green Lantern"); the issue's kind, from <c>&lt;Format&gt;</c> or the
-    /// series, number, file name or title marking an Annual (see <see cref="IssueFormat.Of"/>); and
+    /// placeholders render: the title without its Annual, Giant-Size or volume ("Green Lantern
+    /// Annual (1990)" gives "Green Lantern"); the issue's kind, from <c>&lt;Format&gt;</c> or the
+    /// series, number, file name or title marking one (see <see cref="IssueFormat.Of"/>); and
     /// its volume, from the ComicInfo
     /// <c>&lt;Volume&gt;</c>, the series name or <paramref name="sourceFileName"/> (see
     /// <see cref="ComicVolume.Resolve"/>). American comics restart their numbering with each
@@ -254,9 +290,40 @@ public class ComicFileProcessor
         {
             title = WithoutTrailingWord(title, IssueFormat.Special);
         }
+        else if (kind == IssueFormat.GiantSize)
+        {
+            title = GiantSizeIssue.WithoutGiantSize(title);
+        }
 
         return (title, kind, volume, startYear);
     }
+
+    /// <summary>
+    /// The text that names an issue with no number in its file name, in place of
+    /// <c>{issue}</c>: its <paramref name="title"/>, without the series name, volume and kind
+    /// label an old file name left at its start (<c>All New X-Men .Special – One Down</c> gives
+    /// <c>One Down</c>). Null when the title is blank or one normalize generates
+    /// (<c>Chapter Unknown</c>), or nothing is left of it: then nothing names the issue.
+    /// </summary>
+    public static string? TitleInPlaceOfNumber(string? title, string? series)
+    {
+        if (string.IsNullOrWhiteSpace(title) || GeneratedTitlePattern.IsMatch(title))
+        {
+            return null;
+        }
+
+        var rest = KindLabelPattern.Replace(FileNameTitle.AfterSeries(title, series), string.Empty)
+            .Trim(' ', '\t', '.', '#', '_', ':', '-', '–', '—', '~', ',');
+        return rest.Any(char.IsLetterOrDigit) ? rest : null;
+    }
+
+    /// <summary>
+    /// True when a file name (without its extension) ends in a separator and a bare issue
+    /// prefix, with no number after it (<c>All-New X-Men - Chapter</c>): an earlier rename of an
+    /// issue with no number left it so.
+    /// </summary>
+    public static bool EndsInBareIssuePrefix(string fileNameStem)
+        => !string.IsNullOrEmpty(fileNameStem) && BareIssuePrefixPattern.IsMatch(fileNameStem);
 
     /// <summary>
     /// <paramref name="title"/> without a last word <paramref name="word"/>, so a series named

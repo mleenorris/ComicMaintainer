@@ -91,9 +91,20 @@ the old file name `All New X-Men Annual 001 (2015)` or `#Annual 2021` that some 
 file has been renamed, the title is all that still marks it. Normalize writes `<Format>Annual</Format>` into an Annual
 whose `<Format>` is empty. Annuals stay in the Green Lantern series, in their own "Annual" section with their own missing issues.
 
-Specials work the same way, but only by `<Format>`: set **Format** to `Special` in **View/Edit**, or for many files at
-once in **Update**. Specials get their own "Special" section, after the Annuals. Any other `<Format>` value, such as
-`TPB`, is kept but does not change how the issue is listed or named.
+Specials work the same way. Set **Format** to `Special` in **View/Edit**, or for many files at once in **Update**. A
+title can also mark one: "Special" right before the issue number (`Special 1`), or, for an issue with no number, "Special"
+alone or before a separator (`All New X-Men .Special – One Down`). Specials get their own "Special" section, after the
+Annuals.
+
+Giant-Size issues have their own numbering too. `<Format>` is `Giant-Size`; `Giant` and `Giant Size` are read as it. A
+file is one when its series or file name starts or ends with "Giant-Size" or "Giant Size" (`Giant-Size X-Men`), or its
+title has "Giant" right before the issue number (`Giant 2025`, `#Giant 2025 2`). "Giant" alone in a series name, such
+as `Giant Days`, does not count. Normalize writes `<Format>Giant-Size</Format>` or `<Format>Special</Format>` into an
+empty `<Format>`. Giant-Size issues get their own "Giant-Size" section, after the Specials.
+
+Any other `<Format>` value, such as `TPB`, is kept but does not change how the issue is listed or named.
+
+A story title that only contains one of these words, such as "The Annual Party" or "A Special Day", never counts.
 
 ### Rename
 
@@ -105,19 +116,26 @@ rewrites the archive. The default format is `{series} {format} {volume_label} - 
 | Green Lantern (1990) #1 | `Green Lantern (1990) - Chapter 0001.cbz` |
 | Green Lantern Annual (1990) #1 | `Green Lantern Annual (1990) - Chapter 0001.cbz` |
 | Green Lantern #1, Format `Special` | `Green Lantern Special - Chapter 0001.cbz` |
+| X-Men #2025, title `Giant 2025` | `X-Men Giant-Size - Chapter 2025.cbz` |
 | Saga, volume unknown, #1 | `Saga - Chapter 0001.cbz` |
+| All-New X-Men, no number, title `.Special – One Down` | `All-New X-Men Special - One Down.cbz` |
 
-`{series}` is the series name alone. Its volume, "Annual" and "Special" appear only where the format places them:
+`{series}` is the series name alone. Its volume and kind appear only where the format places them:
 
 - `{volume_label}` is the volume number, `Vol. 2`, when it is known, else the start year, `(1990)`. They come from
   ComicInfo `<Volume>`, the stored start year, the series name, the file name (a `v2` token, or a year before the
   issue number), an old file name left in `<Title>`, and the folder name.
 - `{volume_number}` is the number alone, `2`, and `{volume_year}` the start year alone, `1990`.
-- `{format}` is `Annual` for an Annual and `Special` for a Special.
-- `{annual}` is `Annual` for an Annual only. Prefer `{format}`, which covers Specials too.
+- `{format}` is `Annual`, `Special` or `Giant-Size`.
+- `{annual}` is `Annual` for an Annual only. Prefer `{format}`, which covers the other kinds too.
 
 Each renders empty when it does not apply, and any brackets or ` - ` separator around it go with it. The old defaults,
 `{series} - Chapter {issue}` and `{series} {annual} {volume_label} - Chapter {issue}`, are read as the new one.
+
+An issue with no number never gets a name ending in a bare "Chapter". The word before `{issue}` (`Chapter`, `Ch.`,
+`Issue`, `#`) is dropped, and `{issue}` becomes the issue's title. The series name and kind an old file name left at the
+start of the title are taken off. When there is no title either, the file keeps its name. A file an older version named
+`... - Chapter.cbz` loses the bare "Chapter" when it is processed again.
 
 > **Using this for comic books? Keep `{volume_label}` and `{format}` in your format.** American comics restart their
 > numbering with each volume, and Annuals and Specials have their own numbering. Without these placeholders, Green
@@ -211,6 +229,33 @@ The **Writer** field is comma-separated authors. **Batch Update** applies only t
 through the API, list it in `Fields` with an empty value on `POST /api/files/tags` or
 `POST /api/jobs/update-metadata-selected`.
 
+### Preview changes
+
+Check what processing would do before it does it. Nothing is changed until you process the files.
+
+- **Process > Preview Process All** previews every file that is not a duplicate.
+- **Process > Preview Process Selected** previews the files you selected.
+- **Preview Changes** in a series' **Actions** menu previews that series.
+
+The preview runs in the background, like other jobs. When it ends, the results open, grouped by series. Each file shows:
+
+- its current name and its new name;
+- each tag that changes, with its old and new value. `VolumeYear` is kept in the app's database, not in the file;
+- a clash, when another file already has the new name or another file in the preview gets it first. Processing flags such a
+  file as a duplicate instead of renaming it;
+- a note when processing would fail for the file, or would leave its tags unwritten (a CBR, RAR or ZIP while conversion to
+  CBZ is off).
+
+**Only changes** is on at first. Turn it off to list the files processing would leave alone too.
+
+The preview follows your rename and normalize settings. It shows what reprocessing would do, so it includes files already
+marked processed.
+
+Files with changes are ticked, except clashes and files that would fail. Untick the files you want left alone, then
+choose **Process Ticked Files**. This reprocesses exactly the ticked files.
+
+The app keeps the five most recent previews until it restarts. If the library changes after a preview, run it again.
+
 ## Duplicates
 
 A file whose target name is taken is flagged as a duplicate. Nothing is overwritten, and nothing is moved. Find them with
@@ -220,6 +265,26 @@ On case-insensitive file systems (Windows, macOS, Docker Desktop, SMB), a name t
 flagged.
 
 Library-wide jobs leave out files marked as duplicates. To act on one, select it.
+
+A flag stays after its cause is gone. For example, an Annual once took a regular issue's name. Annuals are now named as
+Annuals, but the real issue is still flagged. **Re-check** finds these:
+
+- **Re-check All** in **Review Duplicates** checks every duplicate. **Re-check Duplicates** in a series' **Actions** menu
+  checks that series' duplicates.
+- For each file, it works out the name processing would give it now.
+- If no other file has that name, the flag is cleared and the file is processed. It gets its proper name and tags.
+- If another file still has it, nothing changes. The job's results name the other file.
+- When the job ends, a message counts the files cleared, still duplicate and failed.
+
+**Compare** (in **Review Duplicates**, or **Compare Duplicate** in an issue's menu) shows a duplicate next to the file that
+has its name: cover, pages, size, date and tags, plus the name processing would give each file. Rows that differ are
+highlighted.
+
+- **Keep Both** changes nothing.
+- **Swap** gives the duplicate the name. The other file gets ` (duplicate)` added to its name and is flagged instead.
+- If the name is free, **Re-check This File** clears the flag.
+
+None of these delete a file.
 
 ## Combine Folders
 
@@ -239,6 +304,11 @@ When a series is in folders that can be combined, its page says so: "This series
 Filter by all, unmarked, marked, duplicates, renamed, normalized, read, unread, matched, unmatched or missing issues. The
 **Genre** and **Status** menus use the series' provider match, and a series shows these once its match has been refreshed.
 Each menu can also find series with no such data.
+
+Missing issues are the gaps from #1 up to the highest issue number. A number far beyond the rest is left out of that, so
+Nightwing #1,000,000 does not make a million issues missing. The numbers are split wherever one is more than 1000 above
+the one before it (or 5 per issue in the run, when that is more). The largest group is the run; groups above it leave no
+gap. The series page, the missing filter and the Missing Issues Check all use this rule.
 
 Read state is per user. **Mark All Read** and **Mark All Unread** apply to the whole library for your account.
 

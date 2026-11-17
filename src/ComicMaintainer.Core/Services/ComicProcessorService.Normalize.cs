@@ -88,14 +88,14 @@ public partial class ComicProcessorService
 
             // Check if metadata is already normalized (has ComicInfo.xml with valid data and series name matches folder)
             // If we successfully read metadata, it means ComicInfo.xml exists and is parseable
-            var isNormalized = await IsMetadataNormalizedAsync(metadata, filePath, cancellationToken);
-            _logger.LogDebug("NormalizeFileAsync: Metadata normalization check - IsNormalized: {IsNormalized}", isNormalized);
-            
-            if (isNormalized)
+            var plan = await PlanNormalizeAsync(metadata, filePath, mutateCache: true, cancellationToken);
+            _logger.LogDebug("NormalizeFileAsync: Metadata normalization check - IsNormalized: {IsNormalized}", plan.AlreadyNormalized);
+
+            if (plan.AlreadyNormalized)
             {
                 _logger.LogInformation("NormalizeFileAsync: File already has normalized metadata: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken);
-                if (await FillFromProviderAsync(filePath, metadata, cancellationToken) is { Succeeded: true } filled)
+                if (await FillFromProviderAsync(filePath, metadata, plan.ProviderFill, cancellationToken) is { Succeeded: true } filled)
                 {
                     filePath = filled.FilePath;
                 }
@@ -106,17 +106,15 @@ public partial class ComicProcessorService
                     filename, filename, metadata, metadata, cancellationToken);
                 return new(true, filePath);
             }
-            
+
             _logger.LogDebug("NormalizeFileAsync: File needs normalization, updating metadata: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
-            // Capture before metadata state (current metadata)
-            var beforeMetadata = metadata.Clone();
-            var normalizedMetadata = await NormalizeMetadataAsync(metadata, filePath, cancellationToken);
+            var beforeMetadata = plan.Before;
+            var normalizedMetadata = plan.Normalized;
 
             // Write only the fields normalize owns into ComicInfo.xml, plus any provider details
             // that fill an empty element, so the archive is rewritten once; every other element stays.
-            var providerFill = await ResolveProviderFillAsync(filePath, normalizedMetadata.Series, cancellationToken);
-            var write = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, NormalizeWriteFields(beforeMetadata, normalizedMetadata), cancellationToken, providerFill: providerFill);
+            var write = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, plan.Fields, cancellationToken, providerFill: plan.ProviderFill);
             if (write.Outcome == MetadataWriteOutcome.NotWritable)
             {
                 await DeferUnwritableNormalizeAsync(filePath, normalizedMetadata.Series, cancellationToken);
@@ -165,8 +163,10 @@ public partial class ComicProcessorService
     /// </summary>
     /// <param name="metadata">The metadata to check</param>
     /// <param name="filePath">The file path to check against folder name</param>
+    /// <param name="mutateCache">Passed to the series name resolver: false for a preview, which must change nothing.</param>
+    /// <param name="cancellationToken">Cancels the check.</param>
     /// <returns>True if the metadata meets minimum normalization requirements, false otherwise</returns>
-    private async Task<bool> IsMetadataNormalizedAsync(ComicMetadata metadata, string filePath, CancellationToken cancellationToken)
+    private async Task<bool> IsMetadataNormalizedAsync(ComicMetadata metadata, string filePath, bool mutateCache, CancellationToken cancellationToken)
     {
         // Metadata is considered normalized if it has at least Series OR (Title AND Issue)
         // This ensures we have enough information to identify the comic
@@ -179,7 +179,7 @@ public partial class ComicProcessorService
         }
         
         // Additionally check if the series name matches the folder name
-        var expectedSeries = await ResolveNormalizedSeriesAsync(metadata, filePath, cancellationToken);
+        var expectedSeries = await ResolveNormalizedSeriesAsync(metadata, filePath, mutateCache, cancellationToken);
         if (hasSeries && metadata.Series != expectedSeries)
         {
             // Series exists but doesn't match folder name - not normalized
@@ -342,21 +342,12 @@ public partial class ComicProcessorService
         ComicMetadata metadata,
         CancellationToken cancellationToken)
     {
-        if (metadata == null || !string.IsNullOrEmpty(metadata.Issue))
+        if (metadata == null || !RecoverMarkedChapter(filePath, metadata))
         {
             return filePath;
         }
 
-        var originalNameStem = Path.GetFileNameWithoutExtension(filePath);
-        var parsedChapter = IssueNumberParser.ParseMarked(originalNameStem);
-        if (string.IsNullOrEmpty(parsedChapter))
-        {
-            return filePath;
-        }
-
-        metadata.Issue = parsedChapter;
-        metadata.Title = NormalizedTitleFor(metadata.Title, parsedChapter);
-
+        var parsedChapter = metadata.Issue;
         if (!_settings.WatcherEnableNormalize)
         {
             _logger.LogDebug(
@@ -388,14 +379,81 @@ public partial class ComicProcessorService
         return write.FilePath;
     }
 
+    /// <summary>
+    /// Puts an explicitly marked chapter number in the file name ("Ch 5", "#5") into
+    /// <paramref name="metadata"/> when it has no issue number, and a missing title into
+    /// "Chapter &lt;n&gt;", so the rename keeps the chapter. Returns true when it changed
+    /// <paramref name="metadata"/>. Only the in-memory values change; see
+    /// <see cref="EnsureChapterMetadataPreservedAsync"/> for the write.
+    /// </summary>
+    private static bool RecoverMarkedChapter(string filePath, ComicMetadata metadata)
+    {
+        if (!string.IsNullOrEmpty(metadata.Issue))
+        {
+            return false;
+        }
+
+        var parsedChapter = IssueNumberParser.ParseMarked(Path.GetFileNameWithoutExtension(filePath));
+        if (string.IsNullOrEmpty(parsedChapter))
+        {
+            return false;
+        }
+
+        metadata.Issue = parsedChapter;
+        metadata.Title = NormalizedTitleFor(metadata.Title, parsedChapter);
+        return true;
+    }
+
+    /// <summary>
+    /// What the normalize phase decides for a file, before anything is written. Processing,
+    /// normalizing and the processing preview all work from it, so a preview shows exactly
+    /// what the real run writes.
+    /// </summary>
+    /// <param name="AlreadyNormalized">
+    /// True when the file's metadata is already normalized (see <see cref="IsMetadataNormalizedAsync"/>):
+    /// only empty elements are filled from the provider.
+    /// </param>
+    /// <param name="Before">The metadata as read from the file.</param>
+    /// <param name="Normalized">The metadata normalize settles on; <paramref name="Before"/> itself when already normalized.</param>
+    /// <param name="Fields">The fields normalize writes (see <see cref="NormalizeWriteFields"/>); none when already normalized.</param>
+    /// <param name="ProviderFill">Provider details for empty elements, or null (see <see cref="ResolveProviderFillAsync"/>).</param>
+    private sealed record NormalizePlan(
+        bool AlreadyNormalized,
+        ComicMetadata Before,
+        ComicMetadata Normalized,
+        ComicMetadataFieldFlags Fields,
+        ProviderComicInfoFields? ProviderFill);
+
+    /// <summary>
+    /// Works out what normalize would write into the file at <paramref name="filePath"/>, whose
+    /// metadata is <paramref name="metadata"/>, without writing anything.
+    /// </summary>
+    /// <param name="mutateCache">
+    /// Passed to the series name resolver. A real run lets it record the folder name as an alias
+    /// of the matched series; a preview passes false so it changes nothing.
+    /// </param>
+    private async Task<NormalizePlan> PlanNormalizeAsync(ComicMetadata metadata, string filePath, bool mutateCache, CancellationToken cancellationToken)
+    {
+        if (await IsMetadataNormalizedAsync(metadata, filePath, mutateCache, cancellationToken))
+        {
+            var fill = await ResolveProviderFillAsync(filePath, metadata.Series, cancellationToken);
+            return new NormalizePlan(true, metadata, metadata, ComicMetadataFieldFlags.None, fill);
+        }
+
+        var before = metadata.Clone();
+        var normalized = await NormalizeMetadataAsync(metadata, filePath, mutateCache, cancellationToken);
+        var providerFill = await ResolveProviderFillAsync(filePath, normalized.Series, cancellationToken);
+        return new NormalizePlan(false, before, normalized, NormalizeWriteFields(before, normalized), providerFill);
+    }
+
     ///<summary>
     /// Helper method to consolidate normalization functions
     /// </summary>
-    private async Task<ComicMetadata> NormalizeMetadataAsync(ComicMetadata metadata, string filePath, CancellationToken cancellationToken)
+    private async Task<ComicMetadata> NormalizeMetadataAsync(ComicMetadata metadata, string filePath, bool mutateCache, CancellationToken cancellationToken)
     {
         var normalizedMetadata = metadata.Clone();
 
-        var normalizedSeries = await ResolveNormalizedSeriesAsync(metadata, filePath, cancellationToken);
+        var normalizedSeries = await ResolveNormalizedSeriesAsync(metadata, filePath, mutateCache, cancellationToken);
         if (!string.IsNullOrEmpty(normalizedSeries) && normalizedMetadata.Series != normalizedSeries)
         {
             _logger.LogDebug("Setting normalized series name: {SeriesName}", LoggingHelper.SanitizeForLog(normalizedSeries));
@@ -476,9 +534,10 @@ public partial class ComicProcessorService
     }
 
     /// <summary>
-    /// The <c>&lt;Format&gt;</c> normalize writes into an empty one, or null: <c>Annual</c> for an
-    /// issue its series, number, file name or title marks as an Annual (see <see cref="IssueFormat.Of"/>),
-    /// so every tool that reads <c>&lt;Format&gt;</c> sees it. A format already set is never replaced.
+    /// The <c>&lt;Format&gt;</c> normalize writes into an empty one, or null: <c>Annual</c>,
+    /// <c>Giant-Size</c> or <c>Special</c> for an issue its series, number, file name or title
+    /// marks as one (see <see cref="IssueFormat.Of"/>), so every tool that reads
+    /// <c>&lt;Format&gt;</c> sees it. A format already set is never replaced.
     /// </summary>
     private static string? FormatToFill(ComicMetadata metadata, string filePath)
         => string.IsNullOrWhiteSpace(metadata.Format)

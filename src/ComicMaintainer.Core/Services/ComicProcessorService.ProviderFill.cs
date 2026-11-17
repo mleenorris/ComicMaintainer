@@ -86,6 +86,7 @@ public partial class ComicProcessorService
     /// <summary>
     /// Fills the empty ComicInfo fields of a file normalize has nothing to change in, so a file
     /// that was already tagged still gets the provider's details the next time it is processed.
+    /// <paramref name="fill"/> is the plan's provider fill (see <see cref="PlanNormalizeAsync"/>).
     /// </summary>
     /// <returns>
     /// The result of the write, or null when nothing was attempted. A failed write is left for
@@ -94,9 +95,9 @@ public partial class ComicProcessorService
     private async Task<MetadataWriteResult?> FillFromProviderAsync(
         string filePath,
         ComicMetadata metadata,
+        ProviderComicInfoFields? fill,
         CancellationToken cancellationToken)
     {
-        var fill = await ResolveProviderFillAsync(filePath, metadata.Series, cancellationToken);
         return fill is null
             ? null
             : await UpdateMetadataCoreAsync(filePath, metadata, ComicMetadataFieldFlags.None, cancellationToken, providerFill: fill);

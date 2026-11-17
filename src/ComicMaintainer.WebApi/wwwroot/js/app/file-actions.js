@@ -272,6 +272,191 @@
             }
         }
 
+        // A duplicate flag is set when the name processing gives a file is
+        // taken, and nothing clears it once that name is free again. A re-check
+        // works out each flagged file's name now: a file whose name is free
+        // loses its flag and is processed, a file whose name is still taken is
+        // left as it is. `files` names the duplicates to re-check; without it
+        // every duplicate in the library is.
+        async function startDuplicateRecheck(files = null) {
+            if (!jobProgress.canStartJob()) return;
+            showProgressModal('Re-checking duplicates...');
+            try {
+                const data = await apiFetch(`/api/jobs/recheck-duplicates-${files ? 'selected' : 'all'}`, {
+                    method: 'POST',
+                    body: files ? { Files: files } : undefined,
+                    errorMessage: 'Failed to start the re-check'
+                });
+                if (isEmptyJobStart(data)) {
+                    closeProgressModal();
+                    showMessage('No duplicates to re-check', 'info');
+                    return;
+                }
+                const jobId = data.job_id;
+                showMessage(`Re-checking ${data.total_items} duplicate(s) in background`, 'info');
+                // Registered before tracking starts: a short job can end during
+                // its first status check.
+                jobProgress.onJobFinished(jobId, () => reportDuplicateRecheck(jobId));
+                await trackJobStatus(jobId, `Re-checking ${data.total_items} duplicate(s)...`);
+            } catch (error) {
+                closeProgressModal();
+                if (error.authHandled) return;
+                showMessage('Failed to start the re-check: ' + error.message, 'error');
+            }
+        }
+
+        function recheckAllDuplicates() {
+            closeDuplicateReviewModal();
+            return startDuplicateRecheck();
+        }
+
+        // What the finished re-check found, as one message.
+        async function reportDuplicateRecheck(jobId) {
+            try {
+                const data = await apiFetch(`/api/jobs/${encodeURIComponent(jobId)}/duplicate-recheck`);
+                showMessage(`Re-check finished: ${data.cleared} cleared, ${data.still_duplicate} still duplicate, ${data.failed} failed`,
+                    data.failed > 0 ? 'warning' : 'success');
+            } catch (error) {
+                if (error.authHandled) return;
+                console.warn('[DUPLICATES] Could not read the re-check results:', error);
+            }
+            loadLibraryHealth();
+        }
+
+        // The duplicate being compared, with what the server said about it.
+        let duplicateCompareCurrent = null;
+
+        // What the compare view shows of each file, as [label, value(file)].
+        const DUPLICATE_COMPARE_FIELDS = [
+            ['Pages', file => file.page_count ?? '—'],
+            ['Size', file => (file.size == null ? '—' : formatFileSize(file.size))],
+            ['Modified', file => (file.modified == null ? '—' : formatModifiedDate(file.modified))],
+            ['Series', file => duplicateCompareTag(file, 'series')],
+            ['Number', file => duplicateCompareTag(file, 'number')],
+            ['Volume', file => duplicateCompareTag(file, 'volume')],
+            ['Volume start year', file => duplicateCompareTag(file, 'volume_year')],
+            ['Format', file => duplicateCompareTag(file, 'format')],
+            ['Title', file => duplicateCompareTag(file, 'title')],
+            ['Year', file => duplicateCompareTag(file, 'year')],
+            ['Processed name', file => file.processed_name || '—']
+        ];
+
+        function duplicateCompareTag(file, name) {
+            const value = file.tags ? file.tags[name] : null;
+            return value == null || value === '' ? '—' : String(value);
+        }
+
+        function compareCurrentDuplicate() {
+            const file = getCurrentDuplicateReviewFile();
+            if (!file) return;
+
+            closeDuplicateReviewModal();
+            openDuplicateCompareModal(file.relative_path);
+        }
+
+        // A duplicate and the file that has the name processing would give it,
+        // side by side, so the user can keep both or swap them.
+        async function openDuplicateCompareModal(filepath) {
+            const current = { filePath: filepath, data: null };
+            duplicateCompareCurrent = current;
+            const content = document.getElementById('duplicateCompareContent');
+            const summary = document.getElementById('duplicateCompareSummary');
+            document.getElementById('duplicateCompareSwapBtn').disabled = true;
+            document.getElementById('duplicateCompareRecheckBtn').hidden = true;
+            summary.textContent = '';
+            renderHtml(content, html`<div class="loading"><div class="spinner"></div><p>Comparing...</p></div>`);
+            document.getElementById('duplicateCompareModal').classList.add('active');
+
+            let data;
+            try {
+                data = await apiFetch(`/api/duplicates/compare?filePath=${encodeURIComponent(filepath)}`,
+                    { errorMessage: 'Failed to compare the files' });
+            } catch (error) {
+                if (error.authHandled || duplicateCompareCurrent !== current) return;
+                clearChildren(content);
+                summary.textContent = `Could not compare the files: ${error.message}`;
+                return;
+            }
+            // Closed, or opened for another file, meanwhile.
+            if (duplicateCompareCurrent !== current) return;
+
+            current.data = data;
+            summary.textContent = duplicateCompareSummary(data);
+            const files = data.other ? [data.file, data.other] : [data.file];
+            const values = files.map(file => DUPLICATE_COMPARE_FIELDS.map(([, value]) => String(value(file))));
+            // A field the two files disagree on is marked, which is what tells them apart.
+            const differs = DUPLICATE_COMPARE_FIELDS.map((_, index) => values.some(row => row[index] !== values[0][index]));
+            renderHtml(content, files.map((file, side) => html`
+                <div class="duplicate-compare-side">
+                    <span class="duplicate-review-badge">${side === 0 ? 'Flagged as duplicate' : 'Has the name'}</span>
+                    <img class="duplicate-compare-cover" data-protected-image="${file.file_path}" alt="${file.name} cover" loading="lazy" decoding="async">
+                    <h3>${file.name}</h3>
+                    <p class="duplicate-compare-path">${file.file_path}</p>
+                    <dl class="duplicate-compare-fields">
+                        ${DUPLICATE_COMPARE_FIELDS.map(([label], index) => html`
+                            <div class="${differs[index] ? 'duplicate-compare-differs' : ''}"><dt>${label}</dt><dd>${values[side][index]}</dd></div>
+                        `)}
+                    </dl>
+                </div>
+            `));
+            hydrateProtectedImages(content);
+            document.getElementById('duplicateCompareSwapBtn').disabled = data.status !== 'clashes';
+            document.getElementById('duplicateCompareRecheckBtn').hidden = data.status !== 'free';
+        }
+
+        function duplicateCompareSummary(data) {
+            if (data.status === 'clashes') {
+                return `Processing would name this file "${data.file.processed_name}", and "${data.other.name}" already has that name.`;
+            }
+            if (data.status === 'free') {
+                return `No other file has the name "${data.file.processed_name}" now. Re-check this file to clear its flag and give it that name.`;
+            }
+            return `The name processing would give this file could not be worked out: ${data.reason}`;
+        }
+
+        // "Keep both" changes nothing: both files stay as they are.
+        function closeDuplicateCompareModal() {
+            duplicateCompareCurrent = null;
+            document.getElementById('duplicateCompareModal').classList.remove('active');
+        }
+
+        function recheckComparedDuplicate() {
+            const current = duplicateCompareCurrent;
+            if (!current) return;
+            closeDuplicateCompareModal();
+            return startDuplicateRecheck([current.filePath]);
+        }
+
+        // The duplicate takes the name; the file that had it is renamed with
+        // "(duplicate)" added and flagged instead. No file is deleted.
+        async function swapComparedDuplicate() {
+            const current = duplicateCompareCurrent;
+            if (!current || !current.data || current.data.status !== 'clashes') return;
+            const { file, other } = current.data;
+            if (!confirm(`Swap these files?\n\n"${file.name}" takes the name "${other.name}".\n"${other.name}" gets "(duplicate)" added to its name and is flagged as the duplicate.\n\nNo file is deleted.`)) {
+                return;
+            }
+
+            const swapBtn = document.getElementById('duplicateCompareSwapBtn');
+            swapBtn.disabled = true;
+            try {
+                const data = await apiFetch('/api/duplicates/swap', {
+                    method: 'POST',
+                    body: { filePath: file.file_path },
+                    errorMessage: 'Failed to swap the files'
+                });
+                closeDuplicateCompareModal();
+                showMessage(`Swapped: ${extractDisplayName(data.file_path)} has the name now, and ${extractDisplayName(data.duplicate_path)} is the duplicate`, 'success');
+                loadLibraryHealth();
+                refreshFiles();
+                await openDuplicateReviewModal(data.duplicate_path);
+            } catch (error) {
+                if (error.authHandled) return;
+                showMessage('Failed to swap the files: ' + error.message, 'error');
+                if (duplicateCompareCurrent === current) swapBtn.disabled = false;
+            }
+        }
+
         // Per-series folder list state. Holds the latest response from
         // /api/files/series/{id}/folders so the "Merge Folders" button can
         // hand off to the existing combine-folders modal without re-fetching.

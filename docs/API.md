@@ -24,6 +24,8 @@ Related documents:
 - [Library browsing](#library-browsing)
 - [Folder combine](#folder-combine)
 - [Batch jobs](#batch-jobs)
+- [Duplicates](#duplicates)
+- [Processing preview](#processing-preview)
 - [Processed status](#processed-status)
 - [Comic reader](#comic-reader)
 - [Reader progress, preferences and sessions](#reader-progress-preferences-and-sessions)
@@ -219,6 +221,7 @@ Paged routes use one of these forms:
 | `limit`, `offset` | `/api/processing-history` | Default 50. `limit` must be 1 to 1000, otherwise `400` |
 | `limit`, `offset` | `/api/email/deliveries` | Default 50, limited to 1 to 500 |
 | `offset`, `limit` | `/api/scheduled-jobs/metadata-audit/findings` | Default 200. A `limit` outside 1 to 1000 becomes 200 |
+| `offset`, `limit` | `/api/files/process-preview/{jobId}` | Default 200. A `limit` outside 1 to 1000 becomes 200 |
 | `limit` only | `/api/error-reports` (1 to 200), `/api/metadata/search` (1 to 50), `/api/series-images/candidates` (1 to 25), `/api/suwayomi/series` (1 to 100) | Out-of-range values are moved into the range |
 | `page` | `/api/suwayomi/sources/{sourceId}/series` (1 to 100), OPDS feeds | OPDS feeds hold 50 entries per page |
 
@@ -385,7 +388,7 @@ Filter values for the listing routes:
 
 **`GET /api/files/scan-unmarked`** returns `{"total_count","unmarked_count","marked_count"}`.
 
-**Metadata.** The metadata object is `{"series","title","issue","volume","volumeYear","format","publisher","year","summary","authors":[],"tags":[],"isUserEdited","userLockedFieldsMask"}`. `format` is ComicInfo `<Format>`; `Annual` and `Special` mark issues numbered on their own. `volume` is the volume number and `volumeYear` the year the volume started, which only the database keeps.
+**Metadata.** The metadata object is `{"series","title","issue","volume","volumeYear","format","publisher","year","summary","authors":[],"tags":[],"isUserEdited","userLockedFieldsMask"}`. `format` is ComicInfo `<Format>`; `Annual`, `Special` and `Giant-Size` mark issues numbered on their own. `volume` is the volume number and `volumeYear` the year the volume started, which only the database keeps.
 
 - `GET` metadata routes answer `404` when the file has none.
 - `PUT /api/files/metadata?filePath=` and `PUT /api/files/{encodedFilePath}/tags` merge: a field left out or sent as `null` keeps its value. They answer an empty `200`.
@@ -488,7 +491,7 @@ With `include_issues=true`, each entry also holds its `issues`. Leave it off for
 
 **`GET /api/files/series/facets`** returns `{"genres":[{"value","count"}],"statuses":[{"value","count"}],"series_without_genres","series_without_status"}`.
 
-**`GET /api/files/series/{seriesId}/issues`** takes `filter`, `page` and `per_page`. It returns `{"id","title","canonical_title","aliases","metadata_source","cover_file_path","has_external_image","external_image_url","issue_count","total_size","issues","page","per_page","total_pages","synopsis","genres","publication_status","site_url"}`. Each issue is `{"file_path","file_name","title","issue","volume","publisher","year","size","modified","processed","renamed","normalized","duplicate","read","format","annual","volume_year","volume_key","volume_label"}`. `format` is `Annual`, `Special` or `null`; `annual` is true for an Annual.
+**`GET /api/files/series/{seriesId}/issues`** takes `filter`, `page` and `per_page`. It returns `{"id","title","canonical_title","aliases","metadata_source","cover_file_path","has_external_image","external_image_url","issue_count","total_size","issues","page","per_page","total_pages","synopsis","genres","publication_status","site_url"}`. Each issue is `{"file_path","file_name","title","issue","volume","publisher","year","size","modified","processed","renamed","normalized","duplicate","read","format","annual","volume_year","volume_key","volume_label"}`. `format` is `Annual`, `Special`, `Giant-Size` or `null`; `annual` is true for an Annual.
 
 **`GET /api/files/series/{seriesId}/folders`** takes `filter` and returns `{"id","title","folders":[{"directory","file_count","total_size"}],"combine_group_key","suggested_destination_directory","combinable"}`. `combinable` is `true` when the folders are one of the groups `GET /api/files/combinable-folders` lists. The series page then shows a banner that offers to merge them. With two or more folders and no such group, `combine_group_key` is `series:<seriesId>` and `combinable` is `false`.
 
@@ -527,6 +530,7 @@ The combine answers `202` with `{"jobId","job_id","totalItems","total_items","de
 | `POST` | `/api/jobs/{operation}-{scope}` | Library write | Start a batch job |
 | `GET` | `/api/jobs` | Signed in | List jobs |
 | `GET` | `/api/jobs/{jobId}` | Signed in | One job's status, and each file's result with `?include=results` |
+| `GET` | `/api/jobs/{jobId}/duplicate-recheck` | Signed in | What a duplicate re-check job found |
 | `POST` | `/api/jobs/{jobId}/cancel` | Library write | Cancel a running job |
 | `DELETE` | `/api/jobs/{jobId}` | Library write | Delete a job's record |
 | `GET` | `/api/active-job` | Signed in | The running job, if any |
@@ -541,6 +545,7 @@ The operations and the scopes each one supports are:
 | `remove-metadata` | yes | yes | no |
 | `update-metadata` | yes | no | no |
 | `delete` | yes | no | no |
+| `recheck-duplicates` | yes | yes | no |
 
 So the concrete routes are:
 
@@ -550,6 +555,7 @@ So the concrete routes are:
 - `POST /api/jobs/remove-metadata-selected`, `POST /api/jobs/remove-metadata-all`
 - `POST /api/jobs/update-metadata-selected`
 - `POST /api/jobs/delete-selected`
+- `POST /api/jobs/recheck-duplicates-selected`, `POST /api/jobs/recheck-duplicates-all`
 
 Any other combination answers `404`.
 
@@ -569,6 +575,7 @@ The body is:
 - `forceReprocess` can also be sent as `?forceReprocess=true`.
 - `selected` paths must be inside the watched or duplicates directory after resolving links, or the whole request is `400 {"error":"One or more file paths are outside the allowed directory"}`. `delete-selected` is stricter: the entry itself and its directory must be inside, with no `..` segment or trailing separator.
 - The `all` and `unmarked` scopes leave out files flagged as duplicates. To act on a duplicate, name it with a `selected` route.
+- `recheck-duplicates` is the exception: it acts only on files flagged as duplicates. `recheck-duplicates-all` takes every one, and `recheck-duplicates-selected` drops named files that are not flagged. See [Duplicates](#duplicates).
 - The `all` and `unmarked` routes need no body. A non-JSON body is `415`, and malformed JSON is `400`.
 
 The response carries both spellings:
@@ -599,9 +606,184 @@ When nothing qualifies, the id is the empty GUID and `total_items` is 0.
 
 Add `?include=results` for the outcome of every file of the job, in the job's order, as `"results": [{ "file": "...", "success": false, "error": "the reason" }]`. A file not reached yet has `success` false and no `error`. The list has an entry for every file, so it is left out unless asked for: to follow progress, read the counts.
 
+**`GET /api/jobs/{jobId}/duplicate-recheck`** sums up a `recheck-duplicates` job. Any other job, or an unknown one, is `404`.
+
+```json
+{
+  "job_id": "...",
+  "status": "completed",
+  "total_items": 3,
+  "cleared": 1,
+  "still_duplicate": 1,
+  "failed": 1,
+  "clashes": [{ "file": "/watched_dir/Saga/Saga 1.cbz", "clashes_with": "/watched_dir/Saga/Saga - Chapter 0001.cbz" }],
+  "failures": [{ "file": "/watched_dir/Saga/Saga 2.cbz", "error": "Could not work out the processed name: File not found" }]
+}
+```
+
+- `cleared` counts the files whose flag was cleared and that were processed. While the job runs, it counts those done so far.
+- `still_duplicate` counts the files left flagged; `clashes` lists each with the file that has its processed name.
+- `failed` counts the files that could not be re-checked, or failed to process once cleared; `failures` lists each with the reason.
+- In `GET /api/jobs/{jobId}`, a still-duplicate file is a failed item whose `error` is `Still a duplicate of <path>`.
+
 **`GET /api/jobs`** returns `{"jobs":[...],"count":3}`, with the summary fields above. **`POST /api/jobs/{jobId}/cancel`** returns `{"success":true}`, or `404`. **`DELETE /api/jobs/{jobId}`** answers `204`, or `404`.
 
 **`GET /api/active-job`** returns `{"active":false}` when nothing is running. Otherwise it returns the summary fields plus `job_title`. After a restart it also reports the most recent interrupted job, so a client can explain why work stopped.
+
+## Duplicates
+
+A file is flagged as a duplicate when the name processing would give it already belongs to another file. These routes compare such a file with that other file, and swap the two. To re-check duplicates, start a `recheck-duplicates` [batch job](#batch-jobs): a file whose name is free again loses its flag and is processed (forced), and a file whose name is still taken is left as it is. No route here deletes a file.
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/duplicates/compare` | Signed in | A file and the file that has its processed name, side by side, by `filePath` |
+| `POST` | `/api/duplicates/swap` | Library write | Give a duplicate the other file's name, and flag that file instead |
+
+**`GET /api/duplicates/compare?filePath=...`** returns:
+
+```json
+{
+  "status": "clashes",
+  "reason": null,
+  "file": {
+    "file_path": "/watched_dir/Saga/Saga 1.cbz",
+    "name": "Saga 1.cbz",
+    "size": 52428800,
+    "modified": 1767225600,
+    "page_count": 22,
+    "duplicate": true,
+    "processed_name": "Saga - Chapter 0001.cbz",
+    "tags": { "series": "Saga", "number": "1", "volume": "1", "volume_year": 2012, "format": null, "title": "Chapter 1", "year": 2012 }
+  },
+  "other": { "file_path": "/watched_dir/Saga/Saga - Chapter 0001.cbz", "...": "the same fields" }
+}
+```
+
+- `status` is `clashes` when another file has the name processing would give the file, `free` when none does, and `unknown` when the name could not be worked out. Then `reason` says why, and `processed_name` is `null`.
+- `file` is the file asked for. `other` is the file that has its processed name; it is `null` unless `status` is `clashes`.
+- `processed_name` is the file name processing would give that file now. For `other` it is its own: when it differs from `other`'s name, processing `other` again would move it off the name.
+- `size` is in bytes and `modified` in Unix seconds, both from the file on disk. `page_count` is `null` when the archive cannot be listed.
+- `duplicate` is the file's duplicate flag.
+- `tags` are the file's current tags: `number` is `<Number>`, and `volume_year` is the volume's start year, which only the database keeps. `tags` is `null` when the archive cannot be read.
+- The cover is `GET /api/comicreader/cover?filePath=...`.
+- A missing `filePath` is `400`, as is a path outside the watched and duplicates directories. A file that does not exist is `404`.
+
+**`POST /api/duplicates/swap`** takes `{"filePath":"/watched_dir/Saga/Saga 1.cbz"}`, a file flagged as a duplicate. The file that has its processed name is renamed aside: its own name with ` (duplicate)` added (` (duplicate 2)` and so on when that is taken), and it is flagged as the duplicate. Then the file is processed (forced), which gives it the freed name and its tags. If it does not end up with the name, the other file is renamed back and both keep their flags. It returns:
+
+```json
+{ "success": true, "file_path": "/watched_dir/Saga/Saga - Chapter 0001.cbz", "duplicate_path": "/watched_dir/Saga/Saga - Chapter 0001 (duplicate).cbz" }
+```
+
+- `file_path` is where the former duplicate is now. `duplicate_path` is where the other file is now.
+- `409 {"error":"..."}` when nothing was changed because the files are not as compared: the file is not flagged, no other file has its name now, or another file does.
+- `400 {"error":"..."}` when the path is missing or outside the library, the processed name cannot be worked out, the other file cannot be renamed, or the file could not take the name.
+
+## Processing preview
+
+A preview works out what processing (normalize, then rename) would do to files, and changes nothing: no file, tag, database row, history entry or series alias. It uses the same steps as processing, so the two agree. It works as a forced reprocess (`forceReprocess=true`): files already marked processed are previewed too. It follows `watcher_enable_normalize` and `watcher_enable_rename`.
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `GET` | `/api/files/process-preview` | Signed in | Preview one file now, by `filePath` |
+| `POST` | `/api/files/process-preview` | Library write | Start a preview job |
+| `GET` | `/api/files/process-preview/{jobId}` | Signed in | One page of a preview job's results |
+
+**A file's preview** is:
+
+```json
+{
+  "filePath": "/watched_dir/Batman/batman 1.cbz",
+  "fileName": "batman 1.cbz",
+  "series": "Batman",
+  "newFilePath": "/watched_dir/Batman/Batman - Chapter 0001.cbz",
+  "newFileName": "Batman - Chapter 0001.cbz",
+  "renamed": true,
+  "tagChanges": [
+    { "field": "Series", "before": "batman", "after": "Batman" },
+    { "field": "VolumeYear", "before": null, "after": "2016" }
+  ],
+  "clash": null,
+  "clashWith": null,
+  "warning": null,
+  "error": null,
+  "changed": true
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `filePath`, `fileName` | The file now |
+| `series` | The series the file is listed under: its series once normalized, or else its folder's name |
+| `newFilePath`, `newFileName` | The path processing would give the file, or `null` when it keeps its path. A CBR, RAR or ZIP whose tags are written becomes a `.cbz`. With a `clash`, this is the name the file would not get |
+| `renamed` | `true` when the file would be renamed: it has a new path, no clash and no error |
+| `tagChanges` | Each value that changes, as `{"field","before","after"}`. `field` is the `ComicInfo.xml` element name (`Series`, `Number`, `Title`, `Volume`, `Year`, `Format`, `Summary`, `Genre`, `Web`, `Count`, `Manga`, ...), or `VolumeYear`, which only the database keeps. `before` is `null` for a value that is added, `after` is `null` for one that is removed |
+| `clash` | `null`; `"existing"` when a file with the new name (ignoring case) is already there; or `"preview"` when an earlier file of the same preview job gets that name. Processing flags the file as a duplicate instead of renaming it. Only a preview job finds `"preview"` clashes |
+| `clashWith` | The file that has, or would first get, the new name |
+| `warning` | Something processing would leave undone, or `null`. Today: tags not written because the file is a CBR, RAR or ZIP and conversion to CBZ is off |
+| `error` | Why processing would fail for the file, or `null`: for example `File not found`, an unreadable archive, or no series name |
+| `changed` | `true` when any of `newFilePath`, `tagChanges`, `clash`, `warning` or `error` is set |
+
+The preview assumes every write succeeds. A disk or permission problem during the real run is not foreseen.
+
+**`GET /api/files/process-preview?filePath=`** previews one file in the request and returns its preview. It answers `400 {"error":"File path is required"}` without `filePath`, and `400 {"error":"File path is outside the allowed directory"}` for a path outside the watched and duplicates directories.
+
+**`POST /api/files/process-preview`** starts a preview job. It takes:
+
+```json
+{ "scope": "selected", "files": ["/watched_dir/Batman/batman 1.cbz"], "seriesId": null }
+```
+
+| `scope` | Files |
+|---|---|
+| `all` | Every tracked file that is not flagged as a duplicate, as `process-all` takes them |
+| `selected` | The paths in `files`. Blank and repeated entries are dropped |
+| `series` | The issues of the series `seriesId` (its id in the series routes) that are not flagged as duplicates |
+
+It returns the [batch job response](#batch-jobs), `{"job_id","total_items","jobId","totalItems"}`. When no file qualifies, the id is the empty GUID and `total_items` is 0. Follow the job's progress with the [batch job routes](#batch-jobs); every file counts as processed, since a file processing would fail for is still previewed. Errors:
+
+- `400 {"error":"scope must be all, selected or series"}` for a missing or other `scope`.
+- `400 {"error":"No files specified"}` for `selected` without a path, and `400 {"error":"One or more file paths are outside the allowed directory"}` when one is outside.
+- `400 {"error":"seriesId is required"}` for `series` without `seriesId`, and `404 {"error":"Series not found"}` for an unknown series.
+
+**`GET /api/files/process-preview/{jobId}`** takes `filter`, `offset` and `limit`, and returns one page of results:
+
+```json
+{
+  "jobId": "...",
+  "status": "completed",
+  "finished": true,
+  "totalFiles": 25000,
+  "summary": {
+    "checked": 25000,
+    "changed": 1012,
+    "renamed": 980,
+    "tagsChanged": 640,
+    "clashes": 3,
+    "unchanged": 23988,
+    "errors": 9
+  },
+  "filter": "changes",
+  "offset": 0,
+  "limit": 200,
+  "total": 1012,
+  "items": [ { "filePath": "...", "...": "a file's preview, as above" } ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `jobId` | The preview job |
+| `status` | The job's status, as `GET /api/jobs/{jobId}` words it. `completed` or `interrupted` when the job record is gone |
+| `finished` | `true` once every file is checked |
+| `totalFiles` | The files the preview covers |
+| `summary` | Counts over every file checked so far: `checked`; `changed` (files with anything to show); `renamed`; `tagsChanged`; `clashes`; `unchanged`; `errors` |
+| `filter`, `offset`, `limit` | The page asked for |
+| `total` | The files the filter selects |
+| `items` | The page, sorted by series, then by path |
+
+`filter` is `changes` (the default: files with `changed` set), `all`, `renamed`, `tags`, `clashes` or `errors`. Another value is `400 {"error":"Unknown filter: x"}`. While the job runs, the page holds the files checked so far. Results are kept in memory for the five most recent previews; an older preview, or one from before a restart, answers `404 {"error":"Preview not found. ..."}`.
+
+To process what a preview showed, send the files to `POST /api/jobs/process-selected` with `"forceReprocess": true`. The web app does this for the files ticked in its preview.
 
 ## Processed status
 

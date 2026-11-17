@@ -148,11 +148,39 @@ test('a longer run of missing issues is one card for the whole range', async () 
     assert.equal(bannerText(page), 'Missing 37 issues: #2, #4-39');
 });
 
-test('an issue numbered like a year is one card however far it is from the rest', async () => {
-    const page = await bootSeries({ issues: [issue(1), issue(2), issue(2024)] });
+test('an issue numbered like a year, far beyond the rest, leaves no gap before it', async () => {
+    const page = await bootSeries({ issues: [issue(1), issue(3), issue(2024)] });
 
-    assert.deepEqual(layout(page), ['/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz', '#3-2023 missing', '/comics/Saga/Saga 2024.cbz']);
-    assert.equal(bannerText(page), 'Missing 2021 issues: #3-2023');
+    assert.deepEqual(layout(page), ['/comics/Saga/Saga 001.cbz', '#2 missing', '/comics/Saga/Saga 003.cbz', '/comics/Saga/Saga 2024.cbz']);
+    assert.equal(bannerText(page), 'Missing 1 issue: #2');
+});
+
+test('an issue number up to 1000 above the rest still counts its gap', async () => {
+    const page = await bootSeries({ issues: [issue(1), issue(1001)] });
+
+    assert.deepEqual(layout(page), ['/comics/Saga/Saga 001.cbz', '#2-1000 missing', '/comics/Saga/Saga 1001.cbz']);
+});
+
+test('a millionth issue in a long series leaves no gap before it', async () => {
+    // Nightwing: about 160 issues and DC's #1,000,000.
+    const issues = Array.from({ length: 160 }, (_, i) => issue(i + 1)).filter(entry => entry.issue !== '7');
+    const page = await bootSeries({ issues: [...issues, issue(1000000)] });
+
+    assert.equal(bannerText(page), 'Missing 1 issue: #7');
+    assert.equal(page.$$('#seriesDetailPanel .series-issue-card--missing').length, 1);
+});
+
+test('a larger cluster of numbers above a smaller one is the run, and the gap before it counts', async () => {
+    const issues = Array.from({ length: 11 }, (_, i) => issue(2000 + i));
+    const page = await bootSeries({ issues: [issue(1), ...issues] });
+
+    assert.equal(bannerText(page), 'Missing 1998 issues: #2-1999');
+});
+
+test('of two clusters of one size, the lower is the run', async () => {
+    const page = await bootSeries({ issues: [issue(1), issue(3), issue(5000), issue(5002)] });
+
+    assert.equal(bannerText(page), 'Missing 1 issue: #2');
 });
 
 test('issue numbers above 100000, such as dates, leave no gap before them', async () => {
@@ -160,6 +188,13 @@ test('issue numbers above 100000, such as dates, leave no gap before them', asyn
 
     assert.deepEqual(layout(page), ['/comics/Saga/Saga 001.cbz', '/comics/Saga/Saga 002.cbz', '/comics/Saga/Saga 20240115.cbz']);
     assert.equal(banner(page), null);
+});
+
+test('a run whose numbers are all above 100000 is not checked for gaps', async () => {
+    const page = await bootSeries({ issues: [issue(20240115), issue(20240117)] });
+
+    assert.equal(banner(page), null);
+    assert.equal(page.$$('#seriesDetailPanel .series-issue-card--missing').length, 0);
 });
 
 // An issue of one volume of Green Lantern: volume_key/volume_label as the server sends them.
@@ -238,6 +273,26 @@ test('Specials get a section of their own after the Annuals, and other kinds aft
         '== Preview 1 issue', '#1'
     ]);
     assert.equal(bannerText(page), 'Missing 1 issue: Special: #2');
+});
+
+test('Giant-Size issues get a section of their own after the Specials', async () => {
+    const kindOf = (number, format) => issue(number, {
+        file_path: `/comics/X-Men/X-Men ${format} - Chapter ${number}.cbz`,
+        file_name: `X-Men ${format} - Chapter ${number}.cbz`,
+        format
+    });
+    const page = await bootSeries({
+        issues: [kindOf(2025, 'Giant-Size'), kindOf(1, 'Special'), issue(1), kindOf(1, 'Giant-Size'), kindOf(1, 'Bonus')]
+    });
+
+    assert.deepEqual(volumeLayout(page), [
+        '== Issues 1 issue', '#1',
+        '== Special 1 issue', '#1',
+        '== Giant-Size 2 issues', '#1', '#2025',
+        '== Bonus 1 issue', '#1'
+    ]);
+    // Giant-Size #2025 is far beyond Giant-Size #1: no gap before it.
+    assert.equal(banner(page), null);
 });
 
 test('the Specials of a volume series are named after their volume', async () => {

@@ -121,6 +121,73 @@ public class ComicFileProcessorTests
     }
 
     [Theory]
+    // {format} names a Giant-Size issue, which {series} then leaves out.
+    [InlineData("X-Men", "Giant", null, "X-Men Giant-Size - Chapter 2025.cbz")]
+    [InlineData("X-Men", null, "#Giant 2025 2", "X-Men Giant-Size - Chapter 2025.cbz")]
+    [InlineData("Giant-Size X-Men", null, null, "X-Men Giant-Size - Chapter 2025.cbz")]
+    [InlineData("X-Men", null, "Giant 2025", "X-Men Giant-Size - Chapter 2025.cbz")]
+    [InlineData("X-Men", null, "Attack of the Giant", "X-Men - Chapter 2025.cbz")]
+    public void FormatFilename_FormatPlaceholder_NamesAGiantSizeIssue(string series, string? format, string? title, string expected)
+    {
+        var tags = new ComicInfo { Series = series, Format = format, Title = title, Number = "2025" };
+
+        Assert.Equal(expected, ComicFileProcessor.FormatFilename(AppSettings.DefaultFilenameFormat, tags, "2025"));
+    }
+
+    [Theory]
+    // No number: the title names the issue in place of "Chapter {issue}"...
+    [InlineData(AppSettings.DefaultFilenameFormat, "All-New X-Men", "All New X-Men .Special – One Down", "All-New X-Men Special - One Down.cbz")]
+    [InlineData(AppSettings.DefaultFilenameFormat, "Saga", "The Hidden Path", "Saga - The Hidden Path.cbz")]
+    [InlineData("{series} #{issue_no_pad} ({year})", "Saga", "The Hidden Path", "Saga The Hidden Path.cbz")]
+    [InlineData("{series} - Ch. {issue}", "Saga", "The Hidden Path", "Saga - The Hidden Path.cbz")]
+    [InlineData("{series} Issue{issue}", "Saga", "The Hidden Path", "Saga The Hidden Path.cbz")]
+    // ...is not named twice by a template that places {title} itself...
+    [InlineData("{series} - Chapter {issue} - {title}", "Saga", "The Hidden Path", "Saga - The Hidden Path.cbz")]
+    // ...and with no title either, nothing is left after the series but no bare "Chapter".
+    [InlineData(AppSettings.DefaultFilenameFormat, "Her Summon", null, "Her Summon.cbz")]
+    [InlineData(AppSettings.DefaultFilenameFormat, "Her Summon", "Chapter Unknown", "Her Summon.cbz")]
+    [InlineData(AppSettings.DefaultFilenameFormat, "Her Summon", "Chapter", "Her Summon.cbz")]
+    [InlineData(AppSettings.DefaultFilenameFormat, "All-New X-Men", "All New X-Men .Special", "All-New X-Men Special.cbz")]
+    // A word that only ends in a prefix is kept.
+    [InlineData("{series} Branch{issue}", "Saga", null, "Saga Branch.cbz")]
+    public void FormatFilename_NoIssueNumber_NeverLeavesABarePrefix(string template, string series, string? title, string expected)
+    {
+        var tags = new ComicInfo { Series = series, Title = title };
+
+        Assert.Equal(expected, ComicFileProcessor.FormatFilename(template, tags, ""));
+    }
+
+    [Theory]
+    [InlineData("All New X-Men .Special – One Down", "All-New X-Men", "One Down")]
+    [InlineData("Giant-Size: The Return", "X-Men", "The Return")]
+    [InlineData("Special Delivery", "X-Men", "Special Delivery")]
+    [InlineData("  The Hidden Path. ", "Saga", "The Hidden Path")]
+    [InlineData("Chapter Unknown", "Saga", null)]
+    [InlineData("chapter 12", "Saga", null)]
+    [InlineData("Saga", "Saga", null)]
+    [InlineData(" - ", "Saga", null)]
+    [InlineData("", "Saga", null)]
+    [InlineData(null, "Saga", null)]
+    public void TitleInPlaceOfNumber_IsTheTitleWithoutWhatAFileNameLeft(string? title, string? series, string? expected)
+    {
+        Assert.Equal(expected, ComicFileProcessor.TitleInPlaceOfNumber(title, series));
+    }
+
+    [Theory]
+    [InlineData("All-New X-Men - Chapter", true)]
+    [InlineData("Her Summon – chapter ", true)]
+    [InlineData("Saga - Ch.", true)]
+    [InlineData("Saga - #", true)]
+    [InlineData("Saga - Chapter 0001", false)]
+    [InlineData("Saga - The Last Chapter", false)]
+    [InlineData("Chapter", false)]
+    [InlineData("", false)]
+    public void EndsInBareIssuePrefix_FindsANameAnEarlierRenameLeftWithoutANumber(string stem, bool expected)
+    {
+        Assert.Equal(expected, ComicFileProcessor.EndsInBareIssuePrefix(stem));
+    }
+
+    [Theory]
     [InlineData("{series} - Chapter {issue}", AppSettings.DefaultFilenameFormat)]
     [InlineData(" {series} - Chapter {issue} ", AppSettings.DefaultFilenameFormat)]
     [InlineData("{series} {annual} {volume_label} - Chapter {issue}", AppSettings.DefaultFilenameFormat)]

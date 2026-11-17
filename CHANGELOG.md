@@ -12,6 +12,17 @@ for it.
 
 ## [Unreleased]
 
+### Added
+
+- **Re-check duplicates.** A duplicate flag used to stay after its cause was gone. Re-check All (in
+  Review Duplicates) and Re-check Duplicates (in a series' Actions menu) work out each duplicate's
+  processed name now: a file whose name is free again loses its flag and is processed, and a file whose
+  name is still taken is left alone, with the file that has it named in the job's results
+  (`POST /api/jobs/recheck-duplicates-{all,selected}`, `GET /api/jobs/{jobId}/duplicate-recheck`).
+- **Compare a duplicate** with the file that has its name: cover, pages, size, date, tags and the name
+  processing would give each. Keep Both changes nothing; Swap gives the duplicate the name and flags the
+  other file instead. No file is deleted (`GET /api/duplicates/compare`, `POST /api/duplicates/swap`).
+
 ### Changed
 
 - The server and the Android app now run on .NET 11. Building from source needs the .NET 11 SDK.

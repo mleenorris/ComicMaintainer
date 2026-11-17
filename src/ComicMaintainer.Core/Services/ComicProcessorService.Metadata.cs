@@ -332,27 +332,9 @@ public partial class ComicProcessorService
                 return new MetadataWriteResult(MetadataWriteOutcome.NotWritable, filePath);
             }
 
-            var values = metadata;
-            var writeFields = fields;
-            var pending = convert ? await GetPendingDatabaseEditAsync(filePath, cancellationToken) : null;
-            if (pending?.Metadata is { } stored)
-            {
-                var locked = (ComicMetadataFieldFlags)stored.UserLockedFieldsMask;
-                var requested = userEdit ? fields : fields & ~locked;
-                values = stored.Clone();
-                ComicMetadataFields.Copy(metadata, values, requested);
-                writeFields = requested | locked;
-            }
-
-            var existing = ReadComicInfoDocument(physicalPath);
-            var updated = ComicInfoXml.Merge(existing, values, writeFields);
-            if (providerFill is not null)
-            {
-                updated = ComicInfoXml.FillEmptyFields(updated, providerFill);
-            }
-
-            if (ComicInfoXml.AreEquivalent(existing, updated) ||
-                (existing is null && !updated.Root!.HasElements))
+            var (existing, updated, values, pending) = await ComposeComicInfoUpdateAsync(
+                filePath, physicalPath, metadata, fields, convert, userEdit, providerFill, cancellationToken);
+            if (ChangesNothing(existing, updated))
             {
                 _logger.LogDebug(
                     "ComicInfo.xml already holds these values, leaving the archive unchanged: {FilePath}",
@@ -386,6 +368,65 @@ public partial class ComicProcessorService
             return MetadataWriteResult.Failed(filePath, DescribeArchiveFailure(ex));
         }
     }
+
+    /// <summary>
+    /// The ComicInfo.xml a metadata write would leave in an archive, worked out without writing.
+    /// </summary>
+    /// <param name="Existing">The archive's ComicInfo.xml now, or null when it has none.</param>
+    /// <param name="Updated">The document the write would store.</param>
+    /// <param name="Values">The metadata written: the request's, over any pending database edit.</param>
+    /// <param name="Pending">The tracked file whose database-only edits the write completes, or null.</param>
+    private readonly record struct ComicInfoUpdate(XDocument? Existing, XDocument Updated, ComicMetadata Values, ComicFile? Pending);
+
+    /// <summary>
+    /// Works out the ComicInfo.xml that writing the <paramref name="fields"/> of
+    /// <paramref name="metadata"/> (and <paramref name="providerFill"/>) would leave in the archive
+    /// at <paramref name="physicalPath"/>. <see cref="UpdateMetadataCoreAsync"/> writes it, and the
+    /// processing preview compares it with the archive's, so the two never disagree.
+    /// </summary>
+    /// <param name="convert">
+    /// True when the write converts a CBR, RAR or ZIP to CBZ: edits the database holds for it
+    /// go into the new archive too.
+    /// </param>
+    private async Task<ComicInfoUpdate> ComposeComicInfoUpdateAsync(
+        string filePath,
+        string physicalPath,
+        ComicMetadata metadata,
+        ComicMetadataFieldFlags fields,
+        bool convert,
+        bool userEdit,
+        ProviderComicInfoFields? providerFill,
+        CancellationToken cancellationToken)
+    {
+        var values = metadata;
+        var writeFields = fields;
+        var pending = convert ? await GetPendingDatabaseEditAsync(filePath, cancellationToken) : null;
+        if (pending?.Metadata is { } stored)
+        {
+            var locked = (ComicMetadataFieldFlags)stored.UserLockedFieldsMask;
+            var requested = userEdit ? fields : fields & ~locked;
+            values = stored.Clone();
+            ComicMetadataFields.Copy(metadata, values, requested);
+            writeFields = requested | locked;
+        }
+
+        var existing = ReadComicInfoDocument(physicalPath);
+        var updated = ComicInfoXml.Merge(existing, values, writeFields);
+        if (providerFill is not null)
+        {
+            updated = ComicInfoXml.FillEmptyFields(updated, providerFill);
+        }
+
+        return new ComicInfoUpdate(existing, updated, values, pending);
+    }
+
+    /// <summary>
+    /// True when storing <paramref name="updated"/> would not change the archive's metadata: it
+    /// holds what <paramref name="existing"/> holds, or the archive has no ComicInfo.xml and there
+    /// is nothing to put in one.
+    /// </summary>
+    private static bool ChangesNothing(XDocument? existing, XDocument updated) =>
+        ComicInfoXml.AreEquivalent(existing, updated) || (existing is null && !updated.Root!.HasElements);
 
     /// <summary>
     /// The reason an archive could not be read or rewritten that is safe to show users, or null.

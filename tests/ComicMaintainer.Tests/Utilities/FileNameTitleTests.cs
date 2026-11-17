@@ -42,4 +42,22 @@ public class FileNameTitleTests
     {
         Assert.Equal(expected, FileNameTitle.CoverYear(stem));
     }
+
+    [Theory]
+    // The series (punctuation and case aside), then any volume token, then punctuation go.
+    [InlineData("All New X-Men .Special – One Down", "All-New X-Men", "Special – One Down")]
+    [InlineData("All New X-Men v2 .Special", "All-New X-Men (2015)", "Special")]
+    [InlineData("All-New X-Men Vol. 2 - One Down", "All-New X-Men", "One Down")]
+    [InlineData("Green Lantern (1990) 001", "Green Lantern Annual", "001")]
+    [InlineData("All New X-Men", "All-New X-Men", "")]
+    // A title that does not start with the series only loses its leading punctuation.
+    [InlineData(".Special – One Down", "All-New X-Men", "Special – One Down")]
+    [InlineData("X-Mens Special", "X-Men", "X-Mens Special")]
+    [InlineData("All New", "All-New X-Men", "All New")]
+    [InlineData("#Giant 2025 2", null, "Giant 2025 2")]
+    [InlineData("- One Down", "(2016)", "One Down")]
+    public void AfterSeries_TakesTheSeriesNameOffTheTitle(string title, string? series, string expected)
+    {
+        Assert.Equal(expected, FileNameTitle.AfterSeries(title, series));
+    }
 }

@@ -127,6 +127,8 @@ async function bootSeries({
             'GET /api/files/series': libraryBody(library || [series]),
             [`GET ${issuesPath(series.id)}`]: issuesBody(series, issues),
             'GET /api/suwayomi/status': suwayomi,
+            // The series page asks for the story arcs of its issues; none by default.
+            [`GET /api/metadata/story-arcs/series/${encodeURIComponent(series.id)}`]: { arcs: [] },
             ...routes
         },
         ...options

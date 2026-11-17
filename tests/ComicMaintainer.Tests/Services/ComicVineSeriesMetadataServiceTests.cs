@@ -363,6 +363,100 @@ public class ComicVineSeriesMetadataServiceTests
         Assert.Empty(await service.SearchVolumesAsync(title));
     }
 
+    [Fact]
+    public async Task ListVolumeIssuesAsync_ReadsPagesOfAHundred_UpToTheRequestLimit()
+    {
+        var requests = new List<string>();
+        static string Page(int count, int firstId)
+            => "{\"status_code\":1,\"results\":[" + string.Join(",", Enumerable.Range(0, count).Select(i =>
+                   $"{{\"id\":{firstId + i},\"issue_number\":\"{firstId + i}\",\"name\":\"Issue {firstId + i}\",\"cover_date\":\"2016-08-01\",\"deck\":\"Deck.\",\"site_detail_url\":\"https://comicvine.example/{firstId + i}\"}}"))
+               + ",{\"id\":0,\"issue_number\":\"1\"},{\"id\":5}]}";
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri!.ToString();
+            requests.Add(uri);
+            return JsonResponse(uri.Contains("offset=100") ? Page(3, 200) : Page(100, 1));
+        });
+        var service = CreateService(handler, ConfiguredSettings());
+
+        var all = await service.ListVolumeIssuesAsync(91273, maxRequests: 5);
+        var limited = await service.ListVolumeIssuesAsync(91273, maxRequests: 1);
+
+        Assert.Equal((103, 2), (all.Value.Count, all.Requests));
+        Assert.Equal((100, 1), (limited.Value.Count, limited.Requests));
+        Assert.Contains("/issues/?api_key=test-key&format=json&filter=volume:91273", requests[0]);
+        Assert.Contains("offset=0", requests[0]);
+        Assert.Equal(new ComicVineIssueSummary(1, "1", "Issue 1", "2016-08-01", "Deck.", "https://comicvine.example/1"), all.Value[0]);
+    }
+
+    [Fact]
+    public async Task GetIssueDetailsAsync_ReadsTheWritersAndStoryArcs()
+    {
+        var handler = new StubHttpMessageHandler(request => request.RequestUri!.AbsolutePath.Contains("4000-101")
+            ? JsonResponse("""
+              {"status_code":1,"results":{"id":101,
+                "person_credits":[{"name":"Tom King","role":"writer"},{"name":"David Finch","role":"penciler, cover"},
+                                  {"name":"TOM KING","role":"Writer, editor"},{"name":" ","role":"writer"},{"role":"writer"}],
+                "story_arc_credits":[{"id":7,"name":"I Am Gotham"},{"id":7,"name":"I Am Gotham"},{"id":8},{"name":"No id"}]}}
+              """)
+            : new HttpResponseMessage(HttpStatusCode.NotFound));
+        var service = CreateService(handler, ConfiguredSettings());
+
+        var details = await service.GetIssueDetailsAsync(101);
+
+        Assert.Equal(["Tom King"], details!.Writers);
+        Assert.Equal([new ComicVineArcReference(7, "I Am Gotham")], details.StoryArcs);
+        Assert.Null(await service.GetIssueDetailsAsync(999));
+    }
+
+    [Fact]
+    public async Task GetStoryArcAsync_ReadsTheIssuesInOrder()
+    {
+        var handler = new StubHttpMessageHandler(request => request.RequestUri!.AbsolutePath.Contains("4045-7")
+            ? JsonResponse("""
+              {"status_code":1,"results":{"id":7,"name":"I Am Gotham","deck":"Gotham and Gotham Girl.","site_detail_url":"https://comicvine.example/arc",
+                "issues":[{"id":102,"name":"Part Two","issue_number":"2","volume":{"name":"Batman"}},{"id":101},{"name":"no id"}]}}
+              """)
+            : JsonResponse("""{"status_code":1,"results":{"id":9}}"""));
+        var service = CreateService(handler, ConfiguredSettings());
+
+        var arc = await service.GetStoryArcAsync(7);
+
+        Assert.Equal(("I Am Gotham", "Gotham and Gotham Girl.", "https://comicvine.example/arc"), (arc!.Name, arc.Summary, arc.SiteUrl));
+        Assert.Equal([new ComicVineArcIssue(102, "Part Two", "2", "Batman"), new ComicVineArcIssue(101, null, null, null)], arc.Issues);
+        Assert.Null(await service.GetStoryArcAsync(9));
+    }
+
+    [Fact]
+    public async Task CatalogCalls_WithoutAnApiKey_AskNothing()
+    {
+        var handler = new StubHttpMessageHandler(_ => throw new InvalidOperationException("no request expected"));
+        var service = CreateService(handler, new AppSettings { EnableExternalSeriesMetadata = true, ComicVineBaseUrl = "https://comicvine.example/api" });
+
+        Assert.False(service.IsConfigured);
+        Assert.Empty((await service.ListVolumeIssuesAsync(1, 5)).Value);
+        Assert.Null(await service.GetIssueDetailsAsync(1));
+        Assert.Null(await service.GetStoryArcAsync(1));
+        Assert.True(CreateService(handler, ConfiguredSettings()).IsConfigured);
+    }
+
+    [Fact]
+    public void CatalogParsers_TolerateAnswersWithoutResults()
+    {
+        using var empty = System.Text.Json.JsonDocument.Parse("""{"status_code":1}""");
+
+        Assert.Empty(ComicVineSeriesMetadataService.ParseIssueList(empty.RootElement));
+        Assert.Null(ComicVineSeriesMetadataService.ParseIssueDetails(empty.RootElement));
+        Assert.Null(ComicVineSeriesMetadataService.ParseStoryArc(empty.RootElement));
+    }
+
+    private static AppSettings ConfiguredSettings() => new()
+    {
+        EnableExternalSeriesMetadata = true,
+        ComicVineApiKey = "test-key",
+        ComicVineBaseUrl = "https://comicvine.example/api"
+    };
+
     private static HttpResponseMessage JsonResponse(string json)
         => new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 

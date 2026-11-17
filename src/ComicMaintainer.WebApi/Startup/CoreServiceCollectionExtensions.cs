@@ -315,6 +315,8 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<ISuwayomiDownloadImportService, SuwayomiDownloadImportService>();
         services.AddSingleton<ComicVineSeriesMetadataService>();
         services.AddSingleton<IComicVineVolumeSearch>(sp => sp.GetRequiredService<ComicVineSeriesMetadataService>());
+        services.AddSingleton<IComicVineCatalogClient>(sp => sp.GetRequiredService<ComicVineSeriesMetadataService>());
+        services.AddSingleton<IComicVineIssueDetailsService, ComicVineIssueDetailsService>();
         services.AddSingleton<MangaDexSeriesMetadataService>();
         services.AddSingleton<AniListManhwaSeriesMetadataService>();
         services.AddSingleton<AniListMangaSeriesMetadataService>();
@@ -452,6 +454,7 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<IScheduledJobHandler, MetadataBackfillJobHandler>();
         services.AddSingleton<IScheduledJobHandler, MissingIssuesCheckJobHandler>();
         services.AddSingleton<IScheduledJobHandler, SuwayomiDownloadImportJobHandler>();
+        services.AddSingleton<IScheduledJobHandler, ComicVineIssueDetailsJobHandler>();
         // Only registered when the database is a file (see AddComicMaintainerData).
         if (services.Any(d => d.ServiceType == typeof(IDatabaseBackupService)))
         {

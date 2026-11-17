@@ -73,6 +73,31 @@ public sealed class ComicProcessorServiceProviderFillTests : IDisposable
         TestIO.TryDeleteDirectory(_root);
     }
 
+    [Fact]
+    public async Task WriteProviderDetailsAsync_WritesTheFields_AndFillsOnlyEmptyElements_InOneRewrite()
+    {
+        var path = WriteArchive("<ComicInfo><Title>Chapter 1</Title><Series>Berserk</Series><Number>1</Number><Web>https://kept.example</Web></ComicInfo>");
+        var service = CreateService();
+
+        var result = await service.WriteProviderDetailsAsync(
+            path,
+            new ComicMetadata { Title = "The Black Swordsman", Year = 1989 },
+            ComicMetadataFieldFlags.Title | ComicMetadataFieldFlags.Year,
+            new ProviderComicInfoFields(Web: "https://comicvine.example/1", StoryArc: "The Black Swordsman Arc", Month: 11));
+
+        Assert.True(result.Succeeded);
+        var info = ReadComicInfo(path);
+        Assert.Equal("The Black Swordsman", info.Element("Title")?.Value);
+        Assert.Equal("1989", info.Element("Year")?.Value);
+        Assert.Equal("11", info.Element("Month")?.Value);
+        Assert.Equal("The Black Swordsman Arc", info.Element("StoryArc")?.Value);
+        Assert.Equal("https://kept.example", info.Element("Web")?.Value);
+
+        // Nothing new: the archive is left as it is.
+        var again = await service.WriteProviderDetailsAsync(path, new ComicMetadata(), ComicMetadataFieldFlags.None, new ProviderComicInfoFields());
+        Assert.Equal(MetadataWriteOutcome.Unchanged, again.Outcome);
+    }
+
     private ComicProcessorService CreateService()
     {
         var resolver = new Mock<ISeriesNameResolver>();

@@ -2332,6 +2332,24 @@
          </div>
      </div>
 
+     <!-- Story Arc Modal -->
+     <div class="modal" id="storyArcModal" role="dialog" aria-modal="true" aria-labelledby="storyArcModalTitle" aria-hidden="true">
+         <div class="modal-content" style="max-width: 720px;">
+             <div class="modal-header">
+                 <h2 id="storyArcModalTitle">Story Arc</h2>
+                 <button class="close-btn" onclick="closeStoryArcModal()">&times;</button>
+             </div>
+             <div class="modal-body">
+                 <p class="combine-folders-meta" id="storyArcSummary"></p>
+                 <div id="storyArcIssues" class="combine-folders-list"></div>
+                 <p><a id="storyArcLink" class="story-arc-link" target="_blank" rel="noopener noreferrer" style="display: none;">View on ComicVine</a></p>
+             </div>
+             <div class="modal-footer">
+                 <button class="btn" onclick="closeStoryArcModal()">Close</button>
+             </div>
+         </div>
+     </div>
+
      <!-- Volume Numbers Modal -->
      <div class="modal" id="volumeNumbersModal" role="dialog" aria-modal="true" aria-labelledby="volumeNumbersModalTitle" aria-hidden="true">
          <div class="modal-content" style="max-width: 720px;">

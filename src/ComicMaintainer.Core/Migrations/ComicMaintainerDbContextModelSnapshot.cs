@@ -207,6 +207,146 @@ namespace ComicMaintainer.Core.Migrations
                     b.ToTable("ComicFiles");
                 });
 
+            modelBuilder.Entity("ComicMaintainer.Core.Data.ComicVineFileStateEntity", b =>
+                {
+                    b.Property<string>("FilePath")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("AppliedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("IssueId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("FilePath");
+
+                    b.HasIndex("IssueId");
+
+                    b.ToTable("ComicVineFileStates");
+                });
+
+            modelBuilder.Entity("ComicMaintainer.Core.Data.ComicVineIssueEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CoverDate")
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DetailsUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IssueNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ListedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SiteUrl")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StoryArcsJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Summary")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("VolumeId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Writers")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("VolumeId");
+
+                    b.ToTable("ComicVineIssues");
+                });
+
+            modelBuilder.Entity("ComicMaintainer.Core.Data.ComicVineStoryArcEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("FetchedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IssuesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SiteUrl")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Summary")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ComicVineStoryArcs");
+                });
+
+            modelBuilder.Entity("ComicMaintainer.Core.Data.ComicVineVolumeLinkEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("IssuesListedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("LinkedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Publisher")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SeriesKey")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("StartYear")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("VolumeId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("VolumeName")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("VolumeId");
+
+                    b.HasIndex("SeriesKey", "StartYear")
+                        .IsUnique();
+
+                    b.ToTable("ComicVineVolumeLinks");
+                });
+
             modelBuilder.Entity("ComicMaintainer.Core.Data.EreaderDeviceEntity", b =>
                 {
                     b.Property<int>("Id")

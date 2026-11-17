@@ -31,6 +31,7 @@ internal static class WwwrootFiles
         "js/app/selection.js",
         "js/app/file-actions.js",
         "js/app/jobs.js",
+        "js/app/process-preview.js",
         "js/app/settings.js",
         "js/app/scheduled-jobs.js",
         "js/app/users.js",

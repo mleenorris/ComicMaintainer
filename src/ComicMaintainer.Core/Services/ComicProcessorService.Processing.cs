@@ -142,11 +142,12 @@ public partial class ComicProcessorService
             {
                 _logger.LogDebug("ProcessFileAsync: Attempting to normalize file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 // Check if metadata is already normalized (has ComicInfo.xml with valid data and series name matches folder)
-                if (await IsMetadataNormalizedAsync(metadata, filePath, cancellationToken))
+                var plan = await PlanNormalizeAsync(metadata, filePath, mutateCache: true, cancellationToken);
+                if (plan.AlreadyNormalized)
                 {
                     _logger.LogDebug("File already has normalized metadata: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                     await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken);
-                    if (await FillFromProviderAsync(filePath, metadata, cancellationToken) is { Succeeded: true } filled
+                    if (await FillFromProviderAsync(filePath, metadata, plan.ProviderFill, cancellationToken) is { Succeeded: true } filled
                         && FollowMovedFile(filled.FilePath, ref filePath, ref resolvedPath))
                     {
                         fileChanged = filled.Outcome is MetadataWriteOutcome.Written or MetadataWriteOutcome.ConvertedToCbz;
@@ -159,13 +160,12 @@ public partial class ComicProcessorService
                 }
                 else
                 {
-                    var beforeMetadata = metadata.Clone();
-                    var normalizedMetadata = await NormalizeMetadataAsync(metadata, filePath, cancellationToken);
+                    var beforeMetadata = plan.Before;
+                    var normalizedMetadata = plan.Normalized;
 
                     // Only the fields normalize owns are written, plus any provider details that
                     // fill an empty element; a CBR/RAR may come back as a new CBZ.
-                    var providerFill = await ResolveProviderFillAsync(filePath, normalizedMetadata.Series, cancellationToken);
-                    var normalizeWrite = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, NormalizeWriteFields(beforeMetadata, normalizedMetadata), cancellationToken, providerFill: providerFill);
+                    var normalizeWrite = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, plan.Fields, cancellationToken, providerFill: plan.ProviderFill);
                     normalizeSuccess = normalizeWrite.Succeeded;
                     var beforeFilename = Path.GetFileName(filePath);
                     if (!FollowMovedFile(normalizeWrite.FilePath, ref filePath, ref resolvedPath))
@@ -244,7 +244,7 @@ public partial class ComicProcessorService
                 FollowMovedFile(preservedPath, ref filePath, ref resolvedPath);
 
                 _logger.LogDebug("ProcessFileAsync: Attempting to rename file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                var newResolvedPath = GenerateFileName(metadata, resolvedPath, originalSeries);
+                var (renameDecision, newResolvedPath) = DecideRename(metadata, resolvedPath, originalSeries);
                 if (newResolvedPath != null)
                 {
                     _logger.LogInformation(
@@ -253,13 +253,14 @@ public partial class ComicProcessorService
                         LoggingHelper.SanitizePathForLog(newResolvedPath));
                 }
 
+                // Only RenameDecision.NameFailed comes without a target.
                 if (newResolvedPath == null)
                 {
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await LogHistoryAsync(filePath, "Rename", false, FilenameGenerationFailedMessage, cancellationToken);
                     renameError = $"Rename failed: {FilenameGenerationFailedMessage}";
                 }
-                else if (newResolvedPath == resolvedPath)
+                else if (renameDecision == RenameDecision.AlreadyNamed)
                 {
                     // File already has correct name, no rename needed
                     _logger.LogDebug("File already has correct name: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
@@ -270,7 +271,7 @@ public partial class ComicProcessorService
                         filename, filename, metadata, metadata, cancellationToken);
                     renameSuccess = true;
                 }
-                else if (TargetFileExists(newResolvedPath, resolvedPath))
+                else if (renameDecision == RenameDecision.TargetTaken)
                 {
                     // Target file already exists - treat as duplicate
                     _logger.LogInformation("ProcessFileAsync: Duplicate detected - target file already exists: {NewPath}", LoggingHelper.SanitizePathForLog(newResolvedPath));

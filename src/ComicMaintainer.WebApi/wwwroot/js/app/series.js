@@ -1425,6 +1425,9 @@
                                             <button class="dropdown-item" data-requires-write onclick="openVolumeNumbersModal('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Ask ComicVine for the number of each volume known only by the year it started">
                                                 ${uiIcon('globe')} Find Volume Numbers
                                             </button>
+                                            <button class="dropdown-item" data-requires-write onclick="previewSeriesProcessing('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="See what processing this series would rename and retag, before anything is changed">
+                                                ${uiIcon('eye')} Preview Changes
+                                            </button>
                                             <div class="dropdown-divider" data-requires-write></div>
                                             <button class="dropdown-item" data-requires-write onclick="refreshSeriesMetadataDirect('${jsArg(series.title)}'); closeAllDropdowns();">
                                                 ${uiIcon('globe')} Refresh Metadata

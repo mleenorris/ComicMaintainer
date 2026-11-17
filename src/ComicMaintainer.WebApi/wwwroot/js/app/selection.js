@@ -241,6 +241,7 @@
                 if (emailSelectedItem) emailSelectedItem.disabled = false;
             }
             if (updateSeriesCoversSelectedItem) updateSeriesCoversSelectedItem.disabled = !canUpdateSelectedSeriesCovers;
+            document.getElementById('previewSelectedItem').disabled = count === 0;
             syncSeriesSelectionControls();
         }
 

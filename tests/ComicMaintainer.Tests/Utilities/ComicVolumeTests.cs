@@ -94,4 +94,22 @@ public class ComicVolumeTests
         Assert.Equal(("y1990", "(1990)", "1990"), (year.Key, year.Label, year.DisplayName));
         Assert.Equal(("v2", "Vol. 2", "Vol. 2"), (number.Key, number.Label, number.DisplayName));
     }
+
+    [Theory]
+    // No extension to strip: a decimal issue stays part of the name.
+    [InlineData("Green Lantern (1990) 012.5", 1990, true)]
+    [InlineData("All New X-Men v2 008 (2016)", 2, false)]
+    public void FromFileNameStem_ReadsANameWithoutAnExtension(string stem, int value, bool isYear)
+    {
+        Assert.Equal(new ComicVolume(value, isYear), ComicVolume.FromFileNameStem(stem));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(" ")]
+    [InlineData("Saga 001 (2012)")]
+    public void FromFileNameStem_NoVolume_IsNull(string? stem)
+    {
+        Assert.Null(ComicVolume.FromFileNameStem(stem));
+    }
 }

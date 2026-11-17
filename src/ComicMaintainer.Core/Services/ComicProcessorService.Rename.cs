@@ -386,8 +386,9 @@ public partial class ComicProcessorService
     /// <param name="originalSeries">
     /// The series as the file named it before the resolved name replaced it. Without a
     /// <c>&lt;Volume&gt;</c> tag, the volume comes from it ("Green Lantern (1990)"), then the file
-    /// name, then the folder name: the sources, in the order, normalize fills
-    /// <c>&lt;Volume&gt;</c> from (see VolumeToFill), so the name and the tag agree.
+    /// name, then a file name left in the title, then the folder name: the sources, in the
+    /// order, normalize fills <c>&lt;Volume&gt;</c> from (see VolumeFromNames), so the name and
+    /// the tag agree.
     /// </param>
     private string? GenerateFileName(ComicMetadata metadata, string originalPath, string? originalSeries = null)
     {
@@ -399,9 +400,7 @@ public partial class ComicProcessorService
             // Convert ComicMetadata to ComicInfo for use with ComicFileProcessor
             var comicInfo = ComicInfo.FromMetadata(metadata);
             if (ComicVolume.FromTag(comicInfo.Volume) is null
-                && (ComicVolume.FromSeriesName(originalSeries)
-                    ?? ComicVolume.FromFileName(Path.GetFileName(originalPath))
-                    ?? ComicVolume.FromSeriesName(Path.GetFileName(directory))) is { } volume)
+                && VolumeFromNames(originalSeries ?? metadata.Series, metadata.Title, metadata.Issue, originalPath) is { } volume)
             {
                 // In-memory only: the copy renders the name, the file's tags are untouched.
                 comicInfo.Volume = volume.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);

@@ -2265,6 +2265,28 @@
          </div>
      </div>
 
+     <!-- Volume Numbers Modal -->
+     <div class="modal" id="volumeNumbersModal" role="dialog" aria-modal="true" aria-labelledby="volumeNumbersModalTitle" aria-hidden="true">
+         <div class="modal-content" style="max-width: 720px;">
+             <div class="modal-header">
+                 <h2 id="volumeNumbersModalTitle">Volume Numbers</h2>
+                 <button class="close-btn" onclick="closeVolumeNumbersModal()">&times;</button>
+             </div>
+             <div class="modal-body">
+                 <p class="combine-folders-meta">
+                     Volumes of this series known only by the year they started. ComicVine's volumes of the same name and publisher suggest each one's number. Check the volumes it counted before you set it.
+                 </p>
+                 <div id="volumeNumbersList" class="combine-folders-list"></div>
+                 <div id="volumeNumbersEmptyState" class="duplicate-review-empty" style="display: none;">
+                     No volume of this series is known only by the year it started.
+                 </div>
+             </div>
+             <div class="modal-footer">
+                 <button class="btn" onclick="closeVolumeNumbersModal()">Close</button>
+             </div>
+         </div>
+     </div>
+
      <!-- Manage Series Names Modal -->
      <div class="modal" id="manageSeriesNamesModal" role="dialog" aria-modal="true" aria-labelledby="manageSeriesNamesModalTitle" aria-hidden="true">
          <div class="modal-content" style="max-width: 720px;">

@@ -659,6 +659,7 @@ Preferences are `{"defaultReaderMode","readingDirection","tapZonesEnabled","auto
 |---|---|---|---|
 | `GET` | `/api/metadata/providers` | Signed in | Health of each provider |
 | `GET` | `/api/metadata/search` | Signed in | Search providers |
+| `GET` | `/api/metadata/volume-number` | Signed in | Suggest a volume's number from ComicVine |
 | `POST` | `/api/metadata/refresh-all` | Library write | Queue a refresh of every series |
 | `POST` | `/api/metadata/match-unmatched` | Library write | Queue a lookup for unmatched series |
 | `POST` | `/api/metadata/refresh-selected` | Library write | Queue a refresh of listed series |
@@ -711,7 +712,21 @@ Preferences are `{"defaultReaderMode","readingDirection","tapZonesEnabled","auto
 
 **The cached record** has `series_id`, `canonical_title`, `aliases`, `user_aliases`, `series_name`, `is_user_selected_name`, `resolved_series_name`, `source`, `source_id`, `last_lookup_utc`, `lookup_status`, `remote_image_url`, `local_image_file`, `image_content_type`, `image_downloaded_utc`, `image_status`, `preferred_language`, `localized_titles`, `synopsis`, `site_url`, `genres`, `publication_status`, `total_chapters`, `origin`, `metadata_version`, `has_image` and `is_user_image`.
 
-**Provider outages.** When nothing was found and a provider could not answer, `POST /api/metadata/refresh/{seriesTitle}` and `GET /api/metadata/search` answer:
+**`GET /api/metadata/volume-number`** takes `title` and `year`, the year a volume started, and suggests that volume's number. It counts ComicVine's volumes named exactly `title` from the publisher of the one that started in `year`, oldest first. Volumes with a single issue, such as one-shots, are left out. `Batman` and `2016` give `3`: DC's `Batman` volumes of 1940, 2011 and 2016. Nothing is written. It returns:
+
+```json
+{
+  "title": "Batman",
+  "year": 2016,
+  "number": 3,
+  "publisher": "DC Comics",
+  "volumes": [{ "name": "Batman", "start_year": 1940, "issues": 713, "publisher": "DC Comics", "site_url": "https://...", "matched": false }]
+}
+```
+
+`volumes` lists the volumes counted, ending with the one that started in `year` (`matched`). `number` is `null` and `volumes` empty when ComicVine has no such volume or is not configured. A missing `title`, or a `year` outside 1900 to 2199, answers `400`.
+
+**Provider outages.** When nothing was found and a provider could not answer, `POST /api/metadata/refresh/{seriesTitle}`, `GET /api/metadata/search` and `GET /api/metadata/volume-number` answer:
 
 ```json
 { "error": "MangaDex did not answer in time", "providers": ["MangaDex"], "retry_after_seconds": 30 }

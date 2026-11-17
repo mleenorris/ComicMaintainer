@@ -312,6 +312,7 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<ISuwayomiSeriesAddService, SuwayomiSeriesAddService>();
         services.AddSingleton<ISuwayomiDownloadImportService, SuwayomiDownloadImportService>();
         services.AddSingleton<ComicVineSeriesMetadataService>();
+        services.AddSingleton<IComicVineVolumeSearch>(sp => sp.GetRequiredService<ComicVineSeriesMetadataService>());
         services.AddSingleton<MangaDexSeriesMetadataService>();
         services.AddSingleton<AniListManhwaSeriesMetadataService>();
         services.AddSingleton<AniListMangaSeriesMetadataService>();

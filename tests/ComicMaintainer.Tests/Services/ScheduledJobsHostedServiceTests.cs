@@ -27,6 +27,26 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
     private const string JobKey = "test-job";
     private static readonly TimeSpan SignalTimeout = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Asks for a run until the job's previous run has released it, for at most
+    /// <see cref="SignalTimeout"/>: true once a request is accepted.
+    /// </summary>
+    private static async Task<bool> RunNowOnceReleasedAsync(ScheduledJobsHostedService hosted, string jobKey)
+    {
+        var deadline = DateTime.UtcNow + SignalTimeout;
+        while (!await hosted.RunNowAsync(jobKey))
+        {
+            if (DateTime.UtcNow >= deadline)
+            {
+                return false;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(10));
+        }
+
+        return true;
+    }
+
     private readonly TestDbContextFactory _dbFactory = new();
     private readonly RecordingLogger _logger = new();
     private readonly List<ScheduledJobsHostedService> _hostedServices = new();
@@ -215,8 +235,9 @@ public sealed class ScheduledJobsHostedServiceTests : IDisposable
         Assert.Equal(1, handler.Invocations);
         Assert.Equal(nameof(ScheduledJobStatus.Success), LoadJob().LastStatus);
 
-        // The finished run released the job, so the next request runs it again.
-        Assert.True(await hosted.RunNowAsync(JobKey));
+        // The finished run releases the job, so the next request runs it again. "completed in"
+        // is logged just before the release, so a request in between can still be refused.
+        Assert.True(await RunNowOnceReleasedAsync(hosted, JobKey));
         await _logger.WaitForAsync(e => e.Message.Contains("second run", StringComparison.Ordinal));
         Assert.Equal(2, handler.Invocations);
     }

@@ -569,11 +569,11 @@ public partial class ComicProcessorService
 
         var number = VolumesFromNames(metadata.Series, metadata.Title, metadata.Issue, filePath)
             .Where(volume => !volume.IsYear)
-            .Cast<ComicVolume?>()
+            .Select(volume => volume.Value.ToString(System.Globalization.CultureInfo.InvariantCulture))
             .FirstOrDefault();
-        if (number is { } found)
+        if (number is not null)
         {
-            return new VolumeWrite(found.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            return new VolumeWrite(number);
         }
 
         return holdsYear ? new VolumeWrite(null) : null;
@@ -600,15 +600,10 @@ public partial class ComicProcessorService
             return tagged.Value;
         }
 
-        foreach (var volume in VolumesFromNames(metadata.Series, metadata.Title, metadata.Issue, filePath))
-        {
-            if (volume.IsYear)
-            {
-                return volume.Value;
-            }
-        }
-
-        return null;
+        return VolumesFromNames(metadata.Series, metadata.Title, metadata.Issue, filePath)
+            .Where(volume => volume.IsYear)
+            .Select(volume => (int?)volume.Value)
+            .FirstOrDefault();
     }
 
     /// <summary>True for a blank <c>&lt;Volume&gt;</c> or ComicInfo's "unset" (-1 or 0).</summary>

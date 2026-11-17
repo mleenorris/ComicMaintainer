@@ -819,6 +819,7 @@
             { name: 'series', property: 'Series', field: 'series' },
             { name: 'issue', property: 'Issue', field: 'issue' },
             { name: 'volume', property: 'Volume', field: 'volume' },
+            { name: 'volume_year', property: 'VolumeYear', field: 'volumeYear' },
             { name: 'format', property: 'Format', field: 'format' },
             { name: 'publisher', property: 'Publisher', field: 'publisher' },
             { name: 'year', property: 'Year', field: 'year' },
@@ -837,11 +838,11 @@
         }
 
         // The ComicMetadata value sent for an input's text. An empty input clears the field
-        // (null, or no authors). Returns undefined for text that cannot be sent: a Year that
-        // is not a number.
+        // (null, or no authors). Returns undefined for text that cannot be sent: a Year or
+        // Volume start year that is not a number.
         function tagFormValue(formField, text) {
             const trimmed = text.trim();
-            if (formField.property === 'Year') {
+            if (formField.property === 'Year' || formField.property === 'VolumeYear') {
                 if (!trimmed) return null;
                 const year = parseInt(trimmed, 10);
                 return isNaN(year) ? undefined : year;

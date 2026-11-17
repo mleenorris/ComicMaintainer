@@ -16,4 +16,7 @@ public class SeriesMetadata
 
     /// <summary>ComicInfo <c>&lt;Format&gt;</c> (see <see cref="ComicMetadata.Format"/>).</summary>
     public string? Format { get; set; }
+
+    /// <summary>The year the volume started, kept by the application (see <see cref="ComicMetadata.VolumeYear"/>).</summary>
+    public int? VolumeYear { get; set; }
 }

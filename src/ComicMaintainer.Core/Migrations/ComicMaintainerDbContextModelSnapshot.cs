@@ -1363,6 +1363,9 @@ namespace ComicMaintainer.Core.Migrations
                                 .HasMaxLength(50)
                                 .HasColumnType("TEXT");
 
+                            b1.Property<int?>("VolumeYear")
+                                .HasColumnType("INTEGER");
+
                             b1.Property<int?>("Year")
                                 .HasColumnType("INTEGER");
 

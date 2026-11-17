@@ -385,7 +385,7 @@ Filter values for the listing routes:
 
 **`GET /api/files/scan-unmarked`** returns `{"total_count","unmarked_count","marked_count"}`.
 
-**Metadata.** The metadata object is `{"series","title","issue","volume","format","publisher","year","summary","authors":[],"tags":[],"isUserEdited","userLockedFieldsMask"}`. `format` is ComicInfo `<Format>`; `Annual` and `Special` mark issues numbered on their own.
+**Metadata.** The metadata object is `{"series","title","issue","volume","volumeYear","format","publisher","year","summary","authors":[],"tags":[],"isUserEdited","userLockedFieldsMask"}`. `format` is ComicInfo `<Format>`; `Annual` and `Special` mark issues numbered on their own. `volume` is the volume number and `volumeYear` the year the volume started, which only the database keeps.
 
 - `GET` metadata routes answer `404` when the file has none.
 - `PUT /api/files/metadata?filePath=` and `PUT /api/files/{encodedFilePath}/tags` merge: a field left out or sent as `null` keeps its value. They answer an empty `200`.
@@ -398,7 +398,7 @@ Filter values for the listing routes:
 { "files": ["/watched_dir/a.cbz"], "metadata": { "series": "Batman" }, "fields": ["series"] }
 ```
 
-`fields` is optional. When present, only the listed fields are applied, and a listed field with no value is removed. When absent, every field that has a value is applied and nothing is removed. Field names are `series`, `title`, `issue` (or `number`), `volume`, `format`, `publisher`, `year`, `summary` (or `description`), `authors` (or `writer`, `writers`) and `tags`. It answers `200`, `207 {"failed":[...]}` when only some files failed, and `400` when all failed, when a field name is unknown (`Unknown metadata field: x`), or when no field is given (`No metadata fields specified`).
+`fields` is optional. When present, only the listed fields are applied, and a listed field with no value is removed. When absent, every field that has a value is applied and nothing is removed. Field names are `series`, `title`, `issue` (or `number`), `volume`, `volume_year` (or `volumeYear`), `format`, `publisher`, `year`, `summary` (or `description`), `authors` (or `writer`, `writers`) and `tags`. It answers `200`, `207 {"failed":[...]}` when only some files failed, and `400` when all failed, when a field name is unknown (`Unknown metadata field: x`), or when no field is given (`No metadata fields specified`).
 
 **`GET /api/files/series-resolution?filePath=`** returns `{"filePath","actualSeries","resolvedSeries","winningStep","candidates","folderSeries","matchedCacheKey","appliedLanguage","explanation","matchesActual"}` and changes nothing.
 
@@ -488,7 +488,7 @@ With `include_issues=true`, each entry also holds its `issues`. Leave it off for
 
 **`GET /api/files/series/facets`** returns `{"genres":[{"value","count"}],"statuses":[{"value","count"}],"series_without_genres","series_without_status"}`.
 
-**`GET /api/files/series/{seriesId}/issues`** takes `filter`, `page` and `per_page`. It returns `{"id","title","canonical_title","aliases","metadata_source","cover_file_path","has_external_image","external_image_url","issue_count","total_size","issues","page","per_page","total_pages","synopsis","genres","publication_status","site_url"}`. Each issue is `{"file_path","file_name","title","issue","volume","publisher","year","size","modified","processed","renamed","normalized","duplicate","read","format","annual","volume_key","volume_label"}`. `format` is `Annual`, `Special` or `null`; `annual` is true for an Annual.
+**`GET /api/files/series/{seriesId}/issues`** takes `filter`, `page` and `per_page`. It returns `{"id","title","canonical_title","aliases","metadata_source","cover_file_path","has_external_image","external_image_url","issue_count","total_size","issues","page","per_page","total_pages","synopsis","genres","publication_status","site_url"}`. Each issue is `{"file_path","file_name","title","issue","volume","publisher","year","size","modified","processed","renamed","normalized","duplicate","read","format","annual","volume_year","volume_key","volume_label"}`. `format` is `Annual`, `Special` or `null`; `annual` is true for an Annual.
 
 **`GET /api/files/series/{seriesId}/folders`** takes `filter` and returns `{"id","title","folders":[{"directory","file_count","total_size"}],"combine_group_key","suggested_destination_directory"}`.
 

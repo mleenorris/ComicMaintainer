@@ -64,7 +64,8 @@ public class ComicFileProcessor
     /// <c>{series}</c> is the series title alone. Its kind and volume go only where the template
     /// places <c>{format}</c> ("Annual" or "Special", see <see cref="IssueFormat"/>; nothing for a
     /// regular issue), <c>{annual}</c> ("Annual" for an Annual only) and <c>{volume_label}</c>
-    /// ("(1990)", "Vol. 2", or nothing when the volume is unknown).
+    /// ("Vol. 2" when the volume number is known, else its start year "(1990)", or nothing).
+    /// <c>{volume_number}</c> ("2") and <c>{volume_year}</c> ("1990") are each part alone.
     /// <c>{volume}</c> is the raw <c>&lt;Volume&gt;</c> value. Brackets and " - " separators a
     /// placeholder left empty are removed with it.
     /// </remarks>
@@ -133,6 +134,8 @@ public class ComicFileProcessor
             ["format"] = series.Kind ?? "",
             ["annual"] = series.Kind == IssueFormat.Annual ? IssueFormat.Annual : "",
             ["volume_label"] = series.Volume?.Label ?? "",
+            ["volume_number"] = series.Volume is { IsYear: false } number ? number.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "",
+            ["volume_year"] = series.VolumeYear?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "",
             ["issue"] = issueFormatted,
             ["issue_no_pad"] = issueNoPad,
             ["title"] = tags.Title ?? "",
@@ -179,11 +182,24 @@ public class ComicFileProcessor
     /// <c>{volume_label}</c> and <c>{format}</c> gives #1 of every volume, Annual #1 and
     /// Special #1 the same name.
     /// </summary>
-    internal static (string Title, string? Kind, ComicVolume? Volume) SeriesParts(ComicInfo tags, string? sourceFileName)
+    internal static (string Title, string? Kind, ComicVolume? Volume, int? VolumeYear) SeriesParts(ComicInfo tags, string? sourceFileName)
     {
         var series = (tags.Series ?? string.Empty).Trim();
         var kind = IssueFormat.Of(tags.Format, series, tags.Number, sourceFileName, tags.Title);
-        var volume = ComicVolume.Resolve(tags.Volume, series, sourceFileName);
+        // A volume number names the volume; its start year is the fallback.
+        ComicVolume?[] named =
+        [
+            ComicVolume.FromTag(tags.Volume),
+            ComicVolume.FromSeriesName(series),
+            ComicVolume.FromFileName(sourceFileName),
+            tags.VolumeYear is { } stored ? ComicVolume.FromYear(stored) : null
+        ];
+        var known = named.OfType<ComicVolume>().ToList();
+        var number = known.Where(candidate => !candidate.IsYear).Cast<ComicVolume?>().FirstOrDefault();
+        var startYear = tags.VolumeYear is { } storedYear && ComicVolume.FromYear(storedYear) is not null
+            ? storedYear
+            : known.Where(candidate => candidate.IsYear).Cast<ComicVolume?>().FirstOrDefault()?.Value;
+        var volume = number ?? (startYear is { } year ? ComicVolume.FromYear(year) : null);
         var title = series.Length == 0
             ? series
             : AnnualIssue.WithoutAnnual(ComicVolume.WithoutVolume(series));
@@ -192,7 +208,7 @@ public class ComicFileProcessor
             title = WithoutTrailingWord(title, IssueFormat.Special);
         }
 
-        return (title, kind, volume);
+        return (title, kind, volume, startYear);
     }
 
     /// <summary>

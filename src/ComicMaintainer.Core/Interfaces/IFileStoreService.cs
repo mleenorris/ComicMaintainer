@@ -270,6 +270,12 @@ public interface IFileStoreService
     Task RecordArchiveMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Stores the year the file's volume started (<see cref="ComicMetadata.VolumeYear"/>), which
+    /// lives only in the database; null removes it. Returns false when the file is not tracked.
+    /// </summary>
+    Task<bool> SetVolumeYearAsync(string filePath, int? volumeYear, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Up to <paramref name="max"/> tracked files, in id order after <paramref name="afterId"/>,
     /// whose cached archive metadata is missing or was read from a different version of the
     /// file (its stored size or modification time has changed since). Files with a user edit

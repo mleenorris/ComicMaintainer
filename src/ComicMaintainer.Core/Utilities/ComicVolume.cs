@@ -43,7 +43,7 @@ public readonly partial record struct ComicVolume(int Value, bool IsYear)
 
     /// <summary>
     /// Reads a ComicInfo <c>&lt;Volume&gt;</c> value: <c>2</c>, <c>02</c>, <c>v2</c>,
-    /// <c>Vol. 2</c> or a start year such as <c>1990</c>. Null for blank, negative (ComicInfo's
+    /// <c>Vol. 2</c> or a start year such as <c>1990</c> or <c>(1990)</c>. Null for blank, negative (ComicInfo's
     /// "unset" is -1), zero or other values.
     /// </summary>
     public static ComicVolume? FromTag(string? volumeTag)
@@ -170,14 +170,18 @@ public readonly partial record struct ComicVolume(int Value, bool IsYear)
         return value is >= 1 and <= MaxVolumeNumber ? new ComicVolume(value, IsYear: false) : null;
     }
 
+    /// <summary>A start-year volume for <paramref name="year"/>; null outside 1900-2199.</summary>
+    public static ComicVolume? FromYear(int year)
+        => year is >= MinYear and <= MaxYear ? new ComicVolume(year, IsYear: true) : null;
+
     private static ComicVolume? FromYear(string digits)
         => int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var year)
            && year is >= MinYear and <= MaxYear
             ? new ComicVolume(year, IsYear: true)
             : null;
 
-    // "2", "02", "v2", "Vol 2", "Vol. 2", "Volume 2", "1990".
-    [GeneratedRegex(@"^(?:v(?:ol(?:ume)?)?\.?\s*)?(?<value>\d{1,4})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
+    // "2", "02", "v2", "Vol 2", "Vol. 2", "Volume 2", "1990", "(1990)", "[1990]".
+    [GeneratedRegex(@"^(?:v(?:ol(?:ume)?)?\.?\s*)?(?<value>\d{1,4})$|^[\(\[]\s*(?<value>\d{4})\s*[\)\]]$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
     private static partial Regex TagPattern();
 
     // "... (1990)", "... [1990]", "... (1990-1995)", "... (1990-)" at the end of a name.

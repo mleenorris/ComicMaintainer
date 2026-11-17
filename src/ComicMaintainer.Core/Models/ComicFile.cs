@@ -16,6 +16,7 @@ public enum ComicMetadataFieldFlags : long
     Authors = 1 << 7,
     Tags = 1 << 8,
     Format = 1 << 9,
+    VolumeYear = 1 << 10,
 }
 
 /// <summary>
@@ -80,6 +81,14 @@ public class ComicMetadata
     /// their own (see <see cref="Utilities.IssueFormat"/>).
     /// </summary>
     public string? Format { get; set; }
+
+    /// <summary>
+    /// The year the issue's volume started (<c>2016</c> for All-New X-Men vol. 2), kept by the
+    /// application only. ComicInfo has a single <c>&lt;Volume&gt;</c> element, which holds the volume
+    /// number; the start year is never written into the archive, and a re-scan of the archive
+    /// keeps it.
+    /// </summary>
+    public int? VolumeYear { get; set; }
     public List<string> Authors { get; set; } = new();
     public List<string> Tags { get; set; } = new();
     public bool IsUserEdited { get; set; }
@@ -100,6 +109,7 @@ public class ComicMetadata
             Year = this.Year,
             Summary = this.Summary,
             Format = this.Format,
+            VolumeYear = this.VolumeYear,
             Authors = new List<string>(this.Authors),
             Tags = new List<string>(this.Tags),
             IsUserEdited = this.IsUserEdited,

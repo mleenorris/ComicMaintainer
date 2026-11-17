@@ -96,6 +96,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
                 metadata.Property(m => m.Publisher).HasMaxLength(256);
                 metadata.Property(m => m.Summary).HasMaxLength(2048);
                 metadata.Property(m => m.Format).HasMaxLength(64);
+                metadata.Property(m => m.VolumeYear);
                 metadata.Property(m => m.Authors).HasConversion(
                     v => string.Join(';', v),
                     v => v.Split(';', StringSplitOptions.RemoveEmptyEntries).ToList()

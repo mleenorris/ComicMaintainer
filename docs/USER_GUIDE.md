@@ -54,13 +54,23 @@ archive, a failed write or no series, counts as failed with a reason.
 ### Normalize
 
 Normalize writes the series, title and number. It keeps a real chapter title, and only fills a missing title or fixes an
-old generated `Chapter N`. It also fills an empty `<Volume>` when the series, file or folder name gives one. For
-example, `The Astonishing X-Men (1995)` gets `1995`, the year that volume started, and `(1999)` gets `1999`. A
-`Vol. 2` or `v2` token gives `2`. A volume that is already set is never replaced. The volume's start year never goes
-into `<Year>`, but an empty `<Year>` gets the issue's cover year: a year in brackets after the issue number, as in
-`Saga 001 (2012)`. A `<Year>` of 1970 counts as empty: some downloaders write it when the date is unknown, so the
-cover year replaces it, and it is kept only when no cover year is found. Everything else in `ComicInfo.xml` stays as it
-was.
+old generated `Chapter N`. Everything else in `ComicInfo.xml` stays as it was, except for these fills:
+
+- **Volume number.** `<Volume>` holds only the volume number. An empty one gets the number when the series, file or
+  folder name gives one: a `Vol. 2` or `v2` token gives `2`. One that holds a year instead (`1990` or `(1990)`, as
+  ComicTagger and older versions wrote it) has the year moved to the start year below, and gets the number from the
+  names or is removed. A number that is already set is never replaced.
+- **Volume start year.** ComicInfo has no element for the year a volume started, so ComicMaintainer keeps it in its
+  own database. `The Astonishing X-Men (1995)` started in 1995 and `(1999)` is volume 2's start. The year is read from
+  a `<Volume>` that holds one, as ComicTagger can write it, or from the series, file or folder name. It is never written
+  into the archive, and a re-scan of the archive keeps it.
+- **Cover year.** The start year never goes into `<Year>`, but an empty `<Year>` gets the issue's cover year: a year in
+  brackets after the issue number, as in `Saga 001 (2012)`. A `<Year>` of 1970 counts as empty: some downloaders
+  write it when the date is unknown, so the cover year replaces it, and it is kept only when no cover year is found.
+
+Both volume values can be edited in **View/Edit**, or for many files at once in **Update**: **Volume** is the number
+and **Volume start year** the year. On the series page, a volume that some issues name by number and others by start
+year is shown once, as `Vol. 2 (2016)`, once one issue has both.
 
 A file renamed before this version may have lost its volume from its name. If its `<Title>` still holds the old file
 name, such as `All New X-Men v2 008 (2016)`, the volume and cover year are read from there. A real story title is never
@@ -92,9 +102,10 @@ rewrites the archive. The default format is `{series} {format} {volume_label} - 
 
 `{series}` is the series name alone. Its volume, "Annual" and "Special" appear only where the format places them:
 
-- `{volume_label}` is the volume's start year, `(1990)`, or its number, `Vol. 2`. It comes from ComicInfo `<Volume>`,
-  then the series name, then the file name (a `v2` token, or a year before the issue number), then an old file name
-  left in `<Title>`, then the folder name.
+- `{volume_label}` is the volume number, `Vol. 2`, when it is known, else the start year, `(1990)`. They come from
+  ComicInfo `<Volume>`, the stored start year, the series name, the file name (a `v2` token, or a year before the
+  issue number), an old file name left in `<Title>`, and the folder name.
+- `{volume_number}` is the number alone, `2`, and `{volume_year}` the start year alone, `1990`.
 - `{format}` is `Annual` for an Annual and `Special` for a Special.
 - `{annual}` is `Annual` for an Annual only. Prefer `{format}`, which covers Specials too.
 

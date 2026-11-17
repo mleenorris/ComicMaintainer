@@ -1187,11 +1187,13 @@
                                 <li><code>{series}</code> - Series name, without its volume or "Annual"</li>
                                 <li><code>{format}</code> - "Annual" or "Special", from the issue's Format tag (an Annual is also recognized by its series, number or file name); empty for regular issues</li>
                                 <li><code>{annual}</code> - "Annual" for an Annual only; empty for other issues, Specials included</li>
-                                <li><code>{volume_label}</code> - The volume: its start year, e.g., (1990), or Vol. 2; empty when unknown</li>
+                                <li><code>{volume_label}</code> - The volume: Vol. 2 when its number is known, else its start year, e.g., (1990); empty when unknown</li>
+                                <li><code>{volume_number}</code> - The volume number alone, e.g., 2; empty when unknown</li>
+                                <li><code>{volume_year}</code> - The year the volume started, e.g., 1990; empty when unknown</li>
                                 <li><code>{issue}</code> - Issue number (padded based on settings, default 4 digits, e.g., 0001, or 0071.4 for decimals)</li>
                                 <li><code>{issue_no_pad}</code> - Issue number (no padding, e.g., 1, or 71.4 for decimals)</li>
                                 <li><code>{title}</code> - Issue title</li>
-                                <li><code>{volume}</code> - Volume as tagged in ComicInfo, e.g., 1990 or 2</li>
+                                <li><code>{volume}</code> - Volume as tagged in ComicInfo, e.g., 2</li>
                                 <li><code>{year}</code> - Publication year</li>
                                 <li><code>{publisher}</code> - Publisher name</li>
                             </ul>
@@ -1562,7 +1564,12 @@
                     </div>
                     <div class="form-group">
                         <label for="volume">Volume</label>
-                        <input type="text" id="volume" name="volume" autocomplete="off">
+                        <input type="text" id="volume" name="volume" autocomplete="off" placeholder="Volume number, e.g. 2">
+                    </div>
+                    <div class="form-group">
+                        <label for="volume_year">Volume start year</label>
+                        <input type="text" id="volume_year" name="volume_year" inputmode="numeric" autocomplete="off" placeholder="The year the volume started, e.g. 2016">
+                        <small class="form-hint">Kept by ComicMaintainer; ComicInfo.xml has no element for it.</small>
                     </div>
                     <div class="form-group">
                         <label for="format">Format</label>
@@ -1616,7 +1623,11 @@
                     </div>
                     <div class="form-group">
                         <label for="batch_volume">Volume</label>
-                        <input type="text" id="batch_volume" name="volume" autocomplete="off" placeholder="Number (2) or start year (2016)">
+                        <input type="text" id="batch_volume" name="volume" autocomplete="off" placeholder="Volume number, e.g. 2">
+                    </div>
+                    <div class="form-group">
+                        <label for="batch_volume_year">Volume start year</label>
+                        <input type="text" id="batch_volume_year" name="volume_year" inputmode="numeric" autocomplete="off" placeholder="The year the volume started, e.g. 2016">
                     </div>
                     <div class="form-group">
                         <label for="batch_format">Format</label>

@@ -520,20 +520,29 @@ public partial class ComicProcessorService
     /// year after the issue number in the file name (<c>Saga 001 (2012)</c>), else in a file name
     /// left in the title (<c>All New X-Men v2 008 (2016)</c>); see <see cref="FileNameTitle.CoverYear"/>.
     /// A year before the issue number is the volume's start year and is never used: #12 of a 1995
-    /// volume did not come out in 1995. A year already set is never replaced.
+    /// volume did not come out in 1995. A year already set is never replaced, except
+    /// <see cref="UnknownYear"/>.
     /// </summary>
     private static int? YearToFill(ComicMetadata metadata, string filePath)
     {
-        if (metadata.Year is > 0)
+        if (metadata.Year is > 0 and not UnknownYear)
         {
             return null;
         }
 
-        return FileNameTitle.CoverYear(Path.GetFileNameWithoutExtension(filePath))
-               ?? (FileNameTitle.IsLeftoverFileName(metadata.Title, metadata.Series, metadata.Issue)
-                   ? FileNameTitle.CoverYear(metadata.Title)
-                   : null);
+        var cover = FileNameTitle.CoverYear(Path.GetFileNameWithoutExtension(filePath))
+                    ?? (FileNameTitle.IsLeftoverFileName(metadata.Title, metadata.Series, metadata.Issue)
+                        ? FileNameTitle.CoverYear(metadata.Title)
+                        : null);
+        return cover == metadata.Year ? null : cover;
     }
+
+    /// <summary>
+    /// 1970, the year of the Unix epoch: what some downloaders and taggers write into
+    /// <c>&lt;Year&gt;</c> when an issue's date is unknown (a date of 0). Normalize treats it as
+    /// unset when the file name gives a cover year, and keeps it otherwise.
+    /// </summary>
+    private const int UnknownYear = 1970;
 
     /// <summary>
     /// The volume number normalize writes into an empty <c>&lt;Volume&gt;</c>, or null: the first

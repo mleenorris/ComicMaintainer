@@ -63,7 +63,8 @@ old generated `Chapter N`. Everything else in `ComicInfo.xml` stays as it was, e
   a `<Volume>` that holds one, as ComicTagger can write it, or from the series, file or folder name. It is never written
   into the archive, and a re-scan of the archive keeps it.
 - **Cover year.** The start year never goes into `<Year>`, but an empty `<Year>` gets the issue's cover year: a year in
-  brackets after the issue number, as in `Saga 001 (2012)`.
+  brackets after the issue number, as in `Saga 001 (2012)`. A `<Year>` of 1970 counts as empty: some downloaders
+  write it when the date is unknown, so the cover year replaces it, and it is kept only when no cover year is found.
 
 Both volume values can be edited in **View/Edit**, or for many files at once in **Update**: **Volume** is the number
 and **Volume start year** the year. On the series page, a volume that some issues name by number and others by start

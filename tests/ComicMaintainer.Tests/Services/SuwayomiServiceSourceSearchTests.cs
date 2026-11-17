@@ -672,6 +672,52 @@ public sealed class SuwayomiServiceSourceSearchTests
     }
 
     [Fact]
+    public async Task DownloadMissingIssuesAsync_ASourceWhoseFirstRequestWouldComeAfterTheSeriesSearchBudget_IsNotSearched()
+    {
+        // The source's turn comes in time, but the series' budget runs out
+        // before it sends a request, as when other sources finish meanwhile.
+        var time = new ClockThatJumpsAfterCall(2, SuwayomiService.SourceDiscoveryBudget + TimeSpan.FromMinutes(1));
+        var handler = new SuwayomiHandler(request => request.Operation switch
+        {
+            "Library" => Json(Library("[]")),
+            "Sources" => Json(Sources("""[{"id":"1","name":"S1","displayName":"S1"}]""")),
+            _ => throw new InvalidOperationException("Unexpected GraphQL operation: " + request.Operation)
+        });
+
+        var ex = await Assert.ThrowsAsync<SuwayomiException>(() => CreateService(handler, timeProvider: time)
+            .DownloadMissingIssuesAsync("Solo Leveling", new[] { 2 }));
+
+        Assert.Contains(
+            "1 search(es) were cut short; Installed Suwayomi sources: 1 of 1 sources were not searched because the search reached its 10-minute limit.",
+            ex.Message);
+    }
+
+    /// <summary>
+    /// A clock that moves forward by <c>jump</c> right after its
+    /// <c>call</c>-th reading, which still sees the time before the jump.
+    /// </summary>
+    private sealed class ClockThatJumpsAfterCall(int call, TimeSpan jump) : TimeProvider
+    {
+        private readonly object _gate = new();
+        private DateTimeOffset _now = DateTimeOffset.UtcNow;
+        private int _calls;
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            lock (_gate)
+            {
+                var now = _now;
+                if (++_calls == call)
+                {
+                    _now += jump;
+                }
+
+                return now;
+            }
+        }
+    }
+
+    [Fact]
     public async Task DownloadMissingIssuesAsync_StopsASourceStartedLateAtTheSeriesSearchBudget()
     {
         // The first source takes 9 minutes, so the fifth starts with only one

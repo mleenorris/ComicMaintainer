@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -446,7 +447,8 @@ public partial class SeriesLibraryService
     /// just gaps strictly between existing issues (e.g. it has 1, 2 and 4 but
     /// not 3). Decimal "specials"/half-chapters (e.g. 2.5) count as a found
     /// issue for their whole number (2), so they can fill an otherwise-missing
-    /// slot. Non-numeric issue labels are ignored. A series split into runs (see
+    /// slot. Non-numeric issue labels are ignored, and so is a number far beyond the
+    /// rest of its run (see <see cref="IssueNumberGaps"/>). A series split into runs (see
     /// <see cref="VolumeNumbering"/>) is checked one run at a time, so #3 of the 1990 volume
     /// does not stand in for a missing #3 of the 2005 volume, nor Annual #3 for issue #3.
     /// </summary>
@@ -495,7 +497,10 @@ public partial class SeriesLibraryService
         }
 
         var min = wholeIssues.Min();
-        var max = wholeIssues.Max();
+
+        // A number far beyond the rest (Nightwing #1,000,000) is not where the run ends: gaps
+        // count up to the run's main cluster only (see IssueNumberGaps).
+        var max = IssueNumberGaps.HighestCounted(wholeIssues)!.Value;
 
         // Comics are conventionally numbered from issue 1 (some start at 0), so a
         // series whose lowest issue is above the expected floor is missing the

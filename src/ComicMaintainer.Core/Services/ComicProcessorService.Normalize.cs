@@ -476,9 +476,10 @@ public partial class ComicProcessorService
     }
 
     /// <summary>
-    /// The <c>&lt;Format&gt;</c> normalize writes into an empty one, or null: <c>Annual</c> for an
-    /// issue its series, number, file name or title marks as an Annual (see <see cref="IssueFormat.Of"/>),
-    /// so every tool that reads <c>&lt;Format&gt;</c> sees it. A format already set is never replaced.
+    /// The <c>&lt;Format&gt;</c> normalize writes into an empty one, or null: <c>Annual</c>,
+    /// <c>Giant-Size</c> or <c>Special</c> for an issue its series, number, file name or title
+    /// marks as one (see <see cref="IssueFormat.Of"/>), so every tool that reads
+    /// <c>&lt;Format&gt;</c> sees it. A format already set is never replaced.
     /// </summary>
     private static string? FormatToFill(ComicMetadata metadata, string filePath)
         => string.IsNullOrWhiteSpace(metadata.Format)

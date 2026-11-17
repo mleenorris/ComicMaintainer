@@ -38,6 +38,61 @@ public static partial class FileNameTitle
     }
 
     /// <summary>
+    /// What follows the series name and any volume token at the start of
+    /// <paramref name="title"/>, without the punctuation in between: <c>All New X-Men .Special – One Down</c>
+    /// for series <c>All-New X-Men</c> gives <c>Special – One Down</c>. The series is matched
+    /// ignoring punctuation and case, as in <see cref="IsLeftoverFileName"/>. A title that does
+    /// not start with the series loses only its leading punctuation (<c>.Special</c> gives
+    /// <c>Special</c>).
+    /// </summary>
+    public static string AfterSeries(string title, string? series)
+    {
+        ArgumentNullException.ThrowIfNull(title);
+        var rest = title;
+        var seriesKey = string.IsNullOrWhiteSpace(series)
+            ? string.Empty
+            : Key(AnnualIssue.WithoutAnnual(ComicVolume.WithoutVolume(series)));
+        if (seriesKey.Length > 0 && EndOfPrefix(title, seriesKey) is { } end)
+        {
+            rest = LeadingVolumePattern().Replace(title[end..], string.Empty);
+        }
+
+        return rest.TrimStart(LeadingPunctuation);
+    }
+
+    private static readonly char[] LeadingPunctuation = [' ', '\t', '.', '#', '_', ':', '-', '–', '—', '~', ','];
+
+    // Where the letters and digits of `key` end at the start of `text`, punctuation aside; null
+    // when `text` does not start with them, or they run on into a longer word ("X-Mens").
+    private static int? EndOfPrefix(string text, string key)
+    {
+        var matched = 0;
+        var end = 0;
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (!char.IsLetterOrDigit(text[i]))
+            {
+                continue;
+            }
+
+            if (matched == key.Length)
+            {
+                return i > end ? end : null;
+            }
+
+            if (char.ToLowerInvariant(text[i]) != key[matched])
+            {
+                return null;
+            }
+
+            matched++;
+            end = i + 1;
+        }
+
+        return matched == key.Length ? end : null;
+    }
+
+    /// <summary>
     /// The cover year in a file name (without its extension): a bracketed year after the issue
     /// number, with no number after it (<c>Saga 001 (2012)</c>,
     /// <c>All New X-Men v2 008 (2016) (Digital)</c>). A year before the issue number
@@ -82,6 +137,10 @@ public static partial class FileNameTitle
     // "(2016)", "[2016]", "(2016-2017)".
     [GeneratedRegex(@"[\(\[]\s*(?<year>\d{4})\s*(?:-\s*(?:\d{4})?\s*)?[\)\]]", RegexOptions.CultureInvariant, 1000)]
     private static partial Regex BracketedYearPattern();
+
+    // A volume token right after the series: " v2", " Vol. 2", " (2015)".
+    [GeneratedRegex(@"^[\s._-]*(?:v\d{1,3}|vol(?:ume)?\.?\s*\d{1,3}|[\(\[]\d{4}[\)\]])(?![\p{L}\p{N}])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex LeadingVolumePattern();
 
     // "(...)", "[...]", "{...}".
     [GeneratedRegex(@"\([^)]*\)|\[[^\]]*\]|\{[^}]*\}", RegexOptions.CultureInvariant, 1000)]

@@ -101,6 +101,23 @@ public class VolumeNumberingTests
     }
 
     [Fact]
+    public void GiantSizeIssues_AreARunOfTheirOwn_AfterTheSpecials()
+    {
+        var groups = Groups(
+            new Issue(null, "1", Kind: IssueFormat.GiantSize),
+            new Issue(null, "1", Kind: IssueFormat.Special),
+            new Issue(null, "1"),
+            new Issue(null, "1", Annual: true),
+            new Issue(null, "2025", Kind: IssueFormat.GiantSize));
+
+        Assert.NotNull(groups);
+        Assert.Equal(
+            new string?[] { null, IssueFormat.Annual, IssueFormat.Special, IssueFormat.GiantSize },
+            groups.Select(g => g.Kind));
+        Assert.Equal(new[] { "1", "2025" }, groups[3].Items.Select(i => i.Number));
+    }
+
+    [Fact]
     public void AnUnknownKind_IsListedAfterTheKnownOnes()
     {
         var groups = Groups(

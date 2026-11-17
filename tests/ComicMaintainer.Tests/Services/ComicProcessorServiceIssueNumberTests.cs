@@ -499,6 +499,65 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
             Times.Never);
     }
 
+    [Theory]
+    [InlineData("Giant 2025")]
+    [InlineData("#Giant 2025 2")]
+    public async Task ProcessFileAsync_GiantSizeNamedOnlyByItsTitle_IsMarkedAndNamedAsOne(string title)
+    {
+        // Tagged as regular issue #2025: only the title left by the tagger says "Giant".
+        var path = WriteArchive("X-Men", "X-Men - Chapter 2025.cbz",
+            $"<ComicInfo><Series>X-Men</Series><Title>{title}</Title><Number>2025</Number></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        var archive = Directory.GetFiles(Path.Join(_root, "X-Men")).Single();
+        Assert.Equal("X-Men Giant-Size - Chapter 2025.cbz", Path.GetFileName(archive));
+        var info = ReadComicInfo(archive);
+        Assert.Equal("Giant-Size", info.Element("Format")?.Value);
+        Assert.Equal("2025", info.Element("Number")?.Value);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_SpecialWithNoNumber_IsNamedByItsTitle()
+    {
+        // Renamed before by an older version, to a bare "- Chapter".
+        var path = WriteArchive("All-New X-Men", "All-New X-Men - Chapter.cbz",
+            "<ComicInfo><Series>All-New X-Men</Series><Title>All New X-Men .Special – One Down</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        var archive = Directory.GetFiles(Path.Join(_root, "All-New X-Men")).Single();
+        Assert.Equal("All-New X-Men Special - One Down.cbz", Path.GetFileName(archive));
+        var info = ReadComicInfo(archive);
+        Assert.Equal("Special", info.Element("Format")?.Value);
+        Assert.Equal("All New X-Men .Special – One Down", info.Element("Title")?.Value);
+        Assert.Null(info.Element("Number"));
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_BareChapterNameWithNoNumberOrTitle_LosesTheBareChapter()
+    {
+        var path = WriteArchive("Her Summon", "Her Summon - Chapter.cbz",
+            "<ComicInfo><Series>Her Summon</Series></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        var archive = Directory.GetFiles(Path.Join(_root, "Her Summon")).Single();
+        Assert.Equal("Her Summon.cbz", Path.GetFileName(archive));
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_NoNumberOrTitle_KeepsTheName()
+    {
+        // The format would only give "Her Summon", which every such issue would share.
+        var path = WriteArchive("Her Summon", "Her Summon Extra.cbz",
+            "<ComicInfo><Series>Her Summon</Series></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        Assert.True(File.Exists(path));
+    }
+
     [Fact]
     public async Task ApplyMetadataEditAsync_VolumeYearOnly_IsStoredAndLeavesTheArchiveAlone()
     {

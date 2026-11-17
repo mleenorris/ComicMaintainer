@@ -150,14 +150,37 @@ public class MissingIssuesCheckJobHandlerTests
             {
                 new() { Issue = "1" },
                 new() { Issue = "2" },
-                new() { Issue = "1", Annual = true },
-                new() { Issue = "3", Annual = true },
+                new() { Issue = "1", Format = "Annual" },
+                new() { Issue = "3", Format = "Annual" },
             }
         };
 
         var summary = await BuildHandler().ExecuteAsync(null, CancellationToken.None);
 
         Assert.Contains("1 series missing 1 issue(s): Green Lantern Annual (1)", summary);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Specials_AreCheckedApartFromTheSeries()
+    {
+        SetupCandidates(("gl", "Green Lantern"));
+        _issuesById["gl"] = new SeriesIssuesResult
+        {
+            Id = "gl",
+            Title = "Green Lantern",
+            CanonicalTitle = "Green Lantern",
+            Issues = new List<SeriesIssueDto>
+            {
+                new() { Issue = "1" },
+                new() { Issue = "2" },
+                new() { Issue = "2", Format = "Special" },
+                new() { Issue = "4", Format = "Special" },
+            }
+        };
+
+        var summary = await BuildHandler().ExecuteAsync(null, CancellationToken.None);
+
+        Assert.Contains("1 series missing 2 issue(s): Green Lantern Special (2)", summary);
     }
 
     [Fact]

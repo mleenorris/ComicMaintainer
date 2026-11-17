@@ -238,6 +238,12 @@ public partial class ComicProcessorService
             return false;
         }
 
+        // An Annual named by its series, number or file name still has to be marked in <Format>.
+        if (FormatToFill(metadata, filePath) is not null)
+        {
+            return false;
+        }
+
         return true;
     }
 
@@ -452,8 +458,25 @@ public partial class ComicProcessorService
             normalizedMetadata.Year = year;
         }
 
+        if (FormatToFill(metadata, filePath) is { } format)
+        {
+            _logger.LogDebug("Setting format: {Format}", format);
+            normalizedMetadata.Format = format;
+        }
+
         return normalizedMetadata;
     }
+
+    /// <summary>
+    /// The <c>&lt;Format&gt;</c> normalize writes into an empty one, or null: <c>Annual</c> for an
+    /// issue its series, number or file name marks as an Annual (see <see cref="AnnualIssue.IsAnnual"/>),
+    /// so every tool that reads <c>&lt;Format&gt;</c> sees it. A format already set is never replaced.
+    /// </summary>
+    private static string? FormatToFill(ComicMetadata metadata, string filePath)
+        => string.IsNullOrWhiteSpace(metadata.Format)
+           && AnnualIssue.IsAnnual(metadata.Series, metadata.Issue, Path.GetFileName(filePath))
+            ? IssueFormat.Annual
+            : null;
 
     /// <summary>
     /// The volume an issue's names give: a year or volume token at the end of
@@ -520,9 +543,9 @@ public partial class ComicProcessorService
 
     /// <summary>
     /// The ComicInfo.xml elements a normalize write changes: the ones normalize owns, plus
-    /// <c>&lt;Volume&gt;</c> and <c>&lt;Year&gt;</c> when normalize filled them (see
-    /// <see cref="VolumeToFill"/> and <see cref="YearToFill"/>), so a file whose volume and year
-    /// were not touched keeps those elements exactly as they were.
+    /// <c>&lt;Volume&gt;</c>, <c>&lt;Year&gt;</c> and <c>&lt;Format&gt;</c> when normalize filled them
+    /// (see <see cref="VolumeToFill"/>, <see cref="YearToFill"/> and <see cref="FormatToFill"/>), so
+    /// a file whose volume, year and format were not touched keeps those elements exactly as they were.
     /// </summary>
     private static ComicMetadataFieldFlags NormalizeWriteFields(ComicMetadata before, ComicMetadata normalized)
     {
@@ -535,6 +558,11 @@ public partial class ComicProcessorService
         if (before.Year != normalized.Year)
         {
             fields |= ComicMetadataFieldFlags.Year;
+        }
+
+        if (!string.Equals(before.Format, normalized.Format, StringComparison.Ordinal))
+        {
+            fields |= ComicMetadataFieldFlags.Format;
         }
 
         return fields;

@@ -218,6 +218,38 @@ test('Annuals get a section of their own, with their own missing issues', async 
     assert.equal(bannerText(page), 'Missing 2 issues: Issues: #2; Annual: #2');
 });
 
+test('Specials get a section of their own after the Annuals, and other kinds after them', async () => {
+    const kindOf = (number, format) => issue(number, {
+        file_path: `/comics/Saga/Saga ${format} - Chapter ${number}.cbz`,
+        file_name: `Saga ${format} - Chapter ${number}.cbz`,
+        format,
+        annual: format === 'Annual'
+    });
+    // Sent in another order than they are listed.
+    const page = await bootSeries({
+        issues: [kindOf(1, 'Preview'), kindOf(1, 'Special'), kindOf(3, 'Special'), issue(1), kindOf(1, 'Annual'), kindOf(1, 'Bonus')]
+    });
+
+    assert.deepEqual(volumeLayout(page), [
+        '== Issues 1 issue', '#1',
+        '== Annual 1 issue', '#1',
+        '== Special 2 issues', '#1', '#2 missing', '#3',
+        '== Bonus 1 issue', '#1',
+        '== Preview 1 issue', '#1'
+    ]);
+    assert.equal(bannerText(page), 'Missing 1 issue: Special: #2');
+});
+
+test('the Specials of a volume series are named after their volume', async () => {
+    const specialOf = (number, year) => ({ ...volumeIssue(number, year), file_path: `/comics/Green Lantern/S${year} ${number}.cbz`, format: 'Special' });
+    const page = await bootSeries({
+        issues: [specialOf(1, 1990), specialOf(1, 2005), { ...specialOf(2, null), file_path: '/comics/Green Lantern/S2.cbz' }]
+    });
+
+    assert.deepEqual(page.$$('#seriesDetailPanel .series-issues-volume-heading').map(text),
+        ['1990 Special 1 issue', '2005 Special 1 issue', 'Special 1 issue']);
+});
+
 test('the Annuals of a volume series are named after their volume', async () => {
     const annualOf = (number, year) => ({ ...volumeIssue(number, year), file_path: `/comics/Green Lantern/Annual ${year} ${number}.cbz`, annual: true });
     const page = await bootSeries({

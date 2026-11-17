@@ -221,7 +221,7 @@ public partial class SeriesLibraryService
                 Normalized = issue.Normalized,
                 Duplicate = issue.Duplicate,
                 Read = issue.Read,
-                Annual = issue.Annual
+                Format = issue.Format
             };
         }
 
@@ -284,7 +284,7 @@ public partial class SeriesLibraryService
     /// </summary>
     internal static IReadOnlyList<VolumeNumbering.VolumeGroup<SeriesIssueDto>>? RestartingVolumes(
         IEnumerable<SeriesIssueDto> issues)
-        => VolumeNumbering.SeparateRuns(issues, issue => issue.VolumeInfo, ResolveIssueNumber, issue => issue.Annual);
+        => VolumeNumbering.SeparateRuns(issues, issue => issue.VolumeInfo, ResolveIssueNumber, issue => issue.Format);
 
     private static string ExtractIssueSortKey(string? issue)
         => string.IsNullOrWhiteSpace(issue) ? "~" : issue;

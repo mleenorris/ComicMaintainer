@@ -141,6 +141,7 @@ public partial class ComicProcessorService
                 if (locked.HasFlag(ComicMetadataFieldFlags.Volume)) metadata.Volume = stored.Volume;
                 if (locked.HasFlag(ComicMetadataFieldFlags.Publisher)) metadata.Publisher = stored.Publisher;
                 if (locked.HasFlag(ComicMetadataFieldFlags.Year)) metadata.Year = stored.Year;
+                if (locked.HasFlag(ComicMetadataFieldFlags.Format)) metadata.Format = stored.Format;
             }
 
             return metadata;

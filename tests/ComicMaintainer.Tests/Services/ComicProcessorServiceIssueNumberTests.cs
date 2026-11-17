@@ -346,6 +346,52 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
         Assert.Equal("1990", info.Element("Volume")?.Value);
     }
 
+    [Fact]
+    public async Task Normalize_AnnualWithAnEmptyFormat_IsMarkedInFormat()
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("Green Lantern", "Green Lantern Annual - Chapter 0001.cbz",
+            "<ComicInfo><Series>Green Lantern Annual</Series><Number>1</Number><Title>Chapter 1</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        Assert.Equal("Annual", ReadComicInfo(path).Element("Format")?.Value);
+    }
+
+    [Theory]
+    [InlineData("<Format>TPB</Format>", "TPB")]
+    [InlineData("", null)]
+    public async Task Normalize_KeepsASetFormat_AndMarksNoRegularIssue(string formatElement, string? expected)
+    {
+        _settings.WatcherEnableRename = false;
+        var series = formatElement.Length == 0 ? "Green Lantern" : "Green Lantern Annual";
+        var path = WriteArchive("Green Lantern", "x.cbz",
+            $"<ComicInfo><Series>{series}</Series><Number>1</Number><Title>Chapter 1</Title>{formatElement}</ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        Assert.Equal(expected, ReadComicInfo(Directory.GetFiles(Path.Join(_root, "Green Lantern")).Single()).Element("Format")?.Value);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_SpecialAndIssueOfTheSameNumber_AreKeptApart()
+    {
+        var issue = WriteArchive("Green Lantern", "a.cbz", "<ComicInfo><Series>Green Lantern</Series><Number>1</Number></ComicInfo>");
+        var special = WriteArchive("Green Lantern", "b.cbz", "<ComicInfo><Series>Green Lantern</Series><Number>1</Number><Format>Special</Format></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(issue));
+        Assert.True(await _service.ProcessFileAsync(special));
+
+        var folder = Path.Join(_root, "Green Lantern");
+        Assert.True(File.Exists(Path.Join(folder, "Green Lantern - Chapter 0001.cbz")));
+        var info = ReadComicInfo(Path.Join(folder, "Green Lantern Special - Chapter 0001.cbz"));
+        Assert.Equal("Green Lantern", info.Element("Series")?.Value);
+        Assert.Equal("Special", info.Element("Format")?.Value);
+        _fileStore.Verify(
+            f => f.MarkFileDuplicateAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     private static string VolumeInfo(string volume, string number)
         => $"<ComicInfo><Series>Green Lantern</Series><Number>{number}</Number><Volume>{volume}</Volume></ComicInfo>";
 

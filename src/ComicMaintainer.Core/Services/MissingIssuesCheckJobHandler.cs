@@ -92,13 +92,13 @@ public class MissingIssuesCheckJobHandler : IScheduledJobFindingsHandler
             // A series split into runs numbered on their own (Annuals, and the volumes of a
             // numbering that restarts with each volume: "Green Lantern" #1 of 1990 and of 2005)
             // is checked one run at a time; one numbering is checked as a whole.
-            var volumes = VolumeNumbering.SeparateRuns(issues.Issues, i => i.VolumeInfo, i => i.Issue, i => i.Annual);
+            var volumes = VolumeNumbering.SeparateRuns(issues.Issues, i => i.VolumeInfo, i => i.Issue, i => i.Format);
             var splitByVolume = volumes?.Any(run => run.Volume is not null) == true;
             var runs = volumes is null
                 ? new (string Title, IEnumerable<SeriesIssueDto> Issues, bool CanDownload)[]
                     { (title, issues.Issues, true) }
                 : volumes.Select(run => (
-                    Title: RunTitle(title, run.Volume, run.IsAnnual, splitByVolume),
+                    Title: RunTitle(title, run.Volume, run.Kind, splitByVolume),
                     Issues: run.Items.AsEnumerable(),
                     // Suwayomi has no notion of comic volumes or Annuals: "#3" would be any run's #3.
                     CanDownload: false)).ToArray();
@@ -327,12 +327,12 @@ public class MissingIssuesCheckJobHandler : IScheduledJobFindingsHandler
     /// <c>Green Lantern Annual</c>, <c>Green Lantern Annual (1990)</c>, or
     /// <c>Green Lantern (no volume)</c> for issues of no known volume among volumes.
     /// </summary>
-    private static string RunTitle(string title, ComicMaintainer.Core.Utilities.ComicVolume? volume, bool annual, bool splitByVolume)
+    private static string RunTitle(string title, ComicMaintainer.Core.Utilities.ComicVolume? volume, string? kind, bool splitByVolume)
     {
-        var name = annual ? $"{title} Annual" : title;
+        var name = kind is null ? title : $"{title} {kind}";
         return volume is { } known
             ? $"{name} {known.Label}"
-            : splitByVolume && !annual ? $"{name} (no volume)" : name;
+            : splitByVolume && kind is null ? $"{name} (no volume)" : name;
     }
 
     private static string? FirstNonBlank(params string?[] values) =>

@@ -66,33 +66,40 @@ read this way: the title has to start with the series name and contain the issue
 
 Annuals keep "Annual" in their series, the way ComicVine names them. That means `<Series>Green Lantern Annual</Series>`
 with `<Number>1</Number>`, and an issue written as `Annual 1` becomes number `1`. A file is an Annual when its series
-ends in "Annual", its number is written as one, or its file name has "Annual" before the issue number (`Green Lantern
-Annual 001`). Annuals stay in the Green Lantern series, in their own "Annual" section with their own missing issues.
+ends in "Annual", its number is written as one, its file name has "Annual" before the issue number (`Green Lantern
+Annual 001`), or its `<Format>` is `Annual`. Normalize writes `<Format>Annual</Format>` into an Annual whose `<Format>`
+is empty. Annuals stay in the Green Lantern series, in their own "Annual" section with their own missing issues.
+
+Specials work the same way, but only by `<Format>`: set **Format** to `Special` in **View/Edit**, or for many files at
+once in **Update**. Specials get their own "Special" section, after the Annuals. Any other `<Format>` value, such as
+`TPB`, is kept but does not change how the issue is listed or named.
 
 ### Rename
 
 Files are named from **Settings > Filename Format** and **Issue Number Padding** (4). Renaming with normalize off never
-rewrites the archive. The default format is `{series} {annual} {volume_label} - Chapter {issue}`:
+rewrites the archive. The default format is `{series} {format} {volume_label} - Chapter {issue}`:
 
 | Issue | Name |
 |---|---|
 | Green Lantern (1990) #1 | `Green Lantern (1990) - Chapter 0001.cbz` |
 | Green Lantern Annual (1990) #1 | `Green Lantern Annual (1990) - Chapter 0001.cbz` |
+| Green Lantern #1, Format `Special` | `Green Lantern Special - Chapter 0001.cbz` |
 | Saga, volume unknown, #1 | `Saga - Chapter 0001.cbz` |
 
-`{series}` is the series name alone. Its volume and "Annual" appear only where the format places them:
+`{series}` is the series name alone. Its volume, "Annual" and "Special" appear only where the format places them:
 
 - `{volume_label}` is the volume's start year, `(1990)`, or its number, `Vol. 2`. It comes from ComicInfo `<Volume>`,
   then the series name, then the file name (a `v2` token, or a year before the issue number), then an old file name
   left in `<Title>`, then the folder name.
-- `{annual}` is `Annual` for an Annual.
+- `{format}` is `Annual` for an Annual and `Special` for a Special.
+- `{annual}` is `Annual` for an Annual only. Prefer `{format}`, which covers Specials too.
 
-Either one renders empty when it does not apply, and any brackets or ` - ` separator around it go with it. The old
-default, `{series} - Chapter {issue}`, is read as the new one.
+Each renders empty when it does not apply, and any brackets or ` - ` separator around it go with it. The old defaults,
+`{series} - Chapter {issue}` and `{series} {annual} {volume_label} - Chapter {issue}`, are read as the new one.
 
-> **Using this for comic books? Keep `{volume_label}` and `{annual}` in your format.** American comics restart their
-> numbering with each volume, and Annuals have their own numbering. Without these placeholders, Green Lantern (1990)
-> #1, Green Lantern (2005) #1 and Green Lantern Annual #1 all get the same name, and all but one are flagged as
+> **Using this for comic books? Keep `{volume_label}` and `{format}` in your format.** American comics restart their
+> numbering with each volume, and Annuals and Specials have their own numbering. Without these placeholders, Green
+> Lantern (1990) #1, Green Lantern (2005) #1 and Green Lantern Annual #1 all get the same name, and all but one are flagged as
 > duplicates. *Delete All Duplicates* would then delete real issues.
 
 A comic directly in the watched folder takes its series from `ComicInfo.xml` or its own file name, never from the

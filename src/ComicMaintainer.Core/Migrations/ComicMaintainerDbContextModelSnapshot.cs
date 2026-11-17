@@ -1323,6 +1323,10 @@ namespace ComicMaintainer.Core.Migrations
                                 .IsRequired()
                                 .HasColumnType("TEXT");
 
+                            b1.Property<string>("Format")
+                                .HasMaxLength(64)
+                                .HasColumnType("TEXT");
+
                             b1.Property<bool>("IsUserEdited")
                                 .HasColumnType("INTEGER");
 

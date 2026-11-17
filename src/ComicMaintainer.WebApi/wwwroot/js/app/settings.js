@@ -286,7 +286,7 @@ showMessage('Default preferred language updated', 'success');
                 apiDebugLog('Settings loaded', settingsData);
 
                 document.getElementById('filenameFormat').value = settingsData.filename_format || '';
-                document.getElementById('currentFormat').textContent = settingsData.filename_format || '{series} {annual} {volume_label} - Chapter {issue}';
+                document.getElementById('currentFormat').textContent = settingsData.filename_format || '{series} {format} {volume_label} - Chapter {issue}';
                 
                 // Load current theme
                 const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';

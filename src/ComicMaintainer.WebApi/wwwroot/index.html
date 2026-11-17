@@ -1179,13 +1179,14 @@
                         </p>
                         <div class="form-group">
                             <label for="filenameFormat">Filename Template</label>
-                            <input type="text" id="filenameFormat" name="filenameFormat" placeholder="{series} {annual} {volume_label} - Chapter {issue}" autocomplete="off">
+                            <input type="text" id="filenameFormat" name="filenameFormat" placeholder="{series} {format} {volume_label} - Chapter {issue}" autocomplete="off">
                             <small class="form-hint">
                                 Available placeholders:
                             </small>
                             <ul style="margin: 10px 0 10px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.6;">
                                 <li><code>{series}</code> - Series name, without its volume or "Annual"</li>
-                                <li><code>{annual}</code> - "Annual" for an Annual; empty for other issues</li>
+                                <li><code>{format}</code> - "Annual" or "Special", from the issue's Format tag (an Annual is also recognized by its series, number or file name); empty for regular issues</li>
+                                <li><code>{annual}</code> - "Annual" for an Annual only; empty for other issues, Specials included</li>
                                 <li><code>{volume_label}</code> - The volume: its start year, e.g., (1990), or Vol. 2; empty when unknown</li>
                                 <li><code>{issue}</code> - Issue number (padded based on settings, default 4 digits, e.g., 0001, or 0071.4 for decimals)</li>
                                 <li><code>{issue_no_pad}</code> - Issue number (no padding, e.g., 1, or 71.4 for decimals)</li>
@@ -1195,8 +1196,8 @@
                                 <li><code>{publisher}</code> - Publisher name</li>
                             </ul>
                             <small style="display: block; margin-top: 10px; color: var(--text-muted);">
-                                <strong>Example:</strong> <code>{series} {annual} {volume_label} #{issue_no_pad} ({year})</code><br>
-                                <strong>Comic books:</strong> keep <code>{volume_label}</code> and <code>{annual}</code> in the format. American comics restart their numbering with each volume, and Annuals have their own, so without them Green Lantern (1990) #1, Green Lantern (2005) #1 and Green Lantern Annual #1 get the same name, and all but one are flagged as duplicates.<br>
+                                <strong>Example:</strong> <code>{series} {format} {volume_label} #{issue_no_pad} ({year})</code><br>
+                                <strong>Comic books:</strong> keep <code>{volume_label}</code> and <code>{format}</code> in the format. American comics restart their numbering with each volume, and Annuals and Specials have their own, so without them Green Lantern (1990) #1, Green Lantern (2005) #1 and Green Lantern Annual #1 get the same name, and all but one are flagged as duplicates.<br>
                                 <strong>Note:</strong> File extension (.cbz or .cbr) is automatically preserved. An empty placeholder is removed along with its brackets or " - " separator.
                             </small>
                         </div>
@@ -1564,6 +1565,14 @@
                         <input type="text" id="volume" name="volume" autocomplete="off">
                     </div>
                     <div class="form-group">
+                        <label for="format">Format</label>
+                        <input type="text" id="format" name="format" list="issueFormatOptions" autocomplete="off" placeholder="Annual or Special; empty for a regular issue">
+                        <datalist id="issueFormatOptions">
+                            <option value="Annual"></option>
+                            <option value="Special"></option>
+                        </datalist>
+                    </div>
+                    <div class="form-group">
                         <label for="publisher">Publisher</label>
                         <input type="text" id="publisher" name="publisher" autocomplete="off">
                     </div>
@@ -1608,6 +1617,10 @@
                     <div class="form-group">
                         <label for="batch_volume">Volume</label>
                         <input type="text" id="batch_volume" name="volume" autocomplete="off" placeholder="Number (2) or start year (2016)">
+                    </div>
+                    <div class="form-group">
+                        <label for="batch_format">Format</label>
+                        <input type="text" id="batch_format" name="format" list="issueFormatOptions" autocomplete="off" placeholder="Annual or Special">
                     </div>
                     <div class="form-group">
                         <label for="batch_publisher">Publisher</label>

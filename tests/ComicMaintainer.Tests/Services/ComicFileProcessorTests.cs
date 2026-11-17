@@ -101,8 +101,30 @@ public class ComicFileProcessorTests
     }
 
     [Theory]
+    // {format} names an Annual or a Special from <Format>; {annual} names only an Annual.
+    [InlineData(AppSettings.DefaultFilenameFormat, "Green Lantern", "Special", "1990", "Green Lantern Special (1990) - Chapter 0001.cbz")]
+    [InlineData(AppSettings.DefaultFilenameFormat, "Green Lantern", "annual", null, "Green Lantern Annual - Chapter 0001.cbz")]
+    [InlineData(AppSettings.DefaultFilenameFormat, "Green Lantern Annual", null, null, "Green Lantern Annual - Chapter 0001.cbz")]
+    [InlineData(AppSettings.DefaultFilenameFormat, "Green Lantern", "TPB", null, "Green Lantern - Chapter 0001.cbz")]
+    [InlineData("{series} {annual} #{issue}", "Green Lantern", "Special", null, "Green Lantern #0001.cbz")]
+    [InlineData("{series} {annual} #{issue}", "Green Lantern", "Annual", null, "Green Lantern Annual #0001.cbz")]
+    [InlineData("{series} [{format}] #{issue}", "Green Lantern", null, null, "Green Lantern #0001.cbz")]
+    // A series already named for its Special is not named "Special Special".
+    [InlineData(AppSettings.DefaultFilenameFormat, "Batman Special", "Special", null, "Batman Special - Chapter 0001.cbz")]
+    [InlineData(AppSettings.DefaultFilenameFormat, "Special", "Special", null, "Special Special - Chapter 0001.cbz")]
+    [InlineData(AppSettings.DefaultFilenameFormat, "Batman Special", null, null, "Batman Special - Chapter 0001.cbz")]
+    public void FormatFilename_FormatPlaceholder_NamesTheIssuesKind(string template, string series, string? format, string? volume, string expected)
+    {
+        var tags = new ComicInfo { Series = series, Format = format, Volume = volume };
+
+        Assert.Equal(expected, ComicFileProcessor.FormatFilename(template, tags, "1"));
+    }
+
+    [Theory]
     [InlineData("{series} - Chapter {issue}", AppSettings.DefaultFilenameFormat)]
     [InlineData(" {series} - Chapter {issue} ", AppSettings.DefaultFilenameFormat)]
+    [InlineData("{series} {annual} {volume_label} - Chapter {issue}", AppSettings.DefaultFilenameFormat)]
+    [InlineData("{series} {volume_label} - {annual} - Chapter {issue}", "{series} {volume_label} - {annual} - Chapter {issue}")]
     [InlineData("{series} #{issue}", "{series} #{issue}")]
     public void FilenameFormat_LegacyDefault_ReadsAsTheCurrentDefault(string configured, string expected)
     {

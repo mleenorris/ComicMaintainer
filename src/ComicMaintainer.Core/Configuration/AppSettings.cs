@@ -6,18 +6,24 @@ namespace ComicMaintainer.Core.Configuration;
 public class AppSettings
 {
     /// <summary>
-    /// The filename format used until one is configured. <c>{annual}</c> and
-    /// <c>{volume_label}</c> keep Annuals and the volumes of a series with the same name apart
-    /// ("Green Lantern Annual (1990) - Chapter 0001"); they render empty when they do not apply.
+    /// The filename format used until one is configured. <c>{format}</c> and
+    /// <c>{volume_label}</c> keep Annuals, Specials and the volumes of a series with the same name
+    /// apart ("Green Lantern Annual (1990) - Chapter 0001"); they render empty when they do not apply.
     /// </summary>
-    public const string DefaultFilenameFormat = "{series} {annual} {volume_label} - Chapter {issue}";
+    public const string DefaultFilenameFormat = "{series} {format} {volume_label} - Chapter {issue}";
 
     /// <summary>
-    /// The default before <c>{annual}</c> and <c>{volume_label}</c> existed. A setting that still
+    /// The default before <c>{format}</c> and <c>{volume_label}</c> existed. A setting that still
     /// holds it, the shipped appsettings.json or an untouched saved setting, reads as
-    /// <see cref="DefaultFilenameFormat"/>, which renders the same names plus the volume and Annual.
+    /// <see cref="DefaultFilenameFormat"/>, which renders the same names plus the volume and kind.
     /// </summary>
     public const string LegacyDefaultFilenameFormat = "{series} - Chapter {issue}";
+
+    /// <summary>
+    /// The default of 3.0.9, before <c>{format}</c> replaced <c>{annual}</c>; read as
+    /// <see cref="DefaultFilenameFormat"/>, which renders the same names and Specials too.
+    /// </summary>
+    public const string AnnualDefaultFilenameFormat = "{series} {annual} {volume_label} - Chapter {issue}";
 
     /// <summary>
     /// The largest supported <see cref="IssueNumberPadding"/>: the number of digits in <see cref="int.MaxValue"/>.
@@ -29,13 +35,14 @@ public class AppSettings
     public string ConfigDirectory { get; set; } = "/Config";
     public string TempFileDirectory { get; set; } = "/Config/temp";
     /// <summary>
-    /// The rename template. <see cref="LegacyDefaultFilenameFormat"/> is read as
-    /// <see cref="DefaultFilenameFormat"/>, from whatever source sets it.
+    /// The rename template. <see cref="LegacyDefaultFilenameFormat"/> and
+    /// <see cref="AnnualDefaultFilenameFormat"/> are read as <see cref="DefaultFilenameFormat"/>,
+    /// from whatever source sets them.
     /// </summary>
     public string FilenameFormat
     {
         get => _filenameFormat;
-        set => _filenameFormat = string.Equals(value?.Trim(), LegacyDefaultFilenameFormat, StringComparison.Ordinal)
+        set => _filenameFormat = value?.Trim() is LegacyDefaultFilenameFormat or AnnualDefaultFilenameFormat
             ? DefaultFilenameFormat
             : value!;
     }

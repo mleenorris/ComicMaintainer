@@ -81,6 +81,25 @@ public class ComicInfoXmlTests
     }
 
     [Fact]
+    public void Format_IsReadAndWrittenInSchemaOrder()
+    {
+        var document = ComicInfoXml.Merge(
+            ComicInfoXml.Parse(TaggedDocument),
+            new ComicMetadata { Format = "Annual" },
+            ComicMetadataFieldFlags.Format);
+
+        Assert.Equal("Annual", ComicInfoXml.Read(document)!.Format);
+        var names = document.Root!.Elements().Select(e => e.Name.LocalName).ToList();
+        Assert.True(names.IndexOf("Format") > names.IndexOf("LanguageISO"));
+        Assert.True(names.IndexOf("Format") < names.IndexOf("Manga"));
+
+        var cleared = ComicInfoXml.Merge(document, new ComicMetadata(), ComicMetadataFieldFlags.Format);
+        Assert.Null(cleared.Root!.Element("Format"));
+        Assert.Equal(ComicMetadataFieldFlags.Format, ComicMetadataFields.Parse(" Format "));
+        Assert.Equal(ComicMetadataFieldFlags.Format, ComicMetadataFields.Supplied(new ComicMetadata { Format = "Special" }));
+    }
+
+    [Fact]
     public void Merge_EmptyValueForAMaskedFieldRemovesItsElement()
     {
         var merged = ComicInfoXml.Merge(

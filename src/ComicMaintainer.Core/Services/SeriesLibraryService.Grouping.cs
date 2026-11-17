@@ -399,7 +399,7 @@ public partial class SeriesLibraryService
                 Normalized = file.IsNormalized,
                 Duplicate = file.IsDuplicate,
                 Read = bakeReadState && file.IsRead,
-                Annual = AnnualIssue.IsAnnual(metadata.Series, metadata.Issue, file.FileName)
+                Format = IssueFormat.Of(metadata.Format, metadata.Series, metadata.Issue, file.FileName)
             });
         }
 

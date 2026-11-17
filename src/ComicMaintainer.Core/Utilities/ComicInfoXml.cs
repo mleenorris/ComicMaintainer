@@ -65,6 +65,7 @@ public static class ComicInfoXml
             Publisher = root.Element(ns + "Publisher")?.Value,
             Year = int.TryParse(root.Element(ns + "Year")?.Value, out var year) ? year : null,
             Summary = root.Element(ns + "Summary")?.Value,
+            Format = root.Element(ns + "Format")?.Value,
             Authors = SplitList(root.Elements(ns + "Writer").Select(e => e.Value)),
             Tags = SplitList(root.Elements(ns + "Tags").Concat(root.Elements(ns + LegacyTagElement)).Select(e => e.Value))
         };
@@ -86,6 +87,7 @@ public static class ComicInfoXml
         if (fields.HasFlag(ComicMetadataFieldFlags.Issue)) SetElement(root, "Number", metadata.Issue);
         if (fields.HasFlag(ComicMetadataFieldFlags.Volume)) SetElement(root, "Volume", metadata.Volume);
         if (fields.HasFlag(ComicMetadataFieldFlags.Summary)) SetElement(root, "Summary", metadata.Summary);
+        if (fields.HasFlag(ComicMetadataFieldFlags.Format)) SetElement(root, "Format", metadata.Format);
         if (fields.HasFlag(ComicMetadataFieldFlags.Year))
         {
             SetElement(root, "Year", metadata.Year?.ToString(System.Globalization.CultureInfo.InvariantCulture));

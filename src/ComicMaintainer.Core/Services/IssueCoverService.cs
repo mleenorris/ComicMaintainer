@@ -19,6 +19,18 @@ public interface IIssueCoverService
         string filePath,
         int comicVineIssueId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The cover of ComicVine issue <paramref name="comicVineIssueId"/> for the cover picker to
+    /// show: its small copy when <paramref name="thumbnail"/> is set and ComicVine has one,
+    /// otherwise the full one. ComicVine refuses to show its images on other sites, so the
+    /// picker cannot link to them: the server fetches them. Null when no cover is stored for
+    /// the issue.
+    /// </summary>
+    Task<IssueCoverImage?> GetCandidateImageAsync(
+        int comicVineIssueId,
+        bool thumbnail,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -59,34 +71,16 @@ public sealed class IssueCoverService : IIssueCoverService
             return new IssueCoverReplaceResult(false, false, "The file is not in the library");
         }
 
-        string? coverUrl;
-        await using (var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken))
-        {
-            coverUrl = await db.ComicVineIssues.AsNoTracking()
-                .Where(issue => issue.Id == comicVineIssueId)
-                .Select(issue => issue.CoverUrl)
-                .FirstOrDefaultAsync(cancellationToken);
-        }
-
+        var (coverUrl, _) = await StoredCoverUrlsAsync(comicVineIssueId, cancellationToken);
         if (string.IsNullOrWhiteSpace(coverUrl))
         {
             return new IssueCoverReplaceResult(false, false, "ComicVine has no cover for that issue");
         }
 
-        byte[] image;
-        string contentType;
-        try
+        var download = await DownloadAsync(comicVineIssueId, coverUrl, cancellationToken);
+        if (download.Bytes is not { } image || download.ContentType is not { } contentType)
         {
-            (image, contentType) = await _imageStore.FetchImageAsync(coverUrl, cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or OperationCanceledException or ArgumentException)
-        {
-            _logger.LogWarning("Could not download the ComicVine cover of issue {IssueId}: {Reason}", comicVineIssueId, LoggingHelper.SanitizeForLog(ex.Message));
-            return new IssueCoverReplaceResult(false, false, $"The cover could not be downloaded: {ex.Message}");
+            return new IssueCoverReplaceResult(false, false, download.Error);
         }
 
         try
@@ -105,6 +99,50 @@ public sealed class IssueCoverService : IIssueCoverService
         {
             _logger.LogWarning(ex, "Could not replace the cover of {Path}", LoggingHelper.SanitizePathForLog(file.FilePath));
             return new IssueCoverReplaceResult(false, false, $"The archive could not be rewritten: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IssueCoverImage?> GetCandidateImageAsync(
+        int comicVineIssueId,
+        bool thumbnail,
+        CancellationToken cancellationToken = default)
+    {
+        var (coverUrl, thumbUrl) = await StoredCoverUrlsAsync(comicVineIssueId, cancellationToken);
+        var url = thumbnail && !string.IsNullOrWhiteSpace(thumbUrl) ? thumbUrl : coverUrl;
+        return string.IsNullOrWhiteSpace(url) ? null : await DownloadAsync(comicVineIssueId, url, cancellationToken);
+    }
+
+    /// <summary>The cover addresses stored for an issue ComicVine listed; nulls when there are none.</summary>
+    private async Task<(string? CoverUrl, string? ThumbUrl)> StoredCoverUrlsAsync(int comicVineIssueId, CancellationToken cancellationToken)
+    {
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var stored = await db.ComicVineIssues.AsNoTracking()
+            .Where(issue => issue.Id == comicVineIssueId)
+            .Select(issue => new { issue.CoverUrl, issue.CoverThumbUrl })
+            .FirstOrDefaultAsync(cancellationToken);
+        return (stored?.CoverUrl, stored?.CoverThumbUrl);
+    }
+
+    /// <summary>
+    /// Downloads a stored cover with every check a provider image gets (see
+    /// <see cref="ISeriesImageStore.FetchImageAsync"/>).
+    /// </summary>
+    private async Task<IssueCoverImage> DownloadAsync(int comicVineIssueId, string url, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var (bytes, contentType) = await _imageStore.FetchImageAsync(url, cancellationToken);
+            return new IssueCoverImage(bytes, contentType, null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or OperationCanceledException or ArgumentException)
+        {
+            _logger.LogWarning("Could not download the ComicVine cover of issue {IssueId}: {Reason}", comicVineIssueId, LoggingHelper.SanitizeForLog(ex.Message));
+            return new IssueCoverImage(null, null, $"The cover could not be downloaded: {ex.Message}");
         }
     }
 }

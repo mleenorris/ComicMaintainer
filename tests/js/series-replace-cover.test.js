@@ -52,13 +52,20 @@ function boot(options = {}) {
     return bootSeriesPage({ series: SERIES, issues: ISSUES, ...options });
 }
 
+// ComicVine refuses to show its images on other sites, so each cover is
+// loaded through the server like any protected image.
 function options(page) {
     return page.$$('#replaceCoverList .replace-cover-option').map(option => ({
         label: option.textContent.trim(),
-        image: option.querySelector('img').getAttribute('src'),
+        image: option.querySelector('img').dataset.protectedImage,
         selected: option.classList.contains('selected') && option.getAttribute('aria-pressed') === 'true'
     }));
 }
+
+const IMAGE_ROUTES = {
+    'GET /api/covers/candidates/101/image': respond(200, 'image-bytes', { 'Content-Type': 'image/jpeg' }),
+    'GET /api/covers/candidates/102/image': respond(200, 'image-bytes', { 'Content-Type': 'image/jpeg' })
+};
 
 async function openReplaceCover(page) {
     clickIssueAction(page, FILE, 'Replace Cover…');
@@ -66,7 +73,7 @@ async function openReplaceCover(page) {
 }
 
 test('Replace Cover lists the volume\'s covers from ComicVine with the issue\'s own chosen', async t => {
-    const page = await boot({ routes: { [CANDIDATES]: candidates() } });
+    const page = await boot({ routes: { [CANDIDATES]: candidates(), ...IMAGE_ROUTES } });
     t.after(() => page.close());
 
     await openReplaceCover(page);
@@ -75,10 +82,17 @@ test('Replace Cover lists the volume\'s covers from ComicVine with the issue\'s 
     assert.equal(page.$('#replaceCoverCurrentImage').dataset.protectedImage, FILE);
     assert.equal(page.$('#replaceCoverNote').textContent, 'Covers of Batman on ComicVine.');
     assert.deepEqual(options(page), [
-        { label: '#1 One', image: 'https://cv.example/101-m.jpg', selected: false },
-        { label: '#2 (this issue)', image: 'https://cv.example/102.jpg', selected: true }
+        { label: '#1 One', image: '/api/covers/candidates/101/image?size=thumb', selected: false },
+        { label: '#2 (this issue)', image: '/api/covers/candidates/102/image?size=thumb', selected: true }
     ]);
     assert.equal(page.$('#replaceCoverApplyBtn').disabled, false);
+    // The covers come from the server, never straight from ComicVine, once they are in view.
+    const observer = page.intersectionObservers.find(o => o.options && o.options.rootMargin === '400px 0px');
+    observer.trigger(true, page.$$('#replaceCoverList img'));
+    await page.settle();
+    assert.ok(page.fetchCalls.some(call => call.url === '/api/covers/candidates/101/image?size=thumb'));
+    assert.ok(page.$$('#replaceCoverList img').every(image => String(image.getAttribute('src')).startsWith('blob:')));
+    assert.ok(page.$$('#replaceCoverList img').every(image => !String(image.getAttribute('src') || '').includes('cv.example')));
 });
 
 test('Replace Cover says why the issue has no match, and that there is nothing to choose', async t => {

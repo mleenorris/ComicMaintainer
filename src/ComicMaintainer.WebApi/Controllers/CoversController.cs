@@ -2,6 +2,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -59,6 +60,32 @@ public class CoversController : ControllerBase
                 matched = cover.IssueId == candidates.MatchedIssueId
             })
         });
+    }
+
+    /// <summary>
+    /// The cover of ComicVine issue <paramref name="comicVineIssueId"/>, one the picker lists,
+    /// fetched by the server: ComicVine refuses to show its images on other sites, so the page
+    /// cannot load them itself. <c>size=thumb</c> gives the small copy.
+    /// </summary>
+    [HttpGet("candidates/{comicVineIssueId:int}/image")]
+    [FailureMessage("Error fetching the cover from ComicVine")]
+    public async Task<IActionResult> CandidateImage(int comicVineIssueId, [FromQuery] string? size, CancellationToken cancellationToken)
+    {
+        var thumbnail = string.Equals(size, "thumb", StringComparison.OrdinalIgnoreCase);
+        var image = await _covers.GetCandidateImageAsync(comicVineIssueId, thumbnail, cancellationToken);
+        if (image is null)
+        {
+            return NotFound(new { error = "ComicVine has no cover for that issue" });
+        }
+
+        if (image.Bytes is null || image.ContentType is null)
+        {
+            return StatusCode(StatusCodes.Status502BadGateway, new { error = image.Error });
+        }
+
+        // A cover does not change; the browser keeps it, so the picker does not fetch it again.
+        Response.Headers.CacheControl = "private, max-age=86400";
+        return File(image.Bytes, image.ContentType);
     }
 
     /// <summary>Makes the cover of ComicVine issue <c>comicVineIssueId</c> page 1 of the file's CBZ.</summary>

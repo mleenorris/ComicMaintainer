@@ -99,3 +99,9 @@ public sealed record CoverCandidates(
 
 /// <summary>What replacing a file's cover with a ComicVine cover did; <see cref="Error"/> says why it failed.</summary>
 public sealed record IssueCoverReplaceResult(bool Succeeded, bool Changed, string? Error);
+
+/// <summary>
+/// A ComicVine cover fetched for the cover picker: the image, or, when <see cref="Bytes"/> is
+/// null, <see cref="Error"/> says why it could not be fetched.
+/// </summary>
+public sealed record IssueCoverImage(byte[]? Bytes, string? ContentType, string? Error);

@@ -1529,18 +1529,21 @@
                 return;
             }
             renderHtml(list, html`<div class="replace-cover-grid">${covers.map(replaceCoverOption)}</div>`);
+            hydrateProtectedImages(list);
             if (covers.some(cover => cover.issue_id === data.matched_issue_id)) {
                 selectReplaceCover(data.matched_issue_id);
             }
         }
 
-        // One cover to choose: its image (ComicVine's screen-sized copy when
-        // there is one), issue number and name.
+        // One cover to choose: its image, issue number and name. ComicVine
+        // refuses to show its images on other sites, so the image comes
+        // through the server (GET /api/covers/candidates/{id}/image), loaded
+        // like any protected image.
         function replaceCoverOption(cover) {
             const label = `#${cover.issue_number}${cover.name ? ` ${cover.name}` : ''}`;
             return html`
                 <button type="button" class="replace-cover-option" data-issue-id="${cover.issue_id}" aria-pressed="false" title="${label}" onclick="selectReplaceCover(${Number(cover.issue_id)})">
-                    <img src="${cover.thumb_url || cover.cover_url}" alt="Cover of ${label}" loading="lazy" referrerpolicy="no-referrer">
+                    <img data-protected-image="/api/covers/candidates/${Number(cover.issue_id)}/image?size=thumb" alt="Cover of ${label}" loading="lazy">
                     <span>${label}${cover.matched ? ' (this issue)' : ''}</span>
                 </button>`;
         }

@@ -245,10 +245,22 @@ public partial class ComicProcessorService
         // whatever the request does meanwhile, so no file is left half swapped.
         var bookkeeping = CancellationToken.None;
         await MoveFileRecordAsync(otherPath, asidePath);
-        await MarkDuplicateAsync(asidePath, bookkeeping);
+        FileProcessingResult processed;
+        try
+        {
+            await MarkDuplicateAsync(asidePath, bookkeeping);
+            await _fileStore.MarkFileDuplicateAsync(filePath, false, bookkeeping);
+            processed = await ProcessFileCoreAsync(filePath, forceReprocess: true, bookkeeping);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Processing reports its own failures, but the bookkeeping around it can throw too. A throw
+            // after the other file moved is a failed swap like a returned failure: put it back.
+            _logger.LogError(ex, "Duplicate swap: {FilePath} threw after the other file was renamed aside", LoggingHelper.SanitizePathForLog(filePath));
+            return new DuplicateSwapResult(false, Error: await UndoSwapAsync(
+                filePath, otherPath, otherResolved, asidePath, otherWas, "The file could not be processed"));
+        }
 
-        await _fileStore.MarkFileDuplicateAsync(filePath, false, bookkeeping);
-        var processed = await ProcessFileCoreAsync(filePath, forceReprocess: true, bookkeeping);
         if (string.Equals(processed.FilePath, filePath, StringComparison.Ordinal) && !processed.Success)
         {
             var reason = processed.Error ?? "The file could not be processed";

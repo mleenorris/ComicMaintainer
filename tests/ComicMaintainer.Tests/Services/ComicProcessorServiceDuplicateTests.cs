@@ -324,6 +324,24 @@ public sealed class ComicProcessorServiceDuplicateTests : IDisposable
     }
 
     [Fact]
+    public async Task Swap_StepAfterTheRenameThrows_PutsTheOtherFileBack()
+    {
+        CreateArchive("Saga - Chapter 0001.cbz", "1", "holder");
+        var duplicate = CreateArchive("Saga 1.cbz", "1", "duplicate");
+        FlagAsDuplicate(duplicate);
+        // The store throws once the other file is out of the way.
+        _fileStore.Setup(s => s.MarkFileDuplicateAsync(duplicate, false, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("boom"));
+        using var service = CreateService();
+
+        var result = await service.SwapDuplicateAsync(duplicate);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("holder", ReadMarker(ProperPath));
+        Assert.False(File.Exists(Path.Join(Folder, "Saga - Chapter 0001 (duplicate).cbz")));
+    }
+
+    [Fact]
     public async Task Swap_OtherFileCannotBePutBack_SaysWhereItIs()
     {
         CreateArchive("Saga - Chapter 0001.cbz", "1", "holder");

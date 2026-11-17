@@ -75,7 +75,8 @@ public partial class ComicProcessorService
                 Issue = root.Element("Number")?.Value,
                 Volume = root.Element("Volume")?.Value,
                 Publisher = root.Element("Publisher")?.Value,
-                Year = int.TryParse(root.Element("Year")?.Value, out var year) ? year : null
+                Year = int.TryParse(root.Element("Year")?.Value, out var year) ? year : null,
+                Format = root.Element("Format")?.Value
             };
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)

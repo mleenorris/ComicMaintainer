@@ -4,10 +4,14 @@ namespace ComicMaintainer.Tests.Utilities;
 
 public class VolumeNumberingTests
 {
-    private sealed record Issue(string? Volume, string? Number, bool Annual = false);
+    private sealed record Issue(string? Volume, string? Number, bool Annual = false, string? Kind = null);
 
     private static IReadOnlyList<VolumeNumbering.VolumeGroup<Issue>>? Groups(params Issue[] issues)
-        => VolumeNumbering.SeparateRuns(issues, issue => ComicVolume.FromTag(issue.Volume), issue => issue.Number, issue => issue.Annual);
+        => VolumeNumbering.SeparateRuns(
+            issues,
+            issue => ComicVolume.FromTag(issue.Volume),
+            issue => issue.Number,
+            issue => issue.Kind ?? (issue.Annual ? IssueFormat.Annual : null));
 
     [Fact]
     public void RestartingNumbering_IsGroupedByVolume_OldestFirst_UnknownLast()
@@ -79,6 +83,32 @@ public class VolumeNumberingTests
         Assert.Equal(
             new[] { ("y1990", false), ("y2005", false), ("y1990", true), ("y2005", true) },
             groups!.Select(g => (g.Volume.GetValueOrDefault().Key, g.IsAnnual)).ToArray());
+    }
+
+    [Fact]
+    public void Specials_AreARunOfTheirOwn_AfterTheAnnuals()
+    {
+        var groups = Groups(
+            new Issue(null, "1", Kind: IssueFormat.Special),
+            new Issue(null, "1", Annual: true),
+            new Issue(null, "1"),
+            new Issue(null, "2", Kind: "Special"));
+
+        Assert.NotNull(groups);
+        Assert.Equal(new string?[] { null, IssueFormat.Annual, IssueFormat.Special }, groups.Select(g => g.Kind));
+        Assert.Equal(new[] { "1", "2" }, groups[2].Items.Select(i => i.Number));
+        Assert.Equal(new[] { false, true, false }, groups.Select(g => g.IsAnnual));
+    }
+
+    [Fact]
+    public void AnUnknownKind_IsListedAfterTheKnownOnes()
+    {
+        var groups = Groups(
+            new Issue(null, "1", Kind: "Preview"),
+            new Issue(null, "1", Kind: IssueFormat.Special),
+            new Issue(null, "1"));
+
+        Assert.Equal(new string?[] { null, IssueFormat.Special, "Preview" }, groups!.Select(g => g.Kind));
     }
 
     [Fact]

@@ -61,9 +61,10 @@ public class ComicFileProcessor
     /// looked for (see <see cref="SeriesParts"/>).
     /// </param>
     /// <remarks>
-    /// <c>{series}</c> is the series title alone. Its Annual and volume go only where the
-    /// template places <c>{annual}</c> ("Annual", or nothing for an issue that is not one) and
-    /// <c>{volume_label}</c> ("(1990)", "Vol. 2", or nothing when the volume is unknown).
+    /// <c>{series}</c> is the series title alone. Its kind and volume go only where the template
+    /// places <c>{format}</c> ("Annual" or "Special", see <see cref="IssueFormat"/>; nothing for a
+    /// regular issue), <c>{annual}</c> ("Annual" for an Annual only) and <c>{volume_label}</c>
+    /// ("(1990)", "Vol. 2", or nothing when the volume is unknown).
     /// <c>{volume}</c> is the raw <c>&lt;Volume&gt;</c> value. Brackets and " - " separators a
     /// placeholder left empty are removed with it.
     /// </remarks>
@@ -129,7 +130,8 @@ public class ComicFileProcessor
         var replacements = new Dictionary<string, string>
         {
             ["series"] = series.Title,
-            ["annual"] = series.Annual ? "Annual" : "",
+            ["format"] = series.Kind ?? "",
+            ["annual"] = series.Kind == IssueFormat.Annual ? IssueFormat.Annual : "",
             ["volume_label"] = series.Volume?.Label ?? "",
             ["issue"] = issueFormatted,
             ["issue_no_pad"] = issueNoPad,
@@ -166,24 +168,47 @@ public class ComicFileProcessor
     }
 
     /// <summary>
-    /// The series split into what the <c>{series}</c>, <c>{annual}</c> and <c>{volume_label}</c>
+    /// The series split into what the <c>{series}</c>, <c>{format}</c> and <c>{volume_label}</c>
     /// placeholders render: the title without its Annual or volume ("Green Lantern Annual
-    /// (1990)" gives "Green Lantern"); whether the issue is an Annual (see
-    /// <see cref="AnnualIssue.IsAnnual"/>); and its volume, from the ComicInfo
+    /// (1990)" gives "Green Lantern"); the issue's kind, from <c>&lt;Format&gt;</c> or the
+    /// series, number, file name or title marking an Annual (see <see cref="IssueFormat.Of"/>); and
+    /// its volume, from the ComicInfo
     /// <c>&lt;Volume&gt;</c>, the series name or <paramref name="sourceFileName"/> (see
     /// <see cref="ComicVolume.Resolve"/>). American comics restart their numbering with each
-    /// volume and Annuals have their own, so a template without <c>{volume_label}</c> and
-    /// <c>{annual}</c> gives #1 of every volume and Annual #1 the same name.
+    /// volume and Annuals and Specials have their own, so a template without
+    /// <c>{volume_label}</c> and <c>{format}</c> gives #1 of every volume, Annual #1 and
+    /// Special #1 the same name.
     /// </summary>
-    internal static (string Title, bool Annual, ComicVolume? Volume) SeriesParts(ComicInfo tags, string? sourceFileName)
+    internal static (string Title, string? Kind, ComicVolume? Volume) SeriesParts(ComicInfo tags, string? sourceFileName)
     {
         var series = (tags.Series ?? string.Empty).Trim();
-        var annual = AnnualIssue.IsAnnual(series, tags.Number, sourceFileName);
+        var kind = IssueFormat.Of(tags.Format, series, tags.Number, sourceFileName, tags.Title);
         var volume = ComicVolume.Resolve(tags.Volume, series, sourceFileName);
         var title = series.Length == 0
             ? series
             : AnnualIssue.WithoutAnnual(ComicVolume.WithoutVolume(series));
-        return (title, annual, volume);
+        if (kind == IssueFormat.Special)
+        {
+            title = WithoutTrailingWord(title, IssueFormat.Special);
+        }
+
+        return (title, kind, volume);
+    }
+
+    /// <summary>
+    /// <paramref name="title"/> without a last word <paramref name="word"/>, so a series named
+    /// "Batman Special" and marked Special is not named "Batman Special Special". Unchanged when
+    /// the word is all it holds.
+    /// </summary>
+    private static string WithoutTrailingWord(string title, string word)
+    {
+        if (!title.EndsWith(word, StringComparison.OrdinalIgnoreCase) || title.Length == word.Length)
+        {
+            return title;
+        }
+
+        var rest = title[..^word.Length];
+        return char.IsWhiteSpace(rest[^1]) && rest.Any(char.IsLetterOrDigit) ? rest.TrimEnd() : title;
     }
 
     public static string SanitizeFileName(string fileName)

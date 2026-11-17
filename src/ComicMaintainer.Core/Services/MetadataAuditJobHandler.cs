@@ -231,6 +231,7 @@ public class MetadataAuditJobHandler : IScheduledJobFindingsHandler
         if (flags.HasFlag(ComicMetadataFieldFlags.Summary) && !StringEquals(disk.Summary, db.Summary)) return true;
         if (flags.HasFlag(ComicMetadataFieldFlags.Authors) && !ListEquals(disk.Authors, db.Authors)) return true;
         if (flags.HasFlag(ComicMetadataFieldFlags.Tags) && !ListEquals(disk.Tags, db.Tags)) return true;
+        if (flags.HasFlag(ComicMetadataFieldFlags.Format) && !StringEquals(disk.Format, db.Format)) return true;
         return false;
     }
 

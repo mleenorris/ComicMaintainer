@@ -15,6 +15,7 @@ public enum ComicMetadataFieldFlags : long
     Summary = 1 << 6,
     Authors = 1 << 7,
     Tags = 1 << 8,
+    Format = 1 << 9,
 }
 
 /// <summary>
@@ -73,6 +74,12 @@ public class ComicMetadata
     public string? Publisher { get; set; }
     public int? Year { get; set; }
     public string? Summary { get; set; }
+
+    /// <summary>
+    /// ComicInfo <c>&lt;Format&gt;</c>. <c>Annual</c> and <c>Special</c> mark issues with a numbering of
+    /// their own (see <see cref="Utilities.IssueFormat"/>).
+    /// </summary>
+    public string? Format { get; set; }
     public List<string> Authors { get; set; } = new();
     public List<string> Tags { get; set; } = new();
     public bool IsUserEdited { get; set; }
@@ -92,6 +99,7 @@ public class ComicMetadata
             Publisher = this.Publisher,
             Year = this.Year,
             Summary = this.Summary,
+            Format = this.Format,
             Authors = new List<string>(this.Authors),
             Tags = new List<string>(this.Tags),
             IsUserEdited = this.IsUserEdited,

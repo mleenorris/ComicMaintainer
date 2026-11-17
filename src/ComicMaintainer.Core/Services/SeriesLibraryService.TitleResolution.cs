@@ -21,7 +21,8 @@ public partial class SeriesLibraryService
             && string.IsNullOrWhiteSpace(cached.Issue)
             && string.IsNullOrWhiteSpace(cached.Volume)
             && string.IsNullOrWhiteSpace(cached.Publisher)
-            && cached.Year is null)
+            && cached.Year is null
+            && string.IsNullOrWhiteSpace(cached.Format))
         {
             return null;
         }
@@ -33,7 +34,8 @@ public partial class SeriesLibraryService
             Issue = cached.Issue,
             Volume = cached.Volume,
             Publisher = cached.Publisher,
-            Year = cached.Year
+            Year = cached.Year,
+            Format = cached.Format
         };
     }
 

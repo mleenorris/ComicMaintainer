@@ -6,8 +6,8 @@ namespace ComicMaintainer.Core.Utilities;
 /// Splits a series' issues into runs that are numbered on their own, so issue order and
 /// missing-issue gaps are worked out per run:
 /// <list type="bullet">
-/// <item>Annuals (see <see cref="AnnualIssue"/>) are always a run of their own: Annual #1 is
-/// not issue #1.</item>
+/// <item>Annuals and Specials (see <see cref="IssueFormat"/>) are always runs of their own:
+/// Annual #1 is not issue #1, nor Special #1.</item>
 /// <item>Volumes are runs of their own when the numbering restarts with each volume, the way
 /// American comics are relaunched (<c>Green Lantern</c> #1 of 1990 and #1 of 2005).</item>
 /// </list>
@@ -22,12 +22,19 @@ public static class VolumeNumbering
     /// <summary>
     /// One run's issues, in their original order. <see cref="Volume"/> is the run's volume, or
     /// null when the run is not split by volume or its issues' volume is unknown.
+    /// <see cref="Kind"/> is the run's kind of issue (<see cref="IssueFormat.Annual"/>,
+    /// <see cref="IssueFormat.Special"/>), or null for the series' regular issues.
     /// </summary>
-    public sealed record VolumeGroup<T>(ComicVolume? Volume, IReadOnlyList<T> Items, bool IsAnnual = false);
+    public sealed record VolumeGroup<T>(ComicVolume? Volume, IReadOnlyList<T> Items, string? Kind = null)
+    {
+        /// <summary>True for a run of Annuals.</summary>
+        public bool IsAnnual => Kind == IssueFormat.Annual;
+    }
 
     /// <summary>
     /// The issues split into runs (see the class summary): the series' own issues first, then
-    /// its Annuals; within each, by volume when the numbering restarts by volume (numbered
+    /// each kind of issue <paramref name="kindOf"/> names, in <see cref="IssueFormat.Kinds"/>
+    /// order (Annuals, then Specials); within each, by volume when the numbering restarts by volume (numbered
     /// volumes, then start years, each ascending; issues of no known volume last). Null when
     /// the series is one run.
     /// </summary>
@@ -35,27 +42,44 @@ public static class VolumeNumbering
         IEnumerable<T> items,
         Func<T, ComicVolume?> volumeOf,
         Func<T, string?> issueOf,
-        Func<T, bool>? isAnnual = null)
+        Func<T, string?>? kindOf = null)
     {
         ArgumentNullException.ThrowIfNull(items);
         var all = items.ToList();
-        var annuals = isAnnual is null ? new List<T>() : all.Where(isAnnual).ToList();
-        if (annuals.Count == 0)
+        var byKind = all
+            .GroupBy(item => kindOf?.Invoke(item))
+            .ToDictionary(group => group.Key ?? string.Empty, group => group.ToList());
+        if (byKind.Count == 1 && byKind.ContainsKey(string.Empty))
         {
-            return ByRestartingVolume(all, volumeOf, issueOf, annual: false);
+            return ByRestartingVolume(all, volumeOf, issueOf, kind: null);
         }
 
-        var regular = all.Where(item => !isAnnual!(item)).ToList();
         var runs = new List<VolumeGroup<T>>();
-        if (regular.Count > 0)
+        var kinds = byKind.Keys
+            .OrderBy(kind => kind.Length == 0 ? -1 : KindOrder(kind))
+            .ThenBy(kind => kind, StringComparer.OrdinalIgnoreCase);
+        foreach (var key in kinds)
         {
-            runs.AddRange(ByRestartingVolume(regular, volumeOf, issueOf, annual: false)
-                          ?? [new VolumeGroup<T>(null, regular)]);
+            var kind = key.Length == 0 ? null : key;
+            var issues = byKind[key];
+            runs.AddRange(ByRestartingVolume(issues, volumeOf, issueOf, kind)
+                          ?? [new VolumeGroup<T>(null, issues, kind)]);
         }
 
-        runs.AddRange(ByRestartingVolume(annuals, volumeOf, issueOf, annual: true)
-                      ?? [new VolumeGroup<T>(null, annuals, IsAnnual: true)]);
         return runs;
+    }
+
+    private static int KindOrder(string kind)
+    {
+        for (var i = 0; i < IssueFormat.Kinds.Count; i++)
+        {
+            if (string.Equals(IssueFormat.Kinds[i], kind, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return IssueFormat.Kinds.Count;
     }
 
     /// <summary>
@@ -81,11 +105,11 @@ public static class VolumeNumbering
         IEnumerable<T> items,
         Func<T, ComicVolume?> volumeOf,
         Func<T, string?> issueOf,
-        bool annual)
+        string? kind)
     {
         var groups = items
             .GroupBy(volumeOf)
-            .Select(group => new VolumeGroup<T>(group.Key, group.ToList(), annual))
+            .Select(group => new VolumeGroup<T>(group.Key, group.ToList(), kind))
             .ToList();
 
         var known = groups.Where(group => group.Volume is not null).ToList();

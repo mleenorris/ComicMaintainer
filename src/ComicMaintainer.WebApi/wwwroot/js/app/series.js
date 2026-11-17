@@ -619,8 +619,8 @@
         // A series' issues split into runs that are numbered on their own, as
         // on the server (VolumeNumbering), which already orders the issues run
         // by run. Each run gets its own heading and its own missing issues:
-        //  - Annuals (issue.annual) are always a run of their own: Annual #1 is
-        //    not issue #1.
+        //  - Annuals and Specials (issue.format) are always runs of their own,
+        //    after the regular issues: Annual #1 is not issue #1.
         //  - American comics restart their numbering with each volume ("Green
         //    Lantern" #1 of 1990 and #1 of 2005): when volumes (volume_key)
         //    share an issue number, each volume is a run. Volumes that continue
@@ -628,25 +628,54 @@
         // Returns [{ label, issues }], or null for one run.
         function groupIssueRuns(issues) {
             const list = issues || [];
-            const annuals = list.filter(issue => issue && issue.annual);
-            const regular = annuals.length ? list.filter(issue => !(issue && issue.annual)) : list;
-            const regularRuns = splitRunByRestartingVolume(regular, false);
-            if (!annuals.length) return regularRuns;
-            const runs = regular.length ? (regularRuns || [wholeRun(regular, false)]) : [];
-            return runs.concat(splitRunByRestartingVolume(annuals, true) || [wholeRun(annuals, true)]);
+            const byKind = new Map();
+            for (const issue of list) {
+                const kind = issueKind(issue);
+                if (!byKind.has(kind)) byKind.set(kind, []);
+                byKind.get(kind).push(issue);
+            }
+            const regular = byKind.get('') || [];
+            const regularRuns = splitRunByRestartingVolume(regular, '');
+            if (byKind.size === 1 && byKind.has('')) return regularRuns;
+            const runs = regular.length ? (regularRuns || [wholeRun(regular, '')]) : [];
+            const kinds = [...byKind.keys()].filter(Boolean).sort((a, b) => kindOrder(a) - kindOrder(b) || a.localeCompare(b));
+            for (const kind of kinds) {
+                const kindIssues = byKind.get(kind);
+                runs.push(...(splitRunByRestartingVolume(kindIssues, kind) || [wholeRun(kindIssues, kind)]));
+            }
+            return runs;
+        }
+
+        // The kind of issue with a numbering of its own ("Annual", "Special"),
+        // or '' for a regular issue.
+        function issueKind(issue) {
+            if (!issue) return '';
+            return issue.format || (issue.annual ? 'Annual' : '');
+        }
+
+        // Annuals before Specials, as on the server (IssueFormat.Kinds).
+        function kindOrder(kind) {
+            const index = ['Annual', 'Special'].indexOf(kind);
+            return index === -1 ? 2 : index;
+        }
+
+        // A run's heading: its volume and kind ("1990", "1990 Annual",
+        // "Special"), or `fallback` for regular issues of no known volume.
+        function runLabel(volume, kind, fallback) {
+            if (!kind) return volume || fallback;
+            return volume ? `${volume} ${kind}` : kind;
         }
 
         // A run named after its issues' volume when they all share one ("1990",
-        // "1990 Annual"); otherwise "Issues" or "Annual".
-        function wholeRun(issues, annual) {
+        // "1990 Annual"); otherwise "Issues", "Annual" or "Special".
+        function wholeRun(issues, kind) {
             const labels = new Set(issues.map(issue => (issue && issue.volume_label) || ''));
             const volume = labels.size === 1 ? [...labels][0] : '';
-            const label = annual ? (volume ? `${volume} Annual` : 'Annual') : (volume || 'Issues');
-            return { label, issues };
+            return { label: runLabel(volume, kind, 'Issues'), issues };
         }
 
         // The issues by volume when their numbering restarts by volume, or null.
-        function splitRunByRestartingVolume(issues, annual) {
+        function splitRunByRestartingVolume(issues, kind) {
             const groups = new Map();
             for (const issue of issues) {
                 const key = (issue && issue.volume_key) || '';
@@ -672,9 +701,7 @@
             }
             if (!restarts) return null;
             return [...groups.values()].map(group => ({
-                label: annual
-                    ? (group.volume ? `${group.volume} Annual` : 'Annual')
-                    : (group.volume || 'No volume'),
+                label: runLabel(group.volume, kind, 'No volume'),
                 issues: group.issues
             }));
         }

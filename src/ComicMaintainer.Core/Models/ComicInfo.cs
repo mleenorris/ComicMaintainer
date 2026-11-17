@@ -135,6 +135,7 @@ public class ComicInfo
             Publisher = Publisher,
             Year = Year,
             Summary = Summary,
+            Format = Format,
             Authors = new[] { Writer, Penciller, Inker, Colorist, Letterer, Editor }
                 .Where(a => !string.IsNullOrWhiteSpace(a))
                 .Select(a => a!)
@@ -157,6 +158,7 @@ public class ComicInfo
             Publisher = metadata.Publisher,
             Year = metadata.Year,
             Summary = metadata.Summary,
+            Format = metadata.Format,
             Writer = metadata.Authors.FirstOrDefault()
         };
     }

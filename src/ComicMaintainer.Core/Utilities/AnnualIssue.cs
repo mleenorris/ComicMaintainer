@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace ComicMaintainer.Core.Utilities;
@@ -42,6 +43,33 @@ public static partial class AnnualIssue
 
         var series = SeriesFromPath.FromFileName(fileName);
         return series is not null && TrailingAnnualPattern().IsMatch(series);
+    }
+
+    /// <summary>
+    /// True when <paramref name="title"/> names the issue as an Annual: the word "Annual" right
+    /// before the issue number (<c>All New X-Men Annual 001 (2015)</c>, <c>v2 .Annual 001</c>,
+    /// <c>#Annual 2021</c>, <c>Annual_1</c> for issue 1 or 2021). A title is often all that is
+    /// left of the original file name once a file has been renamed, so it is the only place that
+    /// still marks the issue as an Annual. "Annual" elsewhere in a story title does not count.
+    /// </summary>
+    public static bool FromTitle(string? title, string? issue)
+    {
+        if (string.IsNullOrWhiteSpace(title) || IssueNumber(issue) is not { } expected ||
+            !decimal.TryParse(expected, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var number))
+        {
+            return false;
+        }
+
+        foreach (Match match in TitleAnnualNumberPattern().Matches(title))
+        {
+            if (decimal.TryParse(match.Groups["number"].Value, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var named) &&
+                named == number)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -121,6 +149,10 @@ public static partial class AnnualIssue
     // A trailing volume: " (1990)", " [1990]", " (1990-1995)", " Vol. 2", " v2".
     [GeneratedRegex(@"\s*(?:[\(\[]\s*\d{4}\s*(?:-\s*(?:\d{4})?\s*)?[\)\]]|(?<![\p{L}\p{N}])(?:vol(?:ume)?\.?\s*|v)\d{1,3})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
     private static partial Regex TrailingVolumePattern();
+
+    // "Annual" then the issue number, with spaces, "_", ":", ".", "#" or "-" between: "Annual 001", "Annual_1", "Annual: 01".
+    [GeneratedRegex(@"(?<![\p{L}\p{N}])annual[\s_:.#-]*(?<number>\d+(?:\.\d+)?)(?![\p{N}])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex TitleAnnualNumberPattern();
 
     // "Annual", "Annual 1", "Annual #1", "Annual 1.5".
     [GeneratedRegex(@"^annual(?:\s*#?\s*(?<number>\d+(?:\.\d+)?))?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]

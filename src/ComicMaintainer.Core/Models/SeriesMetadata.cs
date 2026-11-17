@@ -13,4 +13,7 @@ public class SeriesMetadata
     public string? Volume { get; set; }
     public string? Publisher { get; set; }
     public int? Year { get; set; }
+
+    /// <summary>ComicInfo <c>&lt;Format&gt;</c> (see <see cref="ComicMetadata.Format"/>).</summary>
+    public string? Format { get; set; }
 }

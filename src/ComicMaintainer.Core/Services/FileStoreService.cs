@@ -359,6 +359,7 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource,
         if (patch.Publisher is not null) target.Publisher = patch.Publisher;
         if (patch.Year.HasValue) target.Year = patch.Year;
         if (patch.Summary is not null) target.Summary = patch.Summary;
+        if (patch.Format is not null) target.Format = patch.Format;
         if (patch.Authors.Count > 0) target.Authors = new List<string>(patch.Authors);
         if (patch.Tags.Count > 0) target.Tags = new List<string>(patch.Tags);
     }

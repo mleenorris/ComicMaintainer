@@ -819,6 +819,7 @@
             { name: 'series', property: 'Series', field: 'series' },
             { name: 'issue', property: 'Issue', field: 'issue' },
             { name: 'volume', property: 'Volume', field: 'volume' },
+            { name: 'format', property: 'Format', field: 'format' },
             { name: 'publisher', property: 'Publisher', field: 'publisher' },
             { name: 'year', property: 'Year', field: 'year' },
             { name: 'writer', property: 'Authors', field: 'authors' },

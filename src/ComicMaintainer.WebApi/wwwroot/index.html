@@ -1193,7 +1193,7 @@
                             </small>
                             <ul style="margin: 10px 0 10px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.6;">
                                 <li><code>{series}</code> - Series name, without its volume or "Annual"</li>
-                                <li><code>{format}</code> - "Annual", "Special" or "Giant-Size", from the issue's Format tag (also recognized by the series, number, file name or title); empty for regular issues</li>
+                                <li><code>{format}</code> - "Annual", "Special", "Giant-Size", "One-Shot" or a kind you set yourself, such as "Rebirth", from the issue's Format tag (also recognized by the series, number, file name or title); empty for regular issues</li>
                                 <li><code>{annual}</code> - "Annual" for an Annual only; empty for other issues, Specials included</li>
                                 <li><code>{volume_label}</code> - The volume: Vol. 2 when its number is known, else its start year, e.g., (1990); empty when unknown</li>
                                 <li><code>{volume_number}</code> - The volume number alone, e.g., 2; empty when unknown</li>
@@ -1588,11 +1588,12 @@
                     </div>
                     <div class="form-group">
                         <label for="format">Format</label>
-                        <input type="text" id="format" name="format" list="issueFormatOptions" autocomplete="off" placeholder="Annual, Special or Giant-Size; empty for a regular issue">
+                        <input type="text" id="format" name="format" list="issueFormatOptions" autocomplete="off" placeholder="Annual, Special, Giant-Size, One-Shot or your own, such as Rebirth; empty for a regular issue">
                         <datalist id="issueFormatOptions">
                             <option value="Annual"></option>
                             <option value="Special"></option>
                             <option value="Giant-Size"></option>
+                            <option value="One-Shot"></option>
                         </datalist>
                     </div>
                     <div class="form-group">
@@ -1647,7 +1648,7 @@
                     </div>
                     <div class="form-group">
                         <label for="batch_format">Format</label>
-                        <input type="text" id="batch_format" name="format" list="issueFormatOptions" autocomplete="off" placeholder="Annual, Special or Giant-Size">
+                        <input type="text" id="batch_format" name="format" list="issueFormatOptions" autocomplete="off" placeholder="Annual, Special, Giant-Size, One-Shot or your own">
                     </div>
                     <div class="form-group">
                         <label for="batch_publisher">Publisher</label>

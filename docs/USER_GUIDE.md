@@ -125,7 +125,7 @@ list. **Replace Cover** downloads the full-size cover and makes it page 1 of the
 other page is kept. Only a CBZ can be changed this way; convert a CBR to CBZ first.
 
 The issue is matched to ComicVine as for issue details: through its series and its volume's start year or number.
-Annuals, Specials and Giant-Size issues are not matched yet. This needs a ComicVine API key.
+Annuals, Specials, Giant-Size issues and One-Shots are not matched yet. This needs a ComicVine API key.
 
 A file renamed before this version may have lost its volume from its name. If its `<Title>` still holds the old file
 name, the volume and cover year are read from there, and the title is then replaced by the generated `Chapter 10`, which
@@ -166,7 +166,18 @@ title has "Giant" right before the issue number (`Giant 2025`, `#Giant 2025 2`).
 as `Giant Days`, does not count. Normalize writes `<Format>Giant-Size</Format>` or `<Format>Special</Format>` into an
 empty `<Format>`. Giant-Size issues get their own "Giant-Size" section, after the Specials.
 
-Any other `<Format>` value, such as `TPB`, is kept but does not change how the issue is listed or named.
+One-Shots, single issues published on their own, are a kind of their own as well. `<Format>` is `One-Shot`; `One Shot`
+and `Oneshot` are read as it. A file is one when its series or file name starts or ends with "One-Shot"
+(`X-Men: Red One-Shot`), its file name holds `(One-Shot)`, or its title has "One-Shot" right before the issue number
+(`One-Shot 1`) or as its label. Normalize writes `<Format>One-Shot</Format>` into an empty `<Format>`, `{format}` names
+it, and One-Shots get their own "One-Shot" section, after the Giant-Size issues, so a One-Shot #1 is neither taken for
+issue #1 nor flagged as its duplicate.
+
+You can also set a kind of your own in **Format**, in **View/Edit** or for many files in **Update**: any value counts,
+so a one-shot with a name of its own, such as DC's `Rebirth`, gets its own "Rebirth" section, `{format}` names it
+(`Batman Rebirth - Chapter 0001.cbz`), and it is never taken for issue #1. The values taggers write to describe an
+edition, not a kind, still mean a regular issue: `Series`, `Main Series`, `Limited Series`, `Mini-Series`, `Digital`,
+`Print`, `Web`, `TPB`, `Trade Paperback`, `Hardcover`, `HC`, `Graphic Novel`, `Omnibus` and the like.
 
 A story title that only contains one of these words, such as "The Annual Party" or "A Special Day", never counts.
 
@@ -190,7 +201,7 @@ rewrites the archive. The default format is `{series} {format} {volume_label} - 
   ComicInfo `<Volume>`, the stored start year, the series name, the file name (a `v2` token, or a year before the
   issue number), an old file name left in `<Title>`, and the folder name.
 - `{volume_number}` is the number alone, `2`, and `{volume_year}` the start year alone, `1990`.
-- `{format}` is `Annual`, `Special` or `Giant-Size`.
+- `{format}` is `Annual`, `Special`, `Giant-Size` or `One-Shot`.
 - `{annual}` is `Annual` for an Annual only. Prefer `{format}`, which covers the other kinds too.
 
 Each renders empty when it does not apply, and any brackets or ` - ` separator around it go with it. The old defaults,

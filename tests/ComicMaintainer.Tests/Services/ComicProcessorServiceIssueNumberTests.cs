@@ -644,6 +644,39 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessFileAsync_AOneShotAndIssue1_AreKeptApart_AndTheOneShotIsMarkedInFormat()
+    {
+        var issue1 = WriteArchive("Batman", "Batman 001.cbz", "<ComicInfo><Series>Batman</Series><Number>1</Number></ComicInfo>");
+        var oneShot = WriteArchive("Batman", "Batman (One-Shot).cbz", "<ComicInfo><Series>Batman</Series><Number>1</Number></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(issue1));
+        Assert.True(await _service.ProcessFileAsync(oneShot));
+
+        var folder = Path.Join(_root, "Batman");
+        Assert.True(File.Exists(Path.Join(folder, "Batman - Chapter 0001.cbz")));
+        var renamed = Path.Join(folder, "Batman One-Shot - Chapter 0001.cbz");
+        Assert.True(File.Exists(renamed), "the One-Shot is named apart from issue #1");
+        Assert.Equal("One-Shot", ReadComicInfo(renamed).Element("Format")?.Value);
+        _fileStore.Verify(f => f.MarkFileDuplicateAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AFormatTheUserNamed_IsAKindOfItsOwn()
+    {
+        // DC's Batman: Rebirth one-shot, marked Rebirth by the user.
+        var issue1 = WriteArchive("Batman", "Batman 001.cbz", "<ComicInfo><Series>Batman</Series><Number>1</Number></ComicInfo>");
+        var rebirth = WriteArchive("Batman", "Batman Rebirth 001.cbz", "<ComicInfo><Series>Batman Rebirth</Series><Number>1</Number><Format>Rebirth</Format></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(issue1));
+        Assert.True(await _service.ProcessFileAsync(rebirth));
+
+        var folder = Path.Join(_root, "Batman");
+        Assert.True(File.Exists(Path.Join(folder, "Batman - Chapter 0001.cbz")));
+        Assert.True(File.Exists(Path.Join(folder, "Batman Rebirth - Chapter 0001.cbz")), "named once, apart from issue #1");
+        _fileStore.Verify(f => f.MarkFileDuplicateAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task ProcessFileAsync_AnnualOfAVolume_KeepsAnnualBeforeTheVolume()
     {
         var path = WriteArchive("Green Lantern (1990)", "Green Lantern (1990) Annual 003.cbz");

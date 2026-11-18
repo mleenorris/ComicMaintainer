@@ -25,6 +25,10 @@ namespace ComicMaintainer.Core.Utilities;
 /// never a candidate.</item>
 /// <item>A name with no such number ("Series (2023)", "Series Vol 2") has no issue number.</item>
 /// </list>
+/// <para>A number may carry a letter suffix after a dot, as publishers number crossover tie-ins
+/// inside an ongoing series: Marvel's Monsters Unleashed tie-in of All-New X-Men is "#1.MU", and
+/// ComicVine catalogues it so. "001.MU", "1.NOW" or "12.INH" keep their suffix (one to four
+/// letters, nothing glued after them), so the tie-in is not read as issue #1.</para>
 /// <para>Returned numbers have the zero padding of their integer part removed ("0012" becomes
 /// "12", "0004.5" becomes "4.5"); only generated file names are zero padded.</para>
 /// </remarks>
@@ -33,14 +37,26 @@ public static class IssueNumberParser
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromSeconds(1);
 
     /// <summary>
+    /// What may follow a number's digits: a decimal part ("12.5") or a tie-in's letter suffix
+    /// ("1.MU"), one to four letters that no letter or digit follows.
+    /// </summary>
+    private const string Fraction = @"(?:\.\d+|\.\p{L}{1,4}(?![\p{L}\p{N}]))?";
+
+    /// <summary>A number with a tie-in's letter suffix, as <see cref="Parse"/> returns it.</summary>
+    private static readonly Regex SuffixedNumberPattern = new(
+        @"^(?<number>\d+)\.(?<suffix>\p{L}{1,4})$",
+        RegexOptions.CultureInvariant,
+        MatchTimeout);
+
+    /// <summary>
     /// An explicitly marked chapter or issue number. The marker must not follow a letter, so it
     /// starts a word. A bare "c" only counts directly before a number that no letter, digit or
     /// further decimal follows ("c012", but not the "c2c" scene tag or a "5C2A9E01" checksum).
     /// </summary>
     private static readonly Regex MarkedNumberPattern = new(
-        @"(?<!\p{L})(?:ch(?:ap(?:ter)?)?|issue)[\s._#-]*(?<number>\d+(?:\.\d+)?)" +
+        @"(?<!\p{L})(?:ch(?:ap(?:ter)?)?|issue)[\s._#-]*(?<number>\d+" + Fraction + ")" +
         @"|(?<!\p{L})c(?<number>\d+(?:\.\d+)?)(?![\p{L}\p{N}]|\.\d)" +
-        @"|#\s*(?<number>\d+(?:\.\d+)?)",
+        @"|#\s*(?<number>\d+" + Fraction + ")",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
         MatchTimeout);
 
@@ -67,13 +83,13 @@ public static class IssueNumberParser
 
     /// <summary>A name part that holds nothing but a number.</summary>
     private static readonly Regex NumberOnlyPattern = new(
-        @"^\d+(?:\.\d+)?$",
+        @"^\d+" + Fraction + "$",
         RegexOptions.CultureInvariant,
         MatchTimeout);
 
     /// <summary>A number that is not glued to letters or other digits.</summary>
     private static readonly Regex StandaloneNumberPattern = new(
-        @"(?<![\p{L}\p{N}])\d+(?:\.\d+)?(?![\p{L}\p{N}])",
+        @"(?<![\p{L}\p{N}])\d+" + Fraction + @"(?![\p{L}\p{N}])",
         RegexOptions.CultureInvariant,
         MatchTimeout);
 
@@ -184,9 +200,16 @@ public static class IssueNumberParser
             return string.IsNullOrEmpty(a) && string.IsNullOrEmpty(b);
         }
 
-        if (string.Equals(a, b, StringComparison.Ordinal))
+        if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase))
         {
             return true;
+        }
+
+        // A tie-in's number ("0001.MU" and "1.mu") compares by its number and its suffix.
+        if (SplitSuffix(a) is { } suffixedA && SplitSuffix(b) is { } suffixedB)
+        {
+            return string.Equals(suffixedA.Suffix, suffixedB.Suffix, StringComparison.OrdinalIgnoreCase)
+                   && AreEquivalent(suffixedA.Number, suffixedB.Number);
         }
 
         return decimal.TryParse(a, NumberStyles.Number, CultureInfo.InvariantCulture, out var da) &&
@@ -217,6 +240,21 @@ public static class IssueNumberParser
         }
 
         return trimmed + fractionalPart;
+    }
+
+    /// <summary>
+    /// Splits a number with a tie-in's letter suffix ("1.MU") into the number ("1") and the
+    /// suffix ("MU"); null for any other value.
+    /// </summary>
+    public static (string Number, string Suffix)? SplitSuffix(string? issue)
+    {
+        if (string.IsNullOrWhiteSpace(issue))
+        {
+            return null;
+        }
+
+        var match = SuffixedNumberPattern.Match(issue.Trim());
+        return match.Success ? (match.Groups["number"].Value, match.Groups["suffix"].Value) : null;
     }
 
     /// <summary>

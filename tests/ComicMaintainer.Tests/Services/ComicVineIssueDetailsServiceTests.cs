@@ -441,6 +441,23 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RunAsync_ATieInNumber_MatchesComicVinesTieIn_NotIssue1()
+    {
+        AddFile("/c/Batman/Batman (2016) - Chapter 0001.MU.cbz", "1.mu");
+        _client.Setup(c => c.ListVolumeIssuesAsync(BatmanVolume, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicVineResult<IReadOnlyList<ComicVineIssueSummary>>(
+            [
+                new ComicVineIssueSummary(101, "1", "I Am Gotham, Part One", "2016-08-01", null, null),
+                new ComicVineIssueSummary(150, "1.MU", "Monsters Unleashed", "2017-03-01", null, null),
+            ], 1));
+        _client.Setup(c => c.GetIssueDetailsAsync(150, It.IsAny<CancellationToken>())).ReturnsAsync(new ComicVineIssueDetails(150, [], []));
+
+        await CreateService().RunAsync(null, 20);
+
+        Assert.Equal("Monsters Unleashed", _writes.Single().Metadata.Title);
+    }
+
+    [Fact]
     public async Task GetStoryArcsAsync_GroupsTheFilesByArc()
     {
         AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");

@@ -844,6 +844,7 @@ Preferences are `{"defaultReaderMode","readingDirection","tapZonesEnabled","auto
 | `GET` | `/api/metadata/search` | Signed in | Search providers |
 | `GET` | `/api/metadata/volume-number` | Signed in | Suggest a volume's number from ComicVine |
 | `POST` | `/api/metadata/issue-details/series/{seriesId}` | Library write | Fill a series' issues from ComicVine, as a job |
+| `GET` | `/api/metadata/volumes/series/{seriesId}` | Signed in | A series' volumes and their ComicVine links |
 | `GET` | `/api/metadata/story-arcs/series/{seriesId}` | Signed in | The story arcs a series' issues are part of |
 | `GET` | `/api/metadata/story-arcs/{storyArcId}` | Signed in | A story arc's issues in reading order |
 | `POST` | `/api/metadata/refresh-all` | Library write | Queue a refresh of every series |
@@ -913,6 +914,8 @@ Preferences are `{"defaultReaderMode","readingDirection","tapZonesEnabled","auto
 `volumes` lists the volumes counted, ending with the one that started in `year` (`matched`). `number` is `null` and `volumes` empty when ComicVine has no such volume or is not configured. A missing `title`, or a `year` outside 1900 to 2199, answers `400`.
 
 **`POST /api/metadata/issue-details/series/{seriesId}`** starts a job over the series' files and answers `{"job_id","total_items"}`, or `404` for an unknown series. Follow the job like any other. Each file gets ComicVine's title, cover year and month, summary, writers, story arcs and page, only where its own are empty or placeholders. The job makes at most 250 ComicVine requests; the `comicvine-issue-details` scheduled job continues from there.
+
+**`GET /api/metadata/volumes/series/{seriesId}`** returns `{"volumes":[{"volume_number","start_year","issues","comicvine_volume_id","name","publisher","site_url"}]}`: the series' volumes as its regular issues (not Annuals, Specials or duplicates) name them, by start year, then by volume number, then the issues that name neither. `volume_number` and `start_year` are `null` when the issues do not say; the ComicVine fields are `null` until the volume is linked, which **Fetch Issue Details** does. Issues that name neither use the series' own ComicVine match. It asks ComicVine nothing, and answers `404` for an unknown series.
 
 **`GET /api/metadata/story-arcs/series/{seriesId}`** returns `{"arcs":[{"id","name","file_paths"}]}`, sorted by name: each story arc the series' filled issues are part of, with those files. It reads only what has been fetched and asks ComicVine nothing.
 

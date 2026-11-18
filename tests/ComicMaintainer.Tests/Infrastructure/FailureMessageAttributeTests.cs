@@ -74,6 +74,7 @@ public class FailureMessageAttributeTests
     [InlineData(typeof(CoversController), nameof(CoversController.CandidateImage), "Error fetching the cover from ComicVine")]
     [InlineData(typeof(MetadataController), nameof(MetadataController.FetchIssueDetails), "Error starting the ComicVine issue details job")]
     [InlineData(typeof(MetadataController), nameof(MetadataController.SeriesStoryArcs), "Error reading the series' story arcs")]
+    [InlineData(typeof(MetadataController), nameof(MetadataController.SeriesVolumes), "Error reading the series' volumes")]
     [InlineData(typeof(MetadataController), nameof(MetadataController.StoryArc), "Error reading the story arc")]
     [InlineData(typeof(MetadataController), nameof(MetadataController.SetPreferredLanguage), "Error setting preferred language")]
     [InlineData(typeof(MetadataController), nameof(MetadataController.SetSeriesName), "Error setting series name")]

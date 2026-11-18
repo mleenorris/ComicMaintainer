@@ -470,6 +470,36 @@ public class MetadataController : ControllerBase
         return Ok(new { job_id = jobId, total_items = paths.Count });
     }
 
+    /// <summary>
+    /// The volumes of series <paramref name="seriesId"/> and the ComicVine volume each is linked
+    /// to (see <see cref="IComicVineIssueDetailsService.GetVolumeLinksAsync"/>).
+    /// </summary>
+    [HttpGet("volumes/series/{seriesId}")]
+    [FailureMessage("Error reading the series' volumes")]
+    public async Task<ActionResult<object>> SeriesVolumes(string seriesId, CancellationToken cancellationToken)
+    {
+        var paths = await SeriesFilePathsAsync(seriesId, cancellationToken);
+        if (paths is null)
+        {
+            return NotFound(new { error = "Series not found" });
+        }
+
+        var volumes = await _issueDetails.GetVolumeLinksAsync(paths, cancellationToken);
+        return Ok(new
+        {
+            volumes = volumes.Select(volume => new
+            {
+                volume_number = volume.VolumeNumber == 0 ? (int?)null : volume.VolumeNumber,
+                start_year = volume.StartYear == 0 ? (int?)null : volume.StartYear,
+                issues = volume.Issues,
+                comicvine_volume_id = volume.ComicVineVolumeId,
+                name = volume.Name,
+                publisher = volume.Publisher,
+                site_url = volume.SiteUrl
+            })
+        });
+    }
+
     /// <summary>The story arcs the issues of series <paramref name="seriesId"/> are part of, as ComicVine's details named them.</summary>
     [HttpGet("story-arcs/series/{seriesId}")]
     [FailureMessage("Error reading the series' story arcs")]

@@ -41,4 +41,13 @@ public interface IComicVineIssueDetailsService
     /// is fetched from ComicVine the first time. Null when ComicVine has no such arc.
     /// </summary>
     Task<StoryArcReadingOrder?> GetStoryArcAsync(int storyArcId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The volumes of the files at <paramref name="filePaths"/> and the ComicVine volume each is
+    /// linked to, from what was stored when they were matched; ComicVine is not asked. A volume
+    /// whose files name neither a start year nor a number shows the series' own ComicVine match.
+    /// </summary>
+    Task<IReadOnlyList<SeriesVolumeLink>> GetVolumeLinksAsync(
+        IReadOnlyCollection<string> filePaths,
+        CancellationToken cancellationToken = default);
 }

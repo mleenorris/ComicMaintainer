@@ -5,6 +5,78 @@ namespace ComicMaintainer.Tests.Utilities;
 public class FileNameTitleTests
 {
     [Theory]
+    [InlineData("v4 010 (2018)", "Nightwing", "10", true)]
+    [InlineData("v1 #1", "House of M", "1", true)]
+    [InlineData("001 (2015)", "I Hate Fairyland", "1", true)]
+    [InlineData("z-issue 001 (2016)", "I Hate Fairyland", "1", true)]
+    [InlineData("v2 .Annual 001 (2014)", "Batwoman", "1", true)]
+    [InlineData("0_(2011)", "Batwoman", "0", true)]
+    [InlineData("Issue #1", "Batwoman", "1", true)]
+    [InlineData("Soulfire Vol 1 03 (of 10) (2011)", "Michael Turner's Soulfire", "3", true)]
+    [InlineData("v4 010 (2018)", "Nightwing", "11", false)]
+    [InlineData("The Hunt, Part 10", "Nightwing", "10", false)]
+    [InlineData("v4 010 (2018)", null, "10", true)]
+    public void IsLeftoverFileName_ATitleWithoutTheSeries_IsAFileNameWhenItHoldsNothingElse(string title, string? series, string issue, bool expected)
+    {
+        Assert.Equal(expected, FileNameTitle.IsLeftoverFileName(title, series, issue));
+    }
+
+    [Theory]
+    // A shortened series name: its words, in order, then nothing a story title would hold.
+    [InlineData("Soulfire Vol 1 03 (of 10) (2011)", "Michael Turner's Soulfire", "3", true)]
+    [InlineData("Turner's Soulfire 03", "Michael Turner's Soulfire", "3", true)]
+    [InlineData("Batman 003 (2016)", "Batman: The Dark Knight", "3", true)]
+    [InlineData("Dark Knight v1 003", "Batman: The Dark Knight", "3", true)]
+    // Words the series does not hold, out of order, or naming nothing, are not its name.
+    [InlineData("Soulfire Rising 03", "Michael Turner's Soulfire", "3", false)]
+    [InlineData("Soulfire Michael 03", "Michael Turner's Soulfire", "3", false)]
+    [InlineData("Spider-Man 003", "Batman", "3", false)]
+    [InlineData("The 003", "The Flash", "3", false)]
+    [InlineData("Soulfire: The Hunt, Part 3", "Michael Turner's Soulfire", "3", false)]
+    public void IsLeftoverFileName_AShortenedSeriesName_IsTheSeries(string title, string series, string issue, bool expected)
+    {
+        Assert.Equal(expected, FileNameTitle.IsLeftoverFileName(title, series, issue));
+    }
+
+    [Fact]
+    public void IsLeftoverFileName_AnAliasOfTheSeries_IsTheSeries()
+    {
+        string?[] names = ["The Amazing Spider-Man", null, "ASM", " "];
+
+        Assert.True(FileNameTitle.IsLeftoverFileName("ASM 003 (2014)", names, "3"));
+        Assert.True(FileNameTitle.IsLeftoverFileName("ASM Vol. 3 - The Hunt 003", names, "3"));
+        Assert.True(FileNameTitle.IsFileName("ASM 004 (2014)", names, "3"));
+        Assert.False(FileNameTitle.IsLeftoverFileName("ASM 003 (2014)", "The Amazing Spider-Man", "3"));
+        Assert.False(FileNameTitle.IsFileName("ASM: The Hunt, Part 4", names, "3"));
+    }
+
+    [Theory]
+    // An old file name, of this issue or another.
+    [InlineData("v4 010 (2018)", "Nightwing", "10", true)]
+    [InlineData("v4 011 (2018)", "Nightwing", "10", true)]
+    [InlineData("Vol. 2 003 (2023)", "I Hate Fairyland", "2", true)]
+    [InlineData("All New X-Men v2 009 (2016)", "All-New X-Men", "8", true)]
+    // A story title is never one, whatever number it holds.
+    [InlineData("Vol. 2 003 (2023) Variant Edition", "I Hate Fairyland", "2", false)]
+    [InlineData("The Hunt, Part 11", "Nightwing", "10", false)]
+    [InlineData("Nightwing: Year One Part 3", "Nightwing", "10", false)]
+    [InlineData("(2018)", "Nightwing", "10", false)]
+    [InlineData("1602", "Nightwing", "10", false)]
+    [InlineData("2099", "Nightwing", "10", false)]
+    [InlineData("52", "Nightwing", "10", false)]
+    // A kind word naming another number is a label of this issue, not a file name.
+    [InlineData("#Annual 2021", "Batman", "8", false)]
+    [InlineData(null, "Nightwing", "10", false)]
+    public void IsFileName_TakesAnOldFileNameOfAnyIssue(string? title, string series, string issue, bool expected)
+    {
+        Assert.Equal(expected, FileNameTitle.IsFileName(title, series, issue));
+        if (expected)
+        {
+            Assert.Equal(title!.Contains($"{int.Parse(issue):000}", StringComparison.Ordinal), FileNameTitle.IsLeftoverFileName(title, series, issue));
+        }
+    }
+
+    [Theory]
     // A file name left in the title: the series (punctuation aside) and the issue number.
     [InlineData("All New X-Men v2 008 (2016)", "All-New X-Men", "8", true)]
     [InlineData("All-New X-Men 008", "All-New X-Men", "008", true)]

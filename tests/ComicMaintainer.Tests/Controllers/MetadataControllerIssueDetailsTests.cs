@@ -71,6 +71,20 @@ public class MetadataControllerIssueDetailsTests
     }
 
     [Fact]
+    public async Task SeriesVolumes_ListsEachVolumeWithItsLink()
+    {
+        _details.Setup(d => d.GetVolumeLinksAsync(It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new SeriesVolumeLink(2, 2016, 19, 88888, "All-New X-Men", "Marvel", "https://comicvine.gamespot.com/volume/4050-88888/"), new SeriesVolumeLink(0, 0, 3, null, null, null, null)]);
+
+        var body = Json(Assert.IsType<OkObjectResult>((await CreateController().SeriesVolumes("batman", CancellationToken.None)).Result).Value);
+
+        Assert.Equal(
+            """[{"volume_number":2,"start_year":2016,"issues":19,"comicvine_volume_id":88888,"name":"All-New X-Men","publisher":"Marvel","site_url":"https://comicvine.gamespot.com/volume/4050-88888/"},{"volume_number":null,"start_year":null,"issues":3,"comicvine_volume_id":null,"name":null,"publisher":null,"site_url":null}]""",
+            body["volumes"]!.ToString(Newtonsoft.Json.Formatting.None));
+        Assert.IsType<NotFoundObjectResult>((await CreateController().SeriesVolumes("nope", CancellationToken.None)).Result);
+    }
+
+    [Fact]
     public async Task StoryArc_ReturnsItsIssuesInOrder()
     {
         _details.Setup(d => d.GetStoryArcAsync(7, It.IsAny<CancellationToken>())).ReturnsAsync(new StoryArcReadingOrder(

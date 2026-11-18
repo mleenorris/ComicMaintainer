@@ -61,6 +61,9 @@ public class FileNameTitleTests
     [InlineData("The Hunt, Part 11", "Nightwing", "10", false)]
     [InlineData("Nightwing: Year One Part 3", "Nightwing", "10", false)]
     [InlineData("(2018)", "Nightwing", "10", false)]
+    [InlineData("1602", "Nightwing", "10", false)]
+    [InlineData("2099", "Nightwing", "10", false)]
+    [InlineData("52", "Nightwing", "10", false)]
     // A kind word naming another number is a label of this issue, not a file name.
     [InlineData("#Annual 2021", "Batman", "8", false)]
     [InlineData(null, "Nightwing", "10", false)]

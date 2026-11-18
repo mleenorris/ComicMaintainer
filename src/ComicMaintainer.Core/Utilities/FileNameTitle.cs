@@ -86,7 +86,10 @@ public static partial class FileNameTitle
         if (!SameNumber(parsed, expected))
         {
             // A kind word marks this issue ("#Annual 2021" on Annual #8): the title is a label to keep.
-            return holdsNothingElse && !KindWordPattern().IsMatch(title) ? FileNameKind.OtherIssue : FileNameKind.None;
+            // A bare number ("1602", "2099") is a story title: another issue's file name carries a marker.
+            return holdsNothingElse && FileNameMarkerPattern().IsMatch(title) && !KindWordPattern().IsMatch(title)
+                ? FileNameKind.OtherIssue
+                : FileNameKind.None;
         }
 
         var titleKey = Key(title);
@@ -265,6 +268,14 @@ public static partial class FileNameTitle
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
         1000)]
     private static partial Regex FileNamePartsPattern();
+
+    // What marks a number as part of a file name: "#", a bracketed part, a volume token, an issue
+    // word, or a leading zero ("003").
+    [GeneratedRegex(
+        @"#|[\(\[\{]|(?<!\p{L})v(?:ol(?:ume)?)?\.?\s*\d|(?<!\p{L})(?:z-?)?(?:issue|chapter|ch)(?!\p{L})|(?<![\p{L}\p{N}])0\d",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+        1000)]
+    private static partial Regex FileNameMarkerPattern();
 
     // A word naming a kind of issue (see IssueFormat): "Annual", "Special", "Giant".
     [GeneratedRegex(@"(?<!\p{L})(?:annual|special|giant)(?!\p{L})", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]

@@ -221,7 +221,7 @@ public partial class ComicProcessorService
 
         // A real chapter title counts as normalized; only a missing title or a stale
         // generated "Chapter <n>" one is rewritten, so a title alone never forces a rewrite.
-        var expectedTitle = NormalizedTitleFor(metadata.Title, expectedIssue);
+        var expectedTitle = NormalizedTitleFor(metadata, expectedIssue, await IsTitleLockedAsync(filePath, cancellationToken));
         _logger.LogDebug(
             "Checking title normalization for file: {FilePath}, Current metadata {title} Expected {expectedTitle}",
             LoggingHelper.SanitizePathForLog(filePath),
@@ -267,14 +267,25 @@ public partial class ComicProcessorService
         TimeSpan.FromSeconds(1));
 
     /// <summary>
-    /// The title normalize settles on. A real chapter title (what Suwayomi and most taggers write)
-    /// is kept. A missing title becomes "Chapter &lt;issue&gt;", and so does a generated
+    /// The title normalize settles on for <paramref name="metadata"/> with issue
+    /// <paramref name="issue"/>. A real chapter title (what Suwayomi and most taggers write) is
+    /// kept. A missing title becomes "Chapter &lt;issue&gt;", and so does a generated
     /// "Chapter &lt;n&gt;" title that no longer matches the issue number (for example
-    /// "Chapter 0012" or "Chapter Unknown" for issue 12).
+    /// "Chapter 0012" or "Chapter Unknown" for issue 12), and an old file name a tagger left as
+    /// the title (<c>v4 010 (2018)</c>, see <see cref="FileNameTitle.IsLeftoverFileName"/>): its
+    /// volume and cover year are read in the same normalize, and the generated title is a
+    /// placeholder ComicVine's issue title replaces. An old file name is kept when
+    /// <paramref name="titleLocked"/>: the user set the title by editing it.
     /// </summary>
-    private static string NormalizedTitleFor(string? title, string? issue)
+    private static string NormalizedTitleFor(ComicMetadata metadata, string? issue, bool titleLocked)
     {
+        var title = metadata.Title;
         if (string.IsNullOrWhiteSpace(title))
+        {
+            return CreateNormalizedTitle(issue);
+        }
+
+        if (!titleLocked && !string.IsNullOrEmpty(issue) && FileNameTitle.IsLeftoverFileName(title, metadata.Series, issue))
         {
             return CreateNormalizedTitle(issue);
         }
@@ -289,6 +300,14 @@ public partial class ComicProcessorService
 
         return title;
     }
+
+    /// <summary>
+    /// True when the user locked the file's title by editing it. The lock is kept in the database,
+    /// not in the archive, so it is read from the stored record.
+    /// </summary>
+    private async Task<bool> IsTitleLockedAsync(string filePath, CancellationToken cancellationToken)
+        => await GetTrackedFileAsync(filePath, cancellationToken) is { Metadata: { } stored }
+           && ((ComicMetadataFieldFlags)stored.UserLockedFieldsMask).HasFlag(ComicMetadataFieldFlags.Title);
 
     /// <summary>
     /// The history note for a write that succeeded without rewriting the archive, or null.
@@ -400,7 +419,7 @@ public partial class ComicProcessorService
         }
 
         metadata.Issue = parsedChapter;
-        metadata.Title = NormalizedTitleFor(metadata.Title, parsedChapter);
+        metadata.Title = NormalizedTitleFor(metadata, parsedChapter, titleLocked: true);
         return true;
     }
 
@@ -497,7 +516,7 @@ public partial class ComicProcessorService
         }
 
         // Keep a real chapter title; fill in a missing one and correct a stale generated one.
-        var normalizedTitle = NormalizedTitleFor(normalizedMetadata.Title, normalizedMetadata.Issue);
+        var normalizedTitle = NormalizedTitleFor(normalizedMetadata, normalizedMetadata.Issue, await IsTitleLockedAsync(filePath, cancellationToken));
         if (!string.Equals(normalizedTitle, normalizedMetadata.Title, StringComparison.Ordinal))
         {
             _logger.LogDebug("Setting title to standard format: {Title}", LoggingHelper.SanitizeForLog(normalizedTitle));

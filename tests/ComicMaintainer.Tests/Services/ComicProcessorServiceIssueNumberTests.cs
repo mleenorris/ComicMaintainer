@@ -312,7 +312,69 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
         var info = ReadComicInfo(archive);
         Assert.Equal("2", info.Element("Volume")?.Value);
         Assert.Equal("2016", info.Element("Year")?.Value);
-        Assert.Equal("All New X-Men v2 008 (2016)", info.Element("Title")?.Value);
+        // Its volume and year read, the old file name gives way to a generated title, a
+        // placeholder ComicVine's issue title replaces.
+        Assert.Equal("Chapter 8", info.Element("Title")?.Value);
+    }
+
+    [Theory]
+    // Old file names left as titles without the series, as found in a real library.
+    [InlineData("Nightwing", "10", "v4 010 (2018)", "4", "2018", "Nightwing Vol. 4 - Chapter 0010.cbz")]
+    [InlineData("House of M", "1", "v1 #1", "1", null, "House of M Vol. 1 - Chapter 0001.cbz")]
+    [InlineData("I Hate Fairyland", "1", "001 (2015)", null, "2015", "I Hate Fairyland - Chapter 0001.cbz")]
+    [InlineData("I Hate Fairyland", "4", "z-issue 004 (2016)", null, "2016", "I Hate Fairyland - Chapter 0004.cbz")]
+    [InlineData("I Hate Fairyland", "5", "#5 (2016)", null, "2016", "I Hate Fairyland - Chapter 0005.cbz")]
+    [InlineData("Batwoman", "0", "v1 000", "1", null, "Batwoman Vol. 1 - Chapter 0000.cbz")]
+    [InlineData("Batwoman", "3", "v2 003 (2014).", "2", "2014", "Batwoman Vol. 2 - Chapter 0003.cbz")]
+    [InlineData("Nightwing", "12.5", "v3 012.5 (2013)", "3", "2013", "Nightwing Vol. 3 - Chapter 0012.5.cbz")]
+    public async Task ProcessFileAsync_AnOldFileNameWithoutTheSeries_GivesItsVolumeYearAndTitle(
+        string series, string number, string title, string? volume, string? year, string expectedName)
+    {
+        var path = WriteArchive(series, $"{series} - Chapter x.cbz",
+            $"<ComicInfo><Series>{series}</Series><Number>{number}</Number><Title>{title}</Title><Year>1970</Year></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        var archive = Directory.GetFiles(Path.Join(_root, series)).Single();
+        Assert.Equal(expectedName, Path.GetFileName(archive));
+        var info = ReadComicInfo(archive);
+        Assert.Equal(volume, info.Element("Volume")?.Value);
+        Assert.Equal(year ?? "1970", info.Element("Year")?.Value);
+        Assert.Equal($"Chapter {number}", info.Element("Title")?.Value);
+    }
+
+    [Theory]
+    // A story title, one naming another issue, or one with words a file name would not hold, stays.
+    [InlineData("10", "The Hunt for Robin, Part 10")]
+    [InlineData("10", "v4 011 (2018)")]
+    [InlineData("3", "Vol. 2 003 (2023) Variant Edition")]
+    [InlineData("1", ".I Hate Image Special Edition (2020)")]
+    public async Task Normalize_ATitleThatIsNotAnOldFileName_IsKept(string number, string title)
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("Nightwing", "Nightwing - Chapter x.cbz",
+            $"<ComicInfo><Series>Nightwing</Series><Number>{number}</Number><Title>{title}</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        Assert.Equal(title, ReadComicInfo(path).Element("Title")?.Value);
+    }
+
+    [Fact]
+    public async Task Normalize_ALockedOldFileNameTitle_IsKept()
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("Nightwing", "Nightwing - Chapter x.cbz",
+            "<ComicInfo><Series>Nightwing</Series><Number>10</Number><Title>v4 010 (2018)</Title></ComicInfo>");
+        _fileStore.Setup(f => f.GetFileAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(new ComicFile
+        {
+            FilePath = path,
+            Metadata = new ComicMetadata { Title = "v4 010 (2018)", IsUserEdited = true, UserLockedFieldsMask = (long)ComicMetadataFieldFlags.Title }
+        });
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        Assert.Equal("v4 010 (2018)", ReadComicInfo(path).Element("Title")?.Value);
     }
 
     [Fact]

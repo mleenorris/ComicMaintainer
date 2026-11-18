@@ -109,7 +109,9 @@ and story arcs take a request per issue. A job asks for at most 250. Issues it d
 arcs from the **ComicVine Issue Details** scheduled job, which does the whole library a batch at a time once you turn it
 on. Its `maxRequests` option sets how many requests each run may use.
 
-The series page lists the story arcs its issues are part of, under the synopsis. Choose one to see the arc's reading
+The series page lists its volumes under the synopsis, each with its number or start year, how many issues you have,
+and a link to the ComicVine volume it is matched to, or "not linked to ComicVine yet". It also lists the story arcs its
+issues are part of. Choose one to see the arc's reading
 order across every series, as ComicVine lists it. Issues you have can be read from there, and the others are marked
 **Not in your library**. The arcs are also written into each file's `<StoryArc>`, which Komga and Kavita use to build
 reading lists.
@@ -126,8 +128,12 @@ The issue is matched to ComicVine as for issue details: through its series and i
 Annuals, Specials and Giant-Size issues are not matched yet. This needs a ComicVine API key.
 
 A file renamed before this version may have lost its volume from its name. If its `<Title>` still holds the old file
-name, such as `All New X-Men v2 008 (2016)`, the volume and cover year are read from there. A real story title is never
-read this way: the title has to start with the series name and contain the issue number.
+name, the volume and cover year are read from there, and the title is then replaced by the generated `Chapter 10`, which
+**Fetch Issue Details** replaces in turn with ComicVine's title. An old file name may start with the series, as in
+`All New X-Men v2 008 (2016)`, or not: taggers often left the name of a file inside a series folder, such as
+`v4 010 (2018)`, `v1 #1`, `001 (2015)` or `z-issue 004 (2016)`. A real story title is never read this way: the title has
+to contain the issue's own number, and either start with the series name or hold nothing else than a volume, issue words
+such as `#` or `Annual`, bracketed parts and punctuation. A title you set yourself is kept.
 
 Annuals keep "Annual" in their series, the way ComicVine names them. That means `<Series>Green Lantern Annual</Series>`
 with `<Number>1</Number>`, and an issue written as `Annual 1` becomes number `1`. A file is an Annual when its series

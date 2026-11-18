@@ -1597,6 +1597,17 @@
             font-size: 12px;
         }
 
+        /* The series' volumes and their ComicVine links, one per line. */
+        .series-volume-links {
+            margin-top: 6px;
+            font-size: 12px;
+        }
+
+        .series-volume-links ul {
+            margin: 2px 0 0;
+            padding-left: 18px;
+        }
+
         .series-detail-chip {
             padding: 2px 8px;
             border: 1px solid var(--border-input);

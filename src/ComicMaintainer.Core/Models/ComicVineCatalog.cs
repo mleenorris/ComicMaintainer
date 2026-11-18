@@ -61,6 +61,21 @@ public sealed record ComicVineDetailsRunSummary(
            (StoppedEarly ? "; the rest continue next run" : string.Empty) + ".";
 }
 
+/// <summary>
+/// One volume of a series as the library holds it, and the ComicVine volume it is linked to:
+/// <see cref="VolumeNumber"/> and <see cref="StartYear"/> are what its files say (0 when they do
+/// not say), <see cref="Issues"/> how many regular issues it has. The ComicVine fields are null
+/// when the volume is not linked yet, or ComicVine has no such volume.
+/// </summary>
+public sealed record SeriesVolumeLink(
+    int VolumeNumber,
+    int StartYear,
+    int Issues,
+    int? ComicVineVolumeId,
+    string? Name,
+    string? Publisher,
+    string? SiteUrl);
+
 /// <summary>A story arc some issues of a series are part of.</summary>
 public sealed record SeriesStoryArc(int Id, string Name, IReadOnlyList<string> FilePaths);
 

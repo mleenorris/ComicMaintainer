@@ -14,27 +14,37 @@ public static partial class FileNameTitle
     private const int MaxYear = 2199;
 
     /// <summary>
-    /// True when <paramref name="title"/> is a file name rather than a story title: it starts
-    /// with the series name (ignoring punctuation, case and the series' own volume or "Annual",
-    /// so <c>All New X-Men</c> matches <c>All-New X-Men</c>) and holds the issue number
-    /// (<c>008</c> for issue <c>8</c>).
+    /// True when <paramref name="title"/> is a file name rather than a story title: it holds the
+    /// issue number (<c>008</c> for issue <c>8</c>), and either starts with the series name
+    /// (ignoring punctuation, case and the series' own volume or "Annual", so <c>All New X-Men</c>
+    /// matches <c>All-New X-Men</c>) or holds nothing else a story title would: only a volume
+    /// token, issue words such as <c>Annual</c> or <c>#</c>, bracketed parts and punctuation.
+    /// Taggers often left the name of a file inside a series folder, without the series:
+    /// <c>v4 010 (2018)</c>, <c>v1 #1</c>, <c>001 (2015)</c>, <c>z-issue 001 (2016)</c>.
     /// </summary>
     public static bool IsLeftoverFileName(string? title, string? series, string? issue)
     {
-        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(series) || string.IsNullOrWhiteSpace(issue))
-        {
-            return false;
-        }
-
-        var seriesKey = Key(AnnualIssue.WithoutAnnual(ComicVolume.WithoutVolume(series)));
-        if (seriesKey.Length == 0 || !Key(title).StartsWith(seriesKey, StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(issue))
         {
             return false;
         }
 
         var parsed = IssueNumberParser.Parse(title);
         var expected = AnnualIssue.IssueNumber(issue);
-        return parsed is not null && expected is not null && SameNumber(parsed, expected);
+        if (parsed is null || expected is null || !SameNumber(parsed, expected))
+        {
+            return false;
+        }
+
+        var seriesKey = string.IsNullOrWhiteSpace(series)
+            ? string.Empty
+            : Key(AnnualIssue.WithoutAnnual(ComicVolume.WithoutVolume(series)));
+        if (seriesKey.Length > 0 && Key(title).StartsWith(seriesKey, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return !FileNamePartsPattern().Replace(title, " ").Any(char.IsLetter);
     }
 
     /// <summary>
@@ -124,6 +134,19 @@ public static partial class FileNameTitle
             ? year
             : null;
     }
+
+    // Everything a file name holds besides the series: bracketed parts ("(2018)", "(of 10)"),
+    // a volume token ("v4", "Vol. 2"), issue words ("#", "issue", "z-issue", "Annual",
+    // "Special", "Giant-Size"), numbers (a tie-in's "1.MU" too) and punctuation.
+    [GeneratedRegex(
+        @"[\(\[\{][^\)\]\}]*[\)\]\}]" +
+        @"|(?<!\p{L})v(?:ol(?:ume)?)?\.?\s*\d+" +
+        @"|(?<!\p{L})(?:z-?)?(?:issue|chapter|ch|annual|special|giant(?:[\s-]?size)?)(?!\p{L})" +
+        @"|\d+(?:\.\p{L}{1,4}(?![\p{L}\p{N}]))?" +
+        @"|[\p{P}\p{S}\s_]",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+        1000)]
+    private static partial Regex FileNamePartsPattern();
 
     private static string Key(string text)
         => new(text.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());

@@ -129,6 +129,8 @@ async function bootSeries({
             'GET /api/suwayomi/status': suwayomi,
             // The series page asks for the story arcs of its issues; none by default.
             [`GET /api/metadata/story-arcs/series/${encodeURIComponent(series.id)}`]: { arcs: [] },
+            // ...and its volumes' ComicVine links; none by default.
+            [`GET /api/metadata/volumes/series/${encodeURIComponent(series.id)}`]: { volumes: [] },
             ...routes
         },
         ...options

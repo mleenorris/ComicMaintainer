@@ -5,6 +5,23 @@ namespace ComicMaintainer.Tests.Utilities;
 public class FileNameTitleTests
 {
     [Theory]
+    [InlineData("v4 010 (2018)", "Nightwing", "10", true)]
+    [InlineData("v1 #1", "House of M", "1", true)]
+    [InlineData("001 (2015)", "I Hate Fairyland", "1", true)]
+    [InlineData("z-issue 001 (2016)", "I Hate Fairyland", "1", true)]
+    [InlineData("v2 .Annual 001 (2014)", "Batwoman", "1", true)]
+    [InlineData("0_(2011)", "Batwoman", "0", true)]
+    [InlineData("Issue #1", "Batwoman", "1", true)]
+    [InlineData("Soulfire Vol 1 03 (of 10) (2011)", "Michael Turner's Soulfire", "3", false)]
+    [InlineData("v4 010 (2018)", "Nightwing", "11", false)]
+    [InlineData("The Hunt, Part 10", "Nightwing", "10", false)]
+    [InlineData("v4 010 (2018)", null, "10", true)]
+    public void IsLeftoverFileName_ATitleWithoutTheSeries_IsAFileNameWhenItHoldsNothingElse(string title, string? series, string issue, bool expected)
+    {
+        Assert.Equal(expected, FileNameTitle.IsLeftoverFileName(title, series, issue));
+    }
+
+    [Theory]
     // A file name left in the title: the series (punctuation aside) and the issue number.
     [InlineData("All New X-Men v2 008 (2016)", "All-New X-Men", "8", true)]
     [InlineData("All-New X-Men 008", "All-New X-Men", "008", true)]

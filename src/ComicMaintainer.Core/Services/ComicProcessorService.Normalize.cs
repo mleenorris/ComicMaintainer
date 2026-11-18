@@ -278,9 +278,9 @@ public partial class ComicProcessorService
     /// kept. A missing title becomes "Chapter &lt;issue&gt;", and so does a generated
     /// "Chapter &lt;n&gt;" title that no longer matches the issue number (for example
     /// "Chapter 0012" or "Chapter Unknown" for issue 12), and an old file name a tagger left as
-    /// the title (<c>v4 010 (2018)</c>, see <see cref="FileNameTitle.IsLeftoverFileName"/>): its
-    /// volume and cover year are read in the same normalize, and the generated title is a
-    /// placeholder ComicVine's issue title replaces. An old file name is kept when
+    /// the title (<c>v4 010 (2018)</c>, see <see cref="FileNameTitle.IsFileName"/>), even one naming
+    /// another issue, as the tags are trusted over it: its volume and cover year are read in the
+    /// same normalize, and the generated title is a placeholder ComicVine's issue title replaces. An old file name is kept when
     /// <paramref name="titleLocked"/>: the user set the title by editing it.
     /// </summary>
     private static string NormalizedTitleFor(ComicMetadata metadata, string? issue, bool titleLocked)
@@ -291,7 +291,7 @@ public partial class ComicProcessorService
             return CreateNormalizedTitle(issue);
         }
 
-        if (!titleLocked && !string.IsNullOrEmpty(issue) && FileNameTitle.IsLeftoverFileName(title, metadata.Series, issue))
+        if (!titleLocked && !string.IsNullOrEmpty(issue) && FileNameTitle.IsFileName(title, metadata.Series, issue))
         {
             return CreateNormalizedTitle(issue);
         }
@@ -581,7 +581,9 @@ public partial class ComicProcessorService
     /// The volumes an issue's names give, in the order they are trusted: a year or volume token
     /// at the end of <paramref name="series"/>, then the file name (see
     /// <see cref="ComicVolume.FromFileName"/>), then a file name left in <paramref name="title"/>
-    /// (see <see cref="FileNameTitle"/>), then the folder name. Each source names a volume
+    /// (see <see cref="FileNameTitle.IsFileName"/>; a volume runs across its issues, so one naming
+    /// a neighbouring issue still gives it), then the folder name. They fill only an unset
+    /// <c>&lt;Volume&gt;</c>: a volume the tags hold is trusted over any name. Each source names a volume
     /// number (<c>v2</c>), a start year (<c>(2016)</c>) or nothing.
     /// </summary>
     internal static IEnumerable<ComicVolume> VolumesFromNames(string? series, string? title, string? issue, string filePath)
@@ -590,7 +592,7 @@ public partial class ComicProcessorService
         [
             ComicVolume.FromSeriesName(series),
             ComicVolume.FromFileName(Path.GetFileName(filePath)),
-            FileNameTitle.IsLeftoverFileName(title, series, issue) ? ComicVolume.FromFileNameStem(title) : null,
+            FileNameTitle.IsFileName(title, series, issue) ? ComicVolume.FromFileNameStem(title) : null,
             ComicVolume.FromSeriesName(Path.GetFileName(Path.GetDirectoryName(filePath)))
         ];
         return found.OfType<ComicVolume>();
@@ -610,7 +612,8 @@ public partial class ComicProcessorService
     /// <summary>
     /// The cover year normalize writes into an empty <c>&lt;Year&gt;</c>, or null: a bracketed
     /// year after the issue number in the file name (<c>Saga 001 (2012)</c>), else in a file name
-    /// left in the title (<c>All New X-Men v2 008 (2016)</c>); see <see cref="FileNameTitle.CoverYear"/>.
+    /// left in the title (<c>All New X-Men v2 008 (2016)</c>) that names this very issue (see
+    /// <see cref="TitleNamesThisIssue"/>); see <see cref="FileNameTitle.CoverYear"/>.
     /// A year before the issue number is the volume's start year and is never used: #12 of a 1995
     /// volume did not come out in 1995. A year already set is never replaced, except
     /// <see cref="UnknownYear"/>.
@@ -623,10 +626,31 @@ public partial class ComicProcessorService
         }
 
         var cover = FileNameTitle.CoverYear(Path.GetFileNameWithoutExtension(filePath))
-                    ?? (FileNameTitle.IsLeftoverFileName(metadata.Title, metadata.Series, metadata.Issue)
+                    ?? (TitleNamesThisIssue(metadata)
                         ? FileNameTitle.CoverYear(metadata.Title)
                         : null);
         return cover == metadata.Year ? null : cover;
+    }
+
+    /// <summary>
+    /// True when <paramref name="metadata"/>'s title is an old file name of this very issue: its
+    /// number is <c>&lt;Number&gt;</c> (see <see cref="FileNameTitle.IsLeftoverFileName"/>) and any
+    /// volume it names is the one <c>&lt;Volume&gt;</c> holds. A title that disagrees with the tags
+    /// is another issue's name (<c>v2 008 (2016)</c> on volume 1 is not this issue's), so nothing
+    /// that issue alone has, its cover year or tie-in suffix, is read from it: the tags are trusted.
+    /// </summary>
+    private static bool TitleNamesThisIssue(ComicMetadata metadata)
+    {
+        if (!FileNameTitle.IsLeftoverFileName(metadata.Title, metadata.Series, metadata.Issue))
+        {
+            return false;
+        }
+
+        return ComicVolume.FromTag(metadata.Volume) is not { } tagged
+               || IsVolumeUnset(metadata.Volume)
+               || ComicVolume.FromFileNameStem(metadata.Title!) is not { } named
+               || named.IsYear != tagged.IsYear
+               || named.Value == tagged.Value;
     }
 
     /// <summary>
@@ -652,7 +676,7 @@ public partial class ComicProcessorService
         string?[] names =
         [
             Path.GetFileNameWithoutExtension(filePath),
-            FileNameTitle.IsLeftoverFileName(metadata.Title, metadata.Series, metadata.Issue) ? metadata.Title : null
+            TitleNamesThisIssue(metadata) ? metadata.Title : null
         ];
         foreach (var name in names)
         {

@@ -22,6 +22,29 @@ public class FileNameTitleTests
     }
 
     [Theory]
+    // An old file name, of this issue or another.
+    [InlineData("v4 010 (2018)", "Nightwing", "10", true)]
+    [InlineData("v4 011 (2018)", "Nightwing", "10", true)]
+    [InlineData("Vol. 2 003 (2023)", "I Hate Fairyland", "2", true)]
+    [InlineData("All New X-Men v2 009 (2016)", "All-New X-Men", "8", true)]
+    // A story title is never one, whatever number it holds.
+    [InlineData("Vol. 2 003 (2023) Variant Edition", "I Hate Fairyland", "2", false)]
+    [InlineData("The Hunt, Part 11", "Nightwing", "10", false)]
+    [InlineData("Nightwing: Year One Part 3", "Nightwing", "10", false)]
+    [InlineData("(2018)", "Nightwing", "10", false)]
+    // A kind word naming another number is a label of this issue, not a file name.
+    [InlineData("#Annual 2021", "Batman", "8", false)]
+    [InlineData(null, "Nightwing", "10", false)]
+    public void IsFileName_TakesAnOldFileNameOfAnyIssue(string? title, string series, string issue, bool expected)
+    {
+        Assert.Equal(expected, FileNameTitle.IsFileName(title, series, issue));
+        if (expected)
+        {
+            Assert.Equal(title!.Contains($"{int.Parse(issue):000}", StringComparison.Ordinal), FileNameTitle.IsLeftoverFileName(title, series, issue));
+        }
+    }
+
+    [Theory]
     // A file name left in the title: the series (punctuation aside) and the issue number.
     [InlineData("All New X-Men v2 008 (2016)", "All-New X-Men", "8", true)]
     [InlineData("All-New X-Men 008", "All-New X-Men", "008", true)]

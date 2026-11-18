@@ -99,11 +99,11 @@ public static partial class ComicVineIssueFill
     /// <summary>
     /// True for a title that names nothing but the issue: none at all, a generated one
     /// (<c>Chapter 8</c>, <c>#8</c>, <c>Issue #8</c>, <c>v2 008 (2016)</c>), or an old file name
-    /// left by a tagger (see <see cref="FileNameTitle.IsLeftoverFileName"/>).
+    /// left by a tagger, of this issue or another (see <see cref="FileNameTitle.IsFileName"/>).
     /// </summary>
     public static bool IsPlaceholderTitle(string? title, string? series, string? issue)
     {
-        if (string.IsNullOrWhiteSpace(title) || FileNameTitle.IsLeftoverFileName(title, series, issue))
+        if (string.IsNullOrWhiteSpace(title) || FileNameTitle.IsFileName(title, series, issue))
         {
             return true;
         }

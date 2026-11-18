@@ -135,6 +135,12 @@ name, the volume and cover year are read from there, and the title is then repla
 to contain the issue's own number, and either start with the series name or hold nothing else than a volume, issue words
 such as `#` or `Annual`, bracketed parts and punctuation. A title you set yourself is kept.
 
+When an old file name in the title disagrees with the tags, the tags are trusted. A title `Vol. 2 003 (2023)` on a file
+whose `<Number>` is 2 names another issue, so the number stays 2, the title still becomes `Chapter 2`, and the year
+(2023, #3's cover year) is not read. Likewise a `<Volume>` already set is never changed by a title naming another
+volume, and that title's year is not read either. A volume runs across its issues, so such a title still fills an empty
+`<Volume>`.
+
 Annuals keep "Annual" in their series, the way ComicVine names them. That means `<Series>Green Lantern Annual</Series>`
 with `<Number>1</Number>`, and an issue written as `Annual 1` becomes number `1`. A file is an Annual when its series
 ends in "Annual", its number is written as one, its file name has "Annual" before the issue number (`Green Lantern

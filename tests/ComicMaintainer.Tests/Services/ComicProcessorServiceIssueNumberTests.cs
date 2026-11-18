@@ -344,9 +344,47 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     }
 
     [Theory]
-    // A story title, one naming another issue, or one with words a file name would not hold, stays.
+    // An old file name naming another issue: the tags are trusted. <Number> stays, the title
+    // becomes a placeholder, and the other issue's cover year is not read. A volume runs across
+    // its issues, so it fills an empty <Volume>; one already set is kept.
+    [InlineData("I Hate Fairyland", "2", null, "Vol. 2 003 (2023)", "2", "I Hate Fairyland Vol. 2 - Chapter 0002.cbz")]
+    [InlineData("Nightwing", "10", null, "v4 011 (2018)", "4", "Nightwing Vol. 4 - Chapter 0010.cbz")]
+    [InlineData("Nightwing", "10", "3", "v4 010 (2018)", "3", "Nightwing Vol. 3 - Chapter 0010.cbz")]
+    [InlineData("All-New X-Men", "8", "1", "All New X-Men v2 008 (2016)", "1", "All-New X-Men Vol. 1 - Chapter 0008.cbz")]
+    public async Task ProcessFileAsync_AnOldFileNameThatDisagreesWithTheTags_TrustsTheTags(
+        string series, string number, string? volume, string title, string expectedVolume, string expectedName)
+    {
+        var volumeTag = volume is null ? string.Empty : $"<Volume>{volume}</Volume>";
+        var path = WriteArchive(series, $"{series} - Chapter x.cbz",
+            $"<ComicInfo><Series>{series}</Series><Number>{number}</Number>{volumeTag}<Title>{title}</Title><Year>1970</Year></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        var archive = Directory.GetFiles(Path.Join(_root, series)).Single();
+        Assert.Equal(expectedName, Path.GetFileName(archive));
+        var info = ReadComicInfo(archive);
+        Assert.Equal(number, info.Element("Number")?.Value);
+        Assert.Equal(expectedVolume, info.Element("Volume")?.Value);
+        Assert.Equal("1970", info.Element("Year")?.Value);
+        Assert.Equal($"Chapter {number}", info.Element("Title")?.Value);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AnOldFileNameOfThisIssueAndVolume_StillGivesItsYear()
+    {
+        var path = WriteArchive("Nightwing", "Nightwing - Chapter x.cbz",
+            "<ComicInfo><Series>Nightwing</Series><Number>10</Number><Volume>4</Volume><Title>v4 010 (2018)</Title><Year>1970</Year></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        var info = ReadComicInfo(Directory.GetFiles(Path.Join(_root, "Nightwing")).Single());
+        Assert.Equal("4", info.Element("Volume")?.Value);
+        Assert.Equal("2018", info.Element("Year")?.Value);
+    }
+
+    [Theory]
+    // A story title, or one with words a file name would not hold, stays.
     [InlineData("10", "The Hunt for Robin, Part 10")]
-    [InlineData("10", "v4 011 (2018)")]
     [InlineData("3", "Vol. 2 003 (2023) Variant Edition")]
     [InlineData("1", ".I Hate Image Special Edition (2020)")]
     public async Task Normalize_ATitleThatIsNotAnOldFileName_IsKept(string number, string title)

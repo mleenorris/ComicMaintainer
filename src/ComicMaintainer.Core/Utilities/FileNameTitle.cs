@@ -23,10 +23,30 @@ public static partial class FileNameTitle
     /// <c>v4 010 (2018)</c>, <c>v1 #1</c>, <c>001 (2015)</c>, <c>z-issue 001 (2016)</c>.
     /// </summary>
     public static bool IsLeftoverFileName(string? title, string? series, string? issue)
+        => Classify(title, series, issue) == FileNameKind.ThisIssue;
+
+    /// <summary>
+    /// True when <paramref name="title"/> is an old file name, of this issue (see
+    /// <see cref="IsLeftoverFileName"/>) or of another: a title holding nothing a story title
+    /// would, after any series name (<c>Vol. 2 003 (2023)</c> on issue #2, <c>v4 011 (2018)</c> on
+    /// #10). Such a title is a placeholder either way. When it names another issue, the tags are
+    /// trusted over it: its cover year belongs to that other issue.
+    /// </summary>
+    public static bool IsFileName(string? title, string? series, string? issue)
+        => Classify(title, series, issue) != FileNameKind.None;
+
+    private enum FileNameKind
+    {
+        None,
+        ThisIssue,
+        OtherIssue
+    }
+
+    private static FileNameKind Classify(string? title, string? series, string? issue)
     {
         if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(issue))
         {
-            return false;
+            return FileNameKind.None;
         }
 
         // A tie-in's suffix ("001.MU") is compared by its number: the title is still the file's
@@ -35,20 +55,24 @@ public static partial class FileNameTitle
             ? suffixed.Number
             : IssueNumberParser.Parse(title);
         var expected = AnnualIssue.IssueNumber(issue);
-        if (parsed is null || expected is null || !SameNumber(parsed, expected))
+        if (parsed is null || expected is null)
         {
-            return false;
+            return FileNameKind.None;
+        }
+
+        var holdsNothingElse = !FileNamePartsPattern().Replace(AfterSeries(title, series), " ").Any(char.IsLetter);
+        if (!SameNumber(parsed, expected))
+        {
+            // A kind word marks this issue ("#Annual 2021" on Annual #8): the title is a label to keep.
+            return holdsNothingElse && !KindWordPattern().IsMatch(title) ? FileNameKind.OtherIssue : FileNameKind.None;
         }
 
         var seriesKey = string.IsNullOrWhiteSpace(series)
             ? string.Empty
             : Key(AnnualIssue.WithoutAnnual(ComicVolume.WithoutVolume(series)));
-        if (seriesKey.Length > 0 && Key(title).StartsWith(seriesKey, StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return !FileNamePartsPattern().Replace(title, " ").Any(char.IsLetter);
+        return (seriesKey.Length > 0 && Key(title).StartsWith(seriesKey, StringComparison.Ordinal)) || holdsNothingElse
+            ? FileNameKind.ThisIssue
+            : FileNameKind.None;
     }
 
     /// <summary>
@@ -151,6 +175,10 @@ public static partial class FileNameTitle
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
         1000)]
     private static partial Regex FileNamePartsPattern();
+
+    // A word naming a kind of issue (see IssueFormat): "Annual", "Special", "Giant".
+    [GeneratedRegex(@"(?<!\p{L})(?:annual|special|giant)(?!\p{L})", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex KindWordPattern();
 
     private static string Key(string text)
         => new(text.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());

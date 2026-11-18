@@ -110,7 +110,14 @@ arcs from the **ComicVine Issue Details** scheduled job, which does the whole li
 on. Its `maxRequests` option sets how many requests each run may use.
 
 The series page lists its volumes under the synopsis, each with its number or start year, how many issues you have,
-and a link to the ComicVine volume it is matched to, or "not linked to ComicVine yet". It also lists the story arcs its
+and a link to the ComicVine volume it is matched to, or "not linked to ComicVine yet".
+
+Each issue links to its ComicVine page too: **ComicVine** on its card, and **Open on ComicVine** in its menu. An issue
+filled by **Fetch Issue Details** links to the issue it was filled from. Another one links to the issue of its number
+in its volume's ComicVine listing; hover the link to see which. When the listing has no such issue, or the volume has
+not been listed yet, it links to the volume instead (**Volume on ComicVine**). An issue whose volume is not linked to
+ComicVine yet, or an Annual, Special or other kind with a numbering of its own, has no link. The links come from what was stored
+when issues were matched; showing them asks ComicVine nothing. It also lists the story arcs its
 issues are part of. Choose one to see the arc's reading
 order across every series, as ComicVine lists it. Issues you have can be read from there, and the others are marked
 **Not in your library**. The arcs are also written into each file's `<StoryArc>`, which Komga and Kavita use to build

@@ -233,6 +233,14 @@ move each file into that folder, directly in the watched folder. The folder is c
 2. Otherwise the name is split at ` - `. The last part that is only a number is the issue. If no part is only a number,
    it is the last number of the first part that has one.
 3. Anything in brackets, and volume tokens such as `Vol.1`, are ignored.
+4. A number may carry a letter suffix after a dot, as publishers number crossover tie-ins inside a series: Marvel's
+   Monsters Unleashed tie-in of All-New X-Men is #1.MU, and ComicVine lists it so. One to four letters are kept, so
+   `001.MU`, `1.NOW` or `12.INH` are not read as issue 1 or 12.
+
+A tie-in's file is named with its suffix (`All-New X-Men Vol. 2 - Chapter 0001.MU.cbz`), so it is not taken for a
+duplicate of #1. When `<Number>` holds only `1` but the file name, or an old file name left in the title, says `001.MU`,
+normalize writes `1.MU` into `<Number>`. A file already flagged as a duplicate of #1 is cleared by **Re-check
+Duplicates**.
 
 | File name | Issue |
 | --- | --- |
@@ -241,6 +249,7 @@ move each file into that folder, directly in the watched folder. The folder is c
 | `Mob Psycho 100 - 005` | 5 |
 | `Series 012 - Part 2` | 12 |
 | `Vol.1 Ch.12` | 12 |
+| `All New X-Men v2 001.MU (2017)` | 1.MU |
 | `Series (2023)` | None |
 
 ### How the series name is chosen

@@ -341,4 +341,15 @@ public class ComicFileProcessorTests
         Assert.NotNull(result);
         Assert.EndsWith(".cbz", result);
     }
+
+    [Theory]
+    [InlineData("1.MU", "All-New X-Men - Chapter 0001.MU.cbz")]
+    [InlineData("12.inh", "All-New X-Men - Chapter 0012.inh.cbz")]
+    public void FormatFilename_ATieInNumber_IsPaddedLikeAnyNumber(string issue, string expected)
+    {
+        var tags = new ComicInfo { Series = "All-New X-Men" };
+
+        Assert.Equal(expected, ComicFileProcessor.FormatFilename("{series} - Chapter {issue}", tags, issue));
+        Assert.Equal("1.MU", ComicFileProcessor.FormatFilename("{issue_no_pad}", tags, "1.MU", ".cbz").Replace(".cbz", string.Empty));
+    }
 }

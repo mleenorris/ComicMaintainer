@@ -403,6 +403,43 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessFileAsync_ATieInNamedInTheFileName_KeepsItsSuffix_AndIsNotIssue1()
+    {
+        // Marvel's Monsters Unleashed tie-in, numbered #1.MU inside All-New X-Men Vol. 2.
+        var issue1 = WriteArchive("All-New X-Men", "All New X-Men v2 001 (2016).cbz",
+            "<ComicInfo><Series>All-New X-Men</Series><Number>1</Number><Volume>2</Volume></ComicInfo>");
+        var tieIn = WriteArchive("All-New X-Men", "All New X-Men v2 001.MU (2017).cbz",
+            "<ComicInfo><Series>All-New X-Men</Series><Number>1</Number><Volume>2</Volume></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(issue1));
+        Assert.True(await _service.ProcessFileAsync(tieIn));
+
+        var folder = Path.Join(_root, "All-New X-Men");
+        Assert.True(File.Exists(Path.Join(folder, "All-New X-Men Vol. 2 - Chapter 0001.cbz")));
+        var renamed = Path.Join(folder, "All-New X-Men Vol. 2 - Chapter 0001.MU.cbz");
+        Assert.True(File.Exists(renamed), "the tie-in is named apart from issue #1");
+        Assert.Equal("1.MU", ReadComicInfo(renamed).Element("Number")?.Value);
+        _fileStore.Verify(f => f.MarkFileDuplicateAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    // Already renamed: only the old file name left in the title still says ".MU".
+    [InlineData("1", "All New X-Men v2 001.MU (2017)", "1.MU")]
+    // A title naming another number, or a story title, changes nothing.
+    [InlineData("2", "All New X-Men v2 001.MU (2017)", "2")]
+    [InlineData("1", "Monsters Unleashed", "1")]
+    public async Task Normalize_ATieInSuffixLeftInTheTitle_IsWrittenIntoNumber(string number, string title, string expected)
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("All-New X-Men", "All-New X-Men - Chapter 0001.cbz",
+            $"<ComicInfo><Series>All-New X-Men</Series><Number>{number}</Number><Title>{title}</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        Assert.Equal(expected, ReadComicInfo(path).Element("Number")?.Value);
+    }
+
+    [Fact]
     public async Task ProcessFileAsync_RenameOnly_StillNamesTheVolumeFromTheTitle()
     {
         _settings.WatcherEnableNormalize = false;

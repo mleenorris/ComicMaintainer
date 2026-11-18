@@ -29,7 +29,11 @@ public static partial class FileNameTitle
             return false;
         }
 
-        var parsed = IssueNumberParser.Parse(title);
+        // A tie-in's suffix ("001.MU") is compared by its number: the title is still the file's
+        // old name when <Number> holds the number alone.
+        var parsed = IssueNumberParser.SplitSuffix(IssueNumberParser.Parse(title)) is { } suffixed
+            ? suffixed.Number
+            : IssueNumberParser.Parse(title);
         var expected = AnnualIssue.IssueNumber(issue);
         if (parsed is null || expected is null || !SameNumber(parsed, expected))
         {

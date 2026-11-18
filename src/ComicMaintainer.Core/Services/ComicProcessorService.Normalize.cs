@@ -206,6 +206,12 @@ public partial class ComicProcessorService
             return false;
         }
 
+        // A tie-in's suffix the names give ("001.MU") still has to be written into <Number>.
+        if (IssueSuffixToFill(metadata, filePath) is not null)
+        {
+            return false;
+        }
+
         // The issue field must not be zero padded. If the stored <Number> is
         // padded (e.g. "0012"), the file is not normalized and should be
         // re-processed so both <Number> and <Title> become unpadded.
@@ -515,6 +521,14 @@ public partial class ComicProcessorService
             }
         }
 
+        // A tie-in numbered inside the series keeps its suffix: <Number>1</Number> with a file
+        // named "All New X-Men v2 001.MU" is Monsters Unleashed #1.MU, not issue #1.
+        if (IssueSuffixToFill(normalizedMetadata, filePath) is { } suffixedIssue)
+        {
+            _logger.LogDebug("Setting the tie-in's issue number from the file name or title: {Issue}", LoggingHelper.SanitizeForLog(suffixedIssue));
+            normalizedMetadata.Issue = suffixedIssue;
+        }
+
         // Keep a real chapter title; fill in a missing one and correct a stale generated one.
         var normalizedTitle = NormalizedTitleFor(normalizedMetadata, normalizedMetadata.Issue, await IsTitleLockedAsync(filePath, cancellationToken));
         if (!string.Equals(normalizedTitle, normalizedMetadata.Title, StringComparison.Ordinal))
@@ -621,6 +635,37 @@ public partial class ComicProcessorService
     /// unset when the file name gives a cover year, and keeps it otherwise.
     /// </summary>
     private const int UnknownYear = 1970;
+
+    /// <summary>
+    /// The issue number with a tie-in's letter suffix ("1.MU", see <see cref="IssueNumberParser"/>)
+    /// when <c>&lt;Number&gt;</c> holds only its number ("1") and the file name, or an old file name
+    /// left in the title, gives that number with a suffix; otherwise null. A number already
+    /// suffixed, or a different number, is never changed.
+    /// </summary>
+    private static string? IssueSuffixToFill(ComicMetadata metadata, string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(metadata.Issue) || IssueNumberParser.SplitSuffix(metadata.Issue) is not null)
+        {
+            return null;
+        }
+
+        string?[] names =
+        [
+            Path.GetFileNameWithoutExtension(filePath),
+            FileNameTitle.IsLeftoverFileName(metadata.Title, metadata.Series, metadata.Issue) ? metadata.Title : null
+        ];
+        foreach (var name in names)
+        {
+            if (IssueNumberParser.Parse(name) is { } parsed
+                && IssueNumberParser.SplitSuffix(parsed) is { } suffixed
+                && IssueNumberParser.AreEquivalent(suffixed.Number, metadata.Issue))
+            {
+                return parsed;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>The <c>&lt;Volume&gt;</c> normalize writes: a volume number, or null to remove the element.</summary>
     private readonly record struct VolumeWrite(string? Number);

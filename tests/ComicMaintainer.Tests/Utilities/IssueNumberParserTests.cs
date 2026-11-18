@@ -185,4 +185,44 @@ public class IssueNumberParserTests
     {
         Assert.Equal(expected, IssueNumberParser.StripLeadingZeros(input));
     }
+
+    [Theory]
+    // A tie-in numbered inside the series keeps its letter suffix: Monsters Unleashed #1.MU is not #1.
+    [InlineData("All New X-Men v2 001.MU (2017)", "1.MU")]
+    [InlineData("Avengers 001.NOW", "1.NOW")]
+    [InlineData("Uncanny X-Men 012.INH - Inhumans Attack", "12.INH")]
+    [InlineData("All-New X-Men #1.MU", "1.MU")]
+    [InlineData("Chapter 3.mu", "3.mu")]
+    // A decimal, a longer word or one glued to digits is not a suffix.
+    [InlineData("Series 012.5", "12.5")]
+    [InlineData("Series 001.MUTANT", "1")]
+    [InlineData("Series 001.part1", "1")]
+    public void Parse_ATieInSuffix_IsKept(string name, string expected)
+    {
+        Assert.Equal(expected, IssueNumberParser.Parse(name));
+    }
+
+    [Fact]
+    public void SplitSuffix_SeparatesTheNumberFromTheSuffix()
+    {
+        Assert.Equal(("1", "MU"), IssueNumberParser.SplitSuffix(" 1.MU "));
+        Assert.Null(IssueNumberParser.SplitSuffix("1"));
+        Assert.Null(IssueNumberParser.SplitSuffix("12.5"));
+        Assert.Null(IssueNumberParser.SplitSuffix(null));
+        Assert.Null(IssueNumberParser.SplitSuffix("Annual"));
+    }
+
+    [Fact]
+    public void AreEquivalent_ComparesASuffixWithoutRegardToCase_AndNeverToTheBareNumber()
+    {
+        Assert.True(IssueNumberParser.AreEquivalent("1.mu", "1.MU"));
+        Assert.False(IssueNumberParser.AreEquivalent("1.MU", "1"));
+    }
+
+    [Fact]
+    public void ContainsIssueNumber_FindsASuffixedNumber()
+    {
+        Assert.True(IssueNumberParser.ContainsIssueNumber("All-New X-Men Vol. 2 - Chapter 0001.MU", "1.MU"));
+        Assert.False(IssueNumberParser.ContainsIssueNumber("All-New X-Men Vol. 2 - Chapter 0001", "1.MU"));
+    }
 }

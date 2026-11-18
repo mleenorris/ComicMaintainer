@@ -299,7 +299,10 @@
                     entry.issues = Array.isArray(data.issues) ? data.issues : [];
                     // A list that replaced another may have changed (a job filled its issues):
                     // read their story arcs again.
-                    if (previous) seriesStoryArcsCache.delete(seriesId);
+                    if (previous) {
+                        seriesStoryArcsCache.delete(seriesId);
+                        seriesVolumeLinksCache.delete(seriesId);
+                    }
                     entry.total = typeof data.issue_count === 'number'
                         ? data.issue_count
                         : entry.issues.length;
@@ -1392,6 +1395,50 @@
 
         // The story arcs of a series, under its synopsis; asked for the first
         // time the series is shown (and after its issues reload).
+        // The series' volumes and the ComicVine volume each is linked to
+        // (GET /api/metadata/volumes/series/{id}), under the synopsis:
+        // "Vol. 2 (2016) · 19 issues · All-New X-Men on ComicVine". Read once
+        // per series, and again after its issues reload.
+        const seriesVolumeLinksCache = new Map();
+
+        function renderSeriesVolumeLinks(seriesId) {
+            const entry = seriesVolumeLinksCache.get(seriesId);
+            if (!entry) {
+                loadSeriesVolumeLinks(seriesId);
+                return '';
+            }
+            const volumes = entry.volumes || [];
+            if (!volumes.some(volume => volume.site_url)) return '';
+            const items = volumes.map(volume => {
+                const label = [volume.volume_number ? `Vol. ${Number(volume.volume_number)}` : '', volume.start_year ? `(${Number(volume.start_year)})` : '']
+                    .filter(Boolean).join(' ') || 'No volume';
+                const count = Number(volume.issues) || 0;
+                const head = `${escapeHtml(label)} · ${count} issue${count === 1 ? '' : 's'}`;
+                const link = seriesSiteLink(volume.site_url);
+                return link
+                    ? `<li>${head} · <a class="series-detail-link" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(volume.name || 'ComicVine')} on ComicVine</a>${volume.publisher ? ` (${escapeHtml(volume.publisher)})` : ''}</li>`
+                    : `<li>${head} · not linked to ComicVine yet</li>`;
+            }).join('');
+            return `<div class="series-volume-links"><span class="series-detail-meta">Volumes:</span><ul>${items}</ul></div>`;
+        }
+
+        async function loadSeriesVolumeLinks(seriesId) {
+            const entry = { loading: true };
+            seriesVolumeLinksCache.set(seriesId, entry);
+            let volumes = [];
+            try {
+                const data = await apiFetch(`/api/metadata/volumes/series/${encodeURIComponent(seriesId)}`);
+                volumes = Array.isArray(data.volumes) ? data.volumes : [];
+            } catch (error) {
+                // The volume links are extra: a series without them still shows.
+                if (!error.authHandled) console.warn('Could not load the volumes of the series:', error);
+            }
+            // Dropped when the issues reloaded meanwhile: that load asks again.
+            if (seriesVolumeLinksCache.get(seriesId) !== entry) return;
+            seriesVolumeLinksCache.set(seriesId, { volumes });
+            if (volumes.some(volume => volume.site_url) && currentSeriesDetailId === seriesId) renderSeriesDetail(seriesId);
+        }
+
         function renderSeriesStoryArcs(seriesId) {
             const entry = seriesStoryArcsCache.get(seriesId);
             if (!entry) {
@@ -1710,6 +1757,7 @@
                                 ${series.metadata_source ? html`<div class="series-detail-meta">Source: ${series.metadata_source}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
                                 ${rawHtml(renderSeriesDetails(series))}
                                 ${rawHtml(renderSeriesSynopsis(series))}
+                                ${rawHtml(renderSeriesVolumeLinks(series.id))}
                                 ${rawHtml(renderSeriesStoryArcs(series.id))}
                                 <div class="series-detail-actions">
                                     ${issues.length ? html`<button type="button" class="btn btn-small btn-primary" onclick="readComic('${jsArg(issues[0].file_path)}')">${uiIcon('book-open')} Read First Issue</button>` : ''}

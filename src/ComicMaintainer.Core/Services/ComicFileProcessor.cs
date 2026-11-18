@@ -143,6 +143,13 @@ public class ComicFileProcessor
                     issueNoPad = integerNoPad;
                 }
             }
+            else if (IssueNumberParser.SplitSuffix(issueStr) is { } suffixed
+                     && int.TryParse(suffixed.Number, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var suffixedNumber))
+            {
+                // A tie-in numbered inside the series ("1.MU") is padded like any number: "0001.MU".
+                issueFormatted = $"{suffixedNumber.ToString($"D{ClampIssueNumberPadding(padding)}", System.Globalization.CultureInfo.InvariantCulture)}.{suffixed.Suffix}";
+                issueNoPad = $"{suffixedNumber.ToString(System.Globalization.CultureInfo.InvariantCulture)}.{suffixed.Suffix}";
+            }
             else
             {
                 issueFormatted = issueNumber;

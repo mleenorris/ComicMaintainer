@@ -312,7 +312,175 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
         var info = ReadComicInfo(archive);
         Assert.Equal("2", info.Element("Volume")?.Value);
         Assert.Equal("2016", info.Element("Year")?.Value);
-        Assert.Equal("All New X-Men v2 008 (2016)", info.Element("Title")?.Value);
+        // Its volume and year read, the old file name gives way to a generated title, a
+        // placeholder ComicVine's issue title replaces.
+        Assert.Equal("Chapter 8", info.Element("Title")?.Value);
+    }
+
+    [Theory]
+    // Old file names left as titles without the series, as found in a real library.
+    [InlineData("Nightwing", "10", "v4 010 (2018)", "4", "2018", "Nightwing Vol. 4 - Chapter 0010.cbz")]
+    [InlineData("House of M", "1", "v1 #1", "1", null, "House of M Vol. 1 - Chapter 0001.cbz")]
+    [InlineData("I Hate Fairyland", "1", "001 (2015)", null, "2015", "I Hate Fairyland - Chapter 0001.cbz")]
+    [InlineData("I Hate Fairyland", "4", "z-issue 004 (2016)", null, "2016", "I Hate Fairyland - Chapter 0004.cbz")]
+    [InlineData("I Hate Fairyland", "5", "#5 (2016)", null, "2016", "I Hate Fairyland - Chapter 0005.cbz")]
+    [InlineData("Batwoman", "0", "v1 000", "1", null, "Batwoman Vol. 1 - Chapter 0000.cbz")]
+    [InlineData("Batwoman", "3", "v2 003 (2014).", "2", "2014", "Batwoman Vol. 2 - Chapter 0003.cbz")]
+    [InlineData("Nightwing", "12.5", "v3 012.5 (2013)", "3", "2013", "Nightwing Vol. 3 - Chapter 0012.5.cbz")]
+    public async Task ProcessFileAsync_AnOldFileNameWithoutTheSeries_GivesItsVolumeYearAndTitle(
+        string series, string number, string title, string? volume, string? year, string expectedName)
+    {
+        var path = WriteArchive(series, $"{series} - Chapter x.cbz",
+            $"<ComicInfo><Series>{series}</Series><Number>{number}</Number><Title>{title}</Title><Year>1970</Year></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        var archive = Directory.GetFiles(Path.Join(_root, series)).Single();
+        Assert.Equal(expectedName, Path.GetFileName(archive));
+        var info = ReadComicInfo(archive);
+        Assert.Equal(volume, info.Element("Volume")?.Value);
+        Assert.Equal(year ?? "1970", info.Element("Year")?.Value);
+        Assert.Equal($"Chapter {number}", info.Element("Title")?.Value);
+    }
+
+    [Theory]
+    // An old file name naming another issue: the tags are trusted. <Number> stays, the title
+    // becomes a placeholder, and the other issue's cover year is not read. A volume runs across
+    // its issues, so it fills an empty <Volume>; one already set is kept.
+    [InlineData("I Hate Fairyland", "2", null, "Vol. 2 003 (2023)", "2", "I Hate Fairyland Vol. 2 - Chapter 0002.cbz")]
+    [InlineData("Nightwing", "10", null, "v4 011 (2018)", "4", "Nightwing Vol. 4 - Chapter 0010.cbz")]
+    [InlineData("Nightwing", "10", "3", "v4 010 (2018)", "3", "Nightwing Vol. 3 - Chapter 0010.cbz")]
+    [InlineData("All-New X-Men", "8", "1", "All New X-Men v2 008 (2016)", "1", "All-New X-Men Vol. 1 - Chapter 0008.cbz")]
+    public async Task ProcessFileAsync_AnOldFileNameThatDisagreesWithTheTags_TrustsTheTags(
+        string series, string number, string? volume, string title, string expectedVolume, string expectedName)
+    {
+        var volumeTag = volume is null ? string.Empty : $"<Volume>{volume}</Volume>";
+        var path = WriteArchive(series, $"{series} - Chapter x.cbz",
+            $"<ComicInfo><Series>{series}</Series><Number>{number}</Number>{volumeTag}<Title>{title}</Title><Year>1970</Year></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        var archive = Directory.GetFiles(Path.Join(_root, series)).Single();
+        Assert.Equal(expectedName, Path.GetFileName(archive));
+        var info = ReadComicInfo(archive);
+        Assert.Equal(number, info.Element("Number")?.Value);
+        Assert.Equal(expectedVolume, info.Element("Volume")?.Value);
+        Assert.Equal("1970", info.Element("Year")?.Value);
+        Assert.Equal($"Chapter {number}", info.Element("Title")?.Value);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AnOldFileNameWithAShortenedSeriesName_GivesItsVolumeYearAndTitle()
+    {
+        const string series = "Michael Turner's Soulfire";
+        var path = WriteArchive(series, $"{series} - Chapter x.cbz",
+            $"<ComicInfo><Series>{series}</Series><Number>3</Number><Title>Soulfire Vol 1 03 (of 10) (2011)</Title><Year>1970</Year></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        var archive = Directory.GetFiles(Path.Join(_root, series)).Single();
+        Assert.Equal($"{series} Vol. 1 - Chapter 0003.cbz", Path.GetFileName(archive));
+        var info = ReadComicInfo(archive);
+        Assert.Equal("1", info.Element("Volume")?.Value);
+        Assert.Equal("2011", info.Element("Year")?.Value);
+        Assert.Equal("Chapter 3", info.Element("Title")?.Value);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AnOldFileNameWithAnAliasOfTheSeries_GivesItsVolumeYearAndTitle()
+    {
+        const string series = "The Amazing Spider-Man";
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "amazingspiderman",
+            CanonicalTitle = series,
+            ResolvedSeriesName = series,
+            Aliases = ["ASM"],
+            UserAliases = ["Amazing Spidey"]
+        };
+        var cache = new Mock<ISeriesMetadataCacheService>();
+        cache.Setup(c => c.GetByTitleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(record);
+        using var service = TestServices.CreateComicProcessor(
+            new TestOptionsMonitor<AppSettings>(_settings),
+            NullLogger<ComicProcessorService>.Instance,
+            _fileStore.Object,
+            Mock.Of<IProcessingHistoryService>(),
+            seriesMetadataCache: cache.Object);
+        var asm = WriteArchive(series, $"{series} - Chapter x.cbz",
+            $"<ComicInfo><Series>{series}</Series><Number>3</Number><Title>ASM v3 003 (2014)</Title><Year>1970</Year></ComicInfo>");
+
+        Assert.True(await service.ProcessFileAsync(asm, forceReprocess: true));
+
+        var info = ReadComicInfo(Directory.GetFiles(Path.Join(_root, series)).Single());
+        Assert.Equal("3", info.Element("Volume")?.Value);
+        Assert.Equal("2014", info.Element("Year")?.Value);
+        Assert.Equal("Chapter 3", info.Element("Title")?.Value);
+    }
+
+    [Fact]
+    public async Task Normalize_TheSeriesAliasesCannotBeRead_KeepsTheTitle()
+    {
+        _settings.WatcherEnableRename = false;
+        var cache = new Mock<ISeriesMetadataCacheService>();
+        cache.Setup(c => c.GetByTitleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("db down"));
+        using var service = TestServices.CreateComicProcessor(
+            new TestOptionsMonitor<AppSettings>(_settings),
+            NullLogger<ComicProcessorService>.Instance,
+            _fileStore.Object,
+            Mock.Of<IProcessingHistoryService>(),
+            seriesMetadataCache: cache.Object);
+        var path = WriteArchive("Batman", "Batman - Chapter x.cbz",
+            "<ComicInfo><Series>Batman</Series><Number>3</Number><Title>TDK 003 (2014)</Title></ComicInfo>");
+
+        await service.ProcessFileAsync(path, forceReprocess: true);
+
+        Assert.Equal("TDK 003 (2014)", ReadComicInfo(path).Element("Title")?.Value);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AnOldFileNameOfThisIssueAndVolume_StillGivesItsYear()
+    {
+        var path = WriteArchive("Nightwing", "Nightwing - Chapter x.cbz",
+            "<ComicInfo><Series>Nightwing</Series><Number>10</Number><Volume>4</Volume><Title>v4 010 (2018)</Title><Year>1970</Year></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        var info = ReadComicInfo(Directory.GetFiles(Path.Join(_root, "Nightwing")).Single());
+        Assert.Equal("4", info.Element("Volume")?.Value);
+        Assert.Equal("2018", info.Element("Year")?.Value);
+    }
+
+    [Theory]
+    // A story title, or one with words a file name would not hold, stays.
+    [InlineData("10", "The Hunt for Robin, Part 10")]
+    [InlineData("3", "Vol. 2 003 (2023) Variant Edition")]
+    [InlineData("1", ".I Hate Image Special Edition (2020)")]
+    public async Task Normalize_ATitleThatIsNotAnOldFileName_IsKept(string number, string title)
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("Nightwing", "Nightwing - Chapter x.cbz",
+            $"<ComicInfo><Series>Nightwing</Series><Number>{number}</Number><Title>{title}</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        Assert.Equal(title, ReadComicInfo(path).Element("Title")?.Value);
+    }
+
+    [Fact]
+    public async Task Normalize_ALockedOldFileNameTitle_IsKept()
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("Nightwing", "Nightwing - Chapter x.cbz",
+            "<ComicInfo><Series>Nightwing</Series><Number>10</Number><Title>v4 010 (2018)</Title></ComicInfo>");
+        _fileStore.Setup(f => f.GetFileAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(new ComicFile
+        {
+            FilePath = path,
+            Metadata = new ComicMetadata { Title = "v4 010 (2018)", IsUserEdited = true, UserLockedFieldsMask = (long)ComicMetadataFieldFlags.Title }
+        });
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        Assert.Equal("v4 010 (2018)", ReadComicInfo(path).Element("Title")?.Value);
     }
 
     [Fact]
@@ -338,6 +506,43 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
 
         Assert.Equal("1970", ReadComicInfo(path).Element("Year")?.Value);
         Assert.Equal(path, Directory.GetFiles(Path.Join(_root, "Saga")).Single());
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_ATieInNamedInTheFileName_KeepsItsSuffix_AndIsNotIssue1()
+    {
+        // Marvel's Monsters Unleashed tie-in, numbered #1.MU inside All-New X-Men Vol. 2.
+        var issue1 = WriteArchive("All-New X-Men", "All New X-Men v2 001 (2016).cbz",
+            "<ComicInfo><Series>All-New X-Men</Series><Number>1</Number><Volume>2</Volume></ComicInfo>");
+        var tieIn = WriteArchive("All-New X-Men", "All New X-Men v2 001.MU (2017).cbz",
+            "<ComicInfo><Series>All-New X-Men</Series><Number>1</Number><Volume>2</Volume></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(issue1));
+        Assert.True(await _service.ProcessFileAsync(tieIn));
+
+        var folder = Path.Join(_root, "All-New X-Men");
+        Assert.True(File.Exists(Path.Join(folder, "All-New X-Men Vol. 2 - Chapter 0001.cbz")));
+        var renamed = Path.Join(folder, "All-New X-Men Vol. 2 - Chapter 0001.MU.cbz");
+        Assert.True(File.Exists(renamed), "the tie-in is named apart from issue #1");
+        Assert.Equal("1.MU", ReadComicInfo(renamed).Element("Number")?.Value);
+        _fileStore.Verify(f => f.MarkFileDuplicateAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    // Already renamed: only the old file name left in the title still says ".MU".
+    [InlineData("1", "All New X-Men v2 001.MU (2017)", "1.MU")]
+    // A title naming another number, or a story title, changes nothing.
+    [InlineData("2", "All New X-Men v2 001.MU (2017)", "2")]
+    [InlineData("1", "Monsters Unleashed", "1")]
+    public async Task Normalize_ATieInSuffixLeftInTheTitle_IsWrittenIntoNumber(string number, string title, string expected)
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("All-New X-Men", "All-New X-Men - Chapter 0001.cbz",
+            $"<ComicInfo><Series>All-New X-Men</Series><Number>{number}</Number><Title>{title}</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        Assert.Equal(expected, ReadComicInfo(path).Element("Number")?.Value);
     }
 
     [Fact]

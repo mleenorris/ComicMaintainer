@@ -511,6 +511,57 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetVolumeLinksAsync_ListsEachVolumeWithItsComicVineLink()
+    {
+        AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");
+        AddFile("/c/Batman/Batman (2016) - Chapter 0002.cbz", "2");
+        AddFile("/c/Batman/Batman Vol. 1 - Chapter 0001.cbz", "1", volumeYear: null, volume: "1");
+        AddFile("/c/Batman/Batman (1999) - Chapter 0001.cbz", "1", volumeYear: 1999);
+        AddFile("/c/Batman/Batman - Chapter 0001.cbz", "1", volumeYear: null);
+        AddFile("/c/Batman/Batman Annual - Chapter 0001.cbz", "1", format: "Annual");
+        AddFile("/c/Batman/dup.cbz", "1", duplicate: true);
+        await using (var db = new ComicMaintainerDbContext(_options))
+        {
+            db.ComicVineVolumeLinks.AddRange(
+                new ComicVineVolumeLinkEntity { SeriesKey = "batman", StartYear = 2016, VolumeId = BatmanVolume, VolumeName = "Batman", Publisher = "DC Comics", LinkedUtc = DateTime.UtcNow },
+                new ComicVineVolumeLinkEntity { SeriesKey = "batman", VolumeNumber = 1, VolumeId = 796, VolumeName = "Batman", Publisher = "DC Comics", LinkedUtc = DateTime.UtcNow },
+                new ComicVineVolumeLinkEntity { SeriesKey = "batman", StartYear = 1999, VolumeId = null, LinkedUtc = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        _seriesCache.Setup(c => c.GetByTitleAsync("Batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord { CanonicalTitle = "Batman", Source = "ComicVine", SourceId = "42721", LookupStatus = "manual_match" });
+
+        var volumes = await CreateService().GetVolumeLinksAsync(_files.Select(f => f.FilePath).ToList());
+
+        // Volumes known by start year, oldest first, then by number, then the rest.
+        Assert.Equal(
+        [
+            new SeriesVolumeLink(0, 1999, 1, null, null, null, null),
+            new SeriesVolumeLink(0, 2016, 2, BatmanVolume, "Batman", "DC Comics", $"https://comicvine.gamespot.com/volume/4050-{BatmanVolume}/"),
+            new SeriesVolumeLink(1, 0, 1, 796, "Batman", "DC Comics", "https://comicvine.gamespot.com/volume/4050-796/"),
+            new SeriesVolumeLink(0, 0, 1, 42721, "Batman", null, "https://comicvine.gamespot.com/volume/4050-42721/"),
+        ], volumes);
+        Assert.Empty(await CreateService().GetVolumeLinksAsync(["/c/missing.cbz"]));
+    }
+
+    [Fact]
+    public async Task RunAsync_ATieInNumber_MatchesComicVinesTieIn_NotIssue1()
+    {
+        AddFile("/c/Batman/Batman (2016) - Chapter 0001.MU.cbz", "1.mu");
+        _client.Setup(c => c.ListVolumeIssuesAsync(BatmanVolume, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicVineResult<IReadOnlyList<ComicVineIssueSummary>>(
+            [
+                new ComicVineIssueSummary(101, "1", "I Am Gotham, Part One", "2016-08-01", null, null),
+                new ComicVineIssueSummary(150, "1.MU", "Monsters Unleashed", "2017-03-01", null, null),
+            ], 1));
+        _client.Setup(c => c.GetIssueDetailsAsync(150, It.IsAny<CancellationToken>())).ReturnsAsync(new ComicVineIssueDetails(150, [], []));
+
+        await CreateService().RunAsync(null, 20);
+
+        Assert.Equal("Monsters Unleashed", _writes.Single().Metadata.Title);
+    }
+
+    [Fact]
     public async Task GetStoryArcsAsync_GroupsTheFilesByArc()
     {
         AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");

@@ -109,7 +109,9 @@ and story arcs take a request per issue. A job asks for at most 250. Issues it d
 arcs from the **ComicVine Issue Details** scheduled job, which does the whole library a batch at a time once you turn it
 on. Its `maxRequests` option sets how many requests each run may use.
 
-The series page lists the story arcs its issues are part of, under the synopsis. Choose one to see the arc's reading
+The series page lists its volumes under the synopsis, each with its number or start year, how many issues you have,
+and a link to the ComicVine volume it is matched to, or "not linked to ComicVine yet". It also lists the story arcs its
+issues are part of. Choose one to see the arc's reading
 order across every series, as ComicVine lists it. Issues you have can be read from there, and the others are marked
 **Not in your library**. The arcs are also written into each file's `<StoryArc>`, which Komga and Kavita use to build
 reading lists.
@@ -126,8 +128,24 @@ The issue is matched to ComicVine as for issue details: through its series and i
 Annuals, Specials, Giant-Size issues and One-Shots are not matched yet. This needs a ComicVine API key.
 
 A file renamed before this version may have lost its volume from its name. If its `<Title>` still holds the old file
-name, such as `All New X-Men v2 008 (2016)`, the volume and cover year are read from there. A real story title is never
-read this way: the title has to start with the series name and contain the issue number.
+name, the volume and cover year are read from there, and the title is then replaced by the generated `Chapter 10`, which
+**Fetch Issue Details** replaces in turn with ComicVine's title. An old file name may start with the series, as in
+`All New X-Men v2 008 (2016)`, or not: taggers often left the name of a file inside a series folder, such as
+`v4 010 (2018)`, `v1 #1`, `001 (2015)` or `z-issue 004 (2016)`. A real story title is never read this way: the title has
+to contain the issue's own number, and either start with the series name or hold nothing else than a volume, issue words
+such as `#` or `Annual`, bracketed parts and punctuation. A title you set yourself is kept.
+
+The series name in an old file name may be shortened or different. A title whose first words all appear, in order, in
+the series name, followed only by the parts above, counts: `Soulfire Vol 1 03 (of 10)` under "Michael Turner's
+Soulfire", `Batman 003` under "Batman: The Dark Knight". So does a title that starts with one of the series' aliases:
+the ones ComicVine lists for the matched volume, and the ones you add to the series yourself (`ASM 003` under "The
+Amazing Spider-Man" with the alias `ASM`).
+
+When an old file name in the title disagrees with the tags, the tags are trusted. A title `Vol. 2 003 (2023)` on a file
+whose `<Number>` is 2 names another issue, so the number stays 2, the title still becomes `Chapter 2`, and the year
+(2023, #3's cover year) is not read. Likewise a `<Volume>` already set is never changed by a title naming another
+volume, and that title's year is not read either. A volume runs across its issues, so such a title still fills an empty
+`<Volume>`.
 
 Annuals keep "Annual" in their series, the way ComicVine names them. That means `<Series>Green Lantern Annual</Series>`
 with `<Number>1</Number>`, and an issue written as `Annual 1` becomes number `1`. A file is an Annual when its series
@@ -238,6 +256,14 @@ move each file into that folder, directly in the watched folder. The folder is c
 2. Otherwise the name is split at ` - `. The last part that is only a number is the issue. If no part is only a number,
    it is the last number of the first part that has one.
 3. Anything in brackets, and volume tokens such as `Vol.1`, are ignored.
+4. A number may carry a letter suffix after a dot, as publishers number crossover tie-ins inside a series: Marvel's
+   Monsters Unleashed tie-in of All-New X-Men is #1.MU, and ComicVine lists it so. One to four letters are kept, so
+   `001.MU`, `1.NOW` or `12.INH` are not read as issue 1 or 12.
+
+A tie-in's file is named with its suffix (`All-New X-Men Vol. 2 - Chapter 0001.MU.cbz`), so it is not taken for a
+duplicate of #1. When `<Number>` holds only `1` but the file name, or an old file name left in the title, says `001.MU`,
+normalize writes `1.MU` into `<Number>`. A file already flagged as a duplicate of #1 is cleared by **Re-check
+Duplicates**.
 
 | File name | Issue |
 | --- | --- |
@@ -246,6 +272,7 @@ move each file into that folder, directly in the watched folder. The folder is c
 | `Mob Psycho 100 - 005` | 5 |
 | `Series 012 - Part 2` | 12 |
 | `Vol.1 Ch.12` | 12 |
+| `All New X-Men v2 001.MU (2017)` | 1.MU |
 | `Series (2023)` | None |
 
 ### How the series name is chosen

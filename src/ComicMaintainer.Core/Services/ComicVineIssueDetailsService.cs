@@ -191,6 +191,79 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             .ToList();
     }
 
+    /// <summary>The page of a ComicVine volume; ComicVine finds a volume by its id alone.</summary>
+    internal static string VolumeSiteUrl(int volumeId)
+        => $"https://comicvine.gamespot.com/volume/4050-{volumeId.ToString(CultureInfo.InvariantCulture)}/";
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SeriesVolumeLink>> GetVolumeLinksAsync(
+        IReadOnlyCollection<string> filePaths,
+        CancellationToken cancellationToken = default)
+    {
+        // The regular issues of each volume (Annuals and Specials are volumes of their own on
+        // ComicVine, and are not matched), with a series name to find its link by.
+        var groups = new Dictionary<(string Key, int Year, int Number), (string Series, int Issues)>();
+        foreach (var file in await LoadFilesAsync(filePaths, cancellationToken))
+        {
+            var metadata = file.Metadata;
+            if (file.IsDuplicate || metadata is null || string.IsNullOrWhiteSpace(metadata.Series)
+                || IssueFormat.Of(metadata.Format, metadata.Series, metadata.Issue, file.FileName, metadata.Title) is not null)
+            {
+                continue;
+            }
+
+            var (startYear, volumeNumber) = Run.VolumeOf(metadata);
+            var key = (SeriesKey(metadata.Series), startYear, volumeNumber);
+            groups[key] = groups.TryGetValue(key, out var group) ? (group.Series, group.Issues + 1) : (metadata.Series, 1);
+        }
+
+        if (groups.Count == 0)
+        {
+            return [];
+        }
+
+        var seriesKeys = groups.Keys.Select(key => key.Key).Distinct().ToList();
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var links = (await db.ComicVineVolumeLinks.AsNoTracking()
+                .Where(link => seriesKeys.Contains(link.SeriesKey))
+                .ToListAsync(cancellationToken))
+            .ToDictionary(link => (link.SeriesKey, link.StartYear, link.VolumeNumber));
+
+        var result = new List<SeriesVolumeLink>();
+        foreach (var ((key, startYear, volumeNumber), (series, issues)) in groups)
+        {
+            links.TryGetValue((key, startYear, volumeNumber), out var link);
+            int? volumeId = link?.VolumeId;
+            var name = link?.VolumeName;
+            var publisher = link?.Publisher;
+            if (startYear == 0 && volumeNumber == 0
+                && await _seriesCache.GetByTitleAsync(series, cancellationToken) is { } record
+                && string.Equals(record.Source, "ComicVine", StringComparison.OrdinalIgnoreCase)
+                && record.LookupStatus is "success" or "manual_match"
+                && int.TryParse(record.SourceId, NumberStyles.None, CultureInfo.InvariantCulture, out var seriesVolume))
+            {
+                // Files that name neither belong to the series' own match, read afresh.
+                volumeId = seriesVolume;
+                name ??= record.CanonicalTitle;
+            }
+
+            result.Add(new SeriesVolumeLink(
+                volumeNumber,
+                startYear,
+                issues,
+                volumeId,
+                volumeId is null ? null : name,
+                volumeId is null ? null : publisher,
+                volumeId is { } id ? VolumeSiteUrl(id) : null));
+        }
+
+        return result
+            .OrderBy(volume => volume.VolumeNumber == 0 && volume.StartYear == 0 ? 1 : 0)
+            .ThenBy(volume => volume.StartYear == 0 ? int.MaxValue : volume.StartYear)
+            .ThenBy(volume => volume.VolumeNumber)
+            .ToList();
+    }
+
     /// <inheritdoc />
     public async Task<StoryArcReadingOrder?> GetStoryArcAsync(int storyArcId, CancellationToken cancellationToken = default)
     {
@@ -498,7 +571,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
         /// What names the file's volume: its start year, else its volume number (a year written in
         /// <c>&lt;Volume&gt;</c> counts as the start year); both 0 when it knows neither.
         /// </summary>
-        private static (int StartYear, int VolumeNumber) VolumeOf(ComicMetadata metadata)
+        internal static (int StartYear, int VolumeNumber) VolumeOf(ComicMetadata metadata)
         {
             if (metadata.VolumeYear is { } year && year > 0)
             {

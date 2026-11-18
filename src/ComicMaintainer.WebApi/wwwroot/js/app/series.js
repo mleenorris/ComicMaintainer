@@ -687,15 +687,15 @@
         }
 
         // The kind of issue with a numbering of its own ("Annual", "Special",
-        // "Giant-Size"), or '' for a regular issue.
+        // "Giant-Size", "One-Shot"), or '' for a regular issue.
         function issueKind(issue) {
             if (!issue) return '';
             return issue.format || (issue.annual ? 'Annual' : '');
         }
 
-        // Annuals, then Specials, then Giant-Size issues, as on the server
-        // (IssueFormat.Kinds); any other kind after them.
-        const ISSUE_KINDS = ['Annual', 'Special', 'Giant-Size'];
+        // Annuals, then Specials, then Giant-Size issues, then One-Shots, as on
+        // the server (IssueFormat.Kinds); any other kind after them.
+        const ISSUE_KINDS = ['Annual', 'Special', 'Giant-Size', 'One-Shot'];
         function kindOrder(kind) {
             const index = ISSUE_KINDS.indexOf(kind);
             return index === -1 ? ISSUE_KINDS.length : index;

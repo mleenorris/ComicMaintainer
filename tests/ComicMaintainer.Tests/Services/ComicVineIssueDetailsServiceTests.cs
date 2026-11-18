@@ -426,7 +426,7 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         _files.Add(new ComicFile { FilePath = "/c/e.cbz", FileName = "e.cbz" });
         var service = CreateService();
 
-        Assert.Equal("Annuals, Specials and Giant-Size issues are not matched to ComicVine yet", (await service.GetCoverCandidatesAsync("/c/a.cbz"))!.Reason);
+        Assert.Equal("Annuals, Specials, Giant-Size issues and One-Shots are not matched to ComicVine yet", (await service.GetCoverCandidatesAsync("/c/a.cbz"))!.Reason);
         Assert.Equal("ComicVine has no Batman volume that started in 2003", (await service.GetCoverCandidatesAsync("/c/b.cbz"))!.Reason);
         Assert.Equal("ComicVine's Batman has no issue #99; pick its cover from the others", (await service.GetCoverCandidatesAsync("/c/c.cbz"))!.Reason);
         Assert.Equal("ComicVine has no cover for this issue", (await service.GetCoverCandidatesAsync("/c/d.cbz"))!.Reason);

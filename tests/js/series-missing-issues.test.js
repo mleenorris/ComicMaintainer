@@ -295,6 +295,21 @@ test('Giant-Size issues get a section of their own after the Specials', async ()
     assert.equal(banner(page), null);
 });
 
+test('One-Shots get a section of their own after the Giant-Size issues', async () => {
+    const kindOf = (number, format) => issue(number, {
+        file_path: `/comics/X-Men/X-Men ${format} - Chapter ${number}.cbz`,
+        file_name: `X-Men ${format} - Chapter ${number}.cbz`,
+        format
+    });
+    const page = await bootSeries({ issues: [kindOf(1, 'One-Shot'), kindOf(1, 'Giant-Size'), issue(1)] });
+
+    assert.deepEqual(volumeLayout(page), [
+        '== Issues 1 issue', '#1',
+        '== Giant-Size 1 issue', '#1',
+        '== One-Shot 1 issue', '#1'
+    ]);
+});
+
 test('the Specials of a volume series are named after their volume', async () => {
     const specialOf = (number, year) => ({ ...volumeIssue(number, year), file_path: `/comics/Green Lantern/S${year} ${number}.cbz`, format: 'Special' });
     const page = await bootSeries({

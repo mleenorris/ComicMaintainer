@@ -61,9 +61,9 @@ public class ComicFileProcessor
     private static readonly Regex GeneratedTitlePattern =
         new(@"^\s*chapter(?:\s+\S+)?\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    /// <summary>A kind label starting a title, alone or before a separator: "Special – ", "Giant-Size: ".</summary>
+    /// <summary>A kind label starting a title, alone or before a separator: "Special – ", "Giant-Size: ", "One-Shot: ".</summary>
     private static readonly Regex KindLabelPattern =
-        new(@"^(?:annual|special|giant(?:[\s_-]*sized?)?)(?![\p{L}\p{N}])\s*(?:[-–—:]|$)",
+        new(@"^(?:annual|special|giant(?:[\s_-]*sized?)?|one[\s_-]*shot)(?![\p{L}\p{N}])\s*(?:[-–—:]|$)",
             RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     /// <summary>
@@ -290,9 +290,18 @@ public class ComicFileProcessor
         {
             title = WithoutTrailingWord(title, IssueFormat.Special);
         }
+        else if (kind is not null && !IssueFormat.Kinds.Contains(kind))
+        {
+            // A kind the user named: "Batman Rebirth" marked Rebirth is named "Batman Rebirth", once.
+            title = WithoutTrailingWord(title, kind);
+        }
         else if (kind == IssueFormat.GiantSize)
         {
-            title = GiantSizeIssue.WithoutGiantSize(title);
+            title = IssueKindName.GiantSize.Without(title);
+        }
+        else if (kind == IssueFormat.OneShot)
+        {
+            title = IssueKindName.OneShot.Without(title);
         }
 
         return (title, kind, volume, startYear);

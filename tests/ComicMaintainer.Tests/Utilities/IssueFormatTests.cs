@@ -12,12 +12,21 @@ public class IssueFormatTests
     [InlineData("giant", "Giant-Size")]
     [InlineData(" Giant Size ", "Giant-Size")]
     [InlineData("GIANT-SIZE", "Giant-Size")]
-    [InlineData("Giant Sized Annual", null)]
+    [InlineData("Giant Sized Annual", "Giant Sized Annual")]
+    [InlineData("One-Shot", "One-Shot")]
+    [InlineData("one shot", "One-Shot")]
+    [InlineData("ONESHOT", "One-Shot")]
+    // A kind the user names is kept as written...
+    [InlineData(" Rebirth ", "Rebirth")]
+    [InlineData("One-Shots", "One-Shots")]
+    // ...but the words describing an edition are regular issues.
     [InlineData("TPB", null)]
     [InlineData("Digital", null)]
+    [InlineData("limited series", null)]
+    [InlineData("Series", null)]
     [InlineData("", null)]
     [InlineData(null, null)]
-    public void FromFormat_NamesOnlyTheKindsWithTheirOwnNumbering(string? format, string? expected)
+    public void FromFormat_NamesTheKindsWithTheirOwnNumbering(string? format, string? expected)
     {
         Assert.Equal(expected, IssueFormat.FromFormat(format));
     }

@@ -21,6 +21,9 @@ public sealed class IssueKindWord
     /// <summary>"Special".</summary>
     public static IssueKindWord Special { get; } = new("special");
 
+    /// <summary>"One-Shot", "One Shot" or "Oneshot".</summary>
+    public static IssueKindWord OneShot { get; } = new(@"one[\s_-]*shot");
+
     // The word, then the issue number: "Giant 2025", "#Giant 2025 2", "Special_01".
     private readonly Regex _beforeNumber;
 

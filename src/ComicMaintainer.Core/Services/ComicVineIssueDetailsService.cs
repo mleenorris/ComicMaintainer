@@ -451,7 +451,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
 
             if (IssueFormat.Of(metadata.Format, metadata.Series, metadata.Issue, file.FileName, metadata.Title) is not null)
             {
-                return NoCovers("Annuals, Specials and Giant-Size issues are not matched to ComicVine yet");
+                return NoCovers("Annuals, Specials, Giant-Size issues and One-Shots are not matched to ComicVine yet");
             }
 
             var (startYear, volumeNumber) = VolumeOf(metadata);

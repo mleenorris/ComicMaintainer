@@ -186,6 +186,7 @@ public static partial class ComicVineIssueFill
 
     // Everything a placeholder title is made of: issue words, a volume token, numbers, a year in
     // brackets and punctuation.
-    [GeneratedRegex(@"\b(?:chapter|ch|issue|no|number|vol|volume|v\d+)\b|\d+|[\p{P}\p{S}_]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
+    // A tie-in's number ("Chapter 1.MU") goes whole, suffix and all.
+    [GeneratedRegex(@"\b(?:chapter|ch|issue|no|number|vol|volume|v\d+)\b|\d+\.\p{L}{1,4}(?![\p{L}\p{N}])|\d+|[\p{P}\p{S}_]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
     private static partial Regex IssueWordsPattern();
 }

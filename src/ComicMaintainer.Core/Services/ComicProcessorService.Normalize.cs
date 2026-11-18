@@ -206,8 +206,11 @@ public partial class ComicProcessorService
             return false;
         }
 
+        // Every name the series goes by, to recognise an old file name left in the title.
+        var seriesNames = await SeriesNamesForTitleAsync(metadata, expectedSeries, metadata.Issue, cancellationToken);
+
         // A tie-in's suffix the names give ("001.MU") still has to be written into <Number>.
-        if (IssueSuffixToFill(metadata, filePath) is not null)
+        if (IssueSuffixToFill(metadata, filePath, seriesNames) is not null)
         {
             return false;
         }
@@ -227,7 +230,7 @@ public partial class ComicProcessorService
 
         // A real chapter title counts as normalized; only a missing title or a stale
         // generated "Chapter <n>" one is rewritten, so a title alone never forces a rewrite.
-        var expectedTitle = NormalizedTitleFor(metadata, expectedIssue, await IsTitleLockedAsync(filePath, cancellationToken));
+        var expectedTitle = NormalizedTitleFor(metadata, expectedIssue, await IsTitleLockedAsync(filePath, cancellationToken), seriesNames);
         _logger.LogDebug(
             "Checking title normalization for file: {FilePath}, Current metadata {title} Expected {expectedTitle}",
             LoggingHelper.SanitizePathForLog(filePath),
@@ -239,9 +242,9 @@ public partial class ComicProcessorService
         }
 
         // A volume or cover year named by the series, file, title or folder name still has to be written.
-        if (VolumeToWrite(metadata, filePath) is not null
-            || VolumeYearToFill(metadata, filePath) is not null
-            || YearToFill(metadata, filePath) is not null)
+        if (VolumeToWrite(metadata, filePath, seriesNames) is not null
+            || VolumeYearToFill(metadata, filePath, seriesNames) is not null
+            || YearToFill(metadata, filePath, seriesNames) is not null)
         {
             return false;
         }
@@ -281,9 +284,10 @@ public partial class ComicProcessorService
     /// the title (<c>v4 010 (2018)</c>, see <see cref="FileNameTitle.IsFileName"/>), even one naming
     /// another issue, as the tags are trusted over it: its volume and cover year are read in the
     /// same normalize, and the generated title is a placeholder ComicVine's issue title replaces. An old file name is kept when
-    /// <paramref name="titleLocked"/>: the user set the title by editing it.
+    /// <paramref name="titleLocked"/>: the user set the title by editing it. The file name may
+    /// start with any of <paramref name="seriesNames"/> (see <see cref="SeriesNamesForTitleAsync"/>).
     /// </summary>
-    private static string NormalizedTitleFor(ComicMetadata metadata, string? issue, bool titleLocked)
+    private static string NormalizedTitleFor(ComicMetadata metadata, string? issue, bool titleLocked, IReadOnlyCollection<string?> seriesNames)
     {
         var title = metadata.Title;
         if (string.IsNullOrWhiteSpace(title))
@@ -291,7 +295,7 @@ public partial class ComicProcessorService
             return CreateNormalizedTitle(issue);
         }
 
-        if (!titleLocked && !string.IsNullOrEmpty(issue) && FileNameTitle.IsFileName(title, metadata.Series, issue))
+        if (!titleLocked && !string.IsNullOrEmpty(issue) && FileNameTitle.IsFileName(title, seriesNames, issue))
         {
             return CreateNormalizedTitle(issue);
         }
@@ -425,7 +429,7 @@ public partial class ComicProcessorService
         }
 
         metadata.Issue = parsedChapter;
-        metadata.Title = NormalizedTitleFor(metadata, parsedChapter, titleLocked: true);
+        metadata.Title = NormalizedTitleFor(metadata, parsedChapter, titleLocked: true, [metadata.Series]);
         return true;
     }
 
@@ -521,16 +525,19 @@ public partial class ComicProcessorService
             }
         }
 
+        // Every name the series goes by, to recognise an old file name left in the title.
+        var seriesNames = await SeriesNamesForTitleAsync(metadata, normalizedSeries, normalizedMetadata.Issue, cancellationToken);
+
         // A tie-in numbered inside the series keeps its suffix: <Number>1</Number> with a file
         // named "All New X-Men v2 001.MU" is Monsters Unleashed #1.MU, not issue #1.
-        if (IssueSuffixToFill(normalizedMetadata, filePath) is { } suffixedIssue)
+        if (IssueSuffixToFill(normalizedMetadata, filePath, seriesNames) is { } suffixedIssue)
         {
             _logger.LogDebug("Setting the tie-in's issue number from the file name or title: {Issue}", LoggingHelper.SanitizeForLog(suffixedIssue));
             normalizedMetadata.Issue = suffixedIssue;
         }
 
         // Keep a real chapter title; fill in a missing one and correct a stale generated one.
-        var normalizedTitle = NormalizedTitleFor(normalizedMetadata, normalizedMetadata.Issue, await IsTitleLockedAsync(filePath, cancellationToken));
+        var normalizedTitle = NormalizedTitleFor(normalizedMetadata, normalizedMetadata.Issue, await IsTitleLockedAsync(filePath, cancellationToken), seriesNames);
         if (!string.Equals(normalizedTitle, normalizedMetadata.Title, StringComparison.Ordinal))
         {
             _logger.LogDebug("Setting title to standard format: {Title}", LoggingHelper.SanitizeForLog(normalizedTitle));
@@ -539,19 +546,19 @@ public partial class ComicProcessorService
 
         // Read from the series as the file had it: resolving the series above may have
         // dropped its "(1995)".
-        if (VolumeToWrite(metadata, filePath) is { } volume)
+        if (VolumeToWrite(metadata, filePath, seriesNames) is { } volume)
         {
             _logger.LogDebug("Setting the volume number from the series, file, title or folder name: {Volume}", LoggingHelper.SanitizeForLog(volume.Number ?? "(none)"));
             normalizedMetadata.Volume = volume.Number;
         }
 
-        if (VolumeYearToFill(metadata, filePath) is { } volumeYear)
+        if (VolumeYearToFill(metadata, filePath, seriesNames) is { } volumeYear)
         {
             _logger.LogDebug("Storing the volume's start year: {VolumeYear}", volumeYear);
             normalizedMetadata.VolumeYear = volumeYear;
         }
 
-        if (YearToFill(metadata, filePath) is { } year)
+        if (YearToFill(metadata, filePath, seriesNames) is { } year)
         {
             _logger.LogDebug("Setting year from the cover date in the file name or title: {Year}", year);
             normalizedMetadata.Year = year;
@@ -587,12 +594,19 @@ public partial class ComicProcessorService
     /// number (<c>v2</c>), a start year (<c>(2016)</c>) or nothing.
     /// </summary>
     internal static IEnumerable<ComicVolume> VolumesFromNames(string? series, string? title, string? issue, string filePath)
+        => VolumesFromNames(series, title, issue, filePath, [series]);
+
+    /// <summary>
+    /// <see cref="VolumesFromNames(string?, string?, string?, string)"/>, with a file name in the
+    /// title recognised by any of <paramref name="seriesNames"/> (see <see cref="SeriesNamesForTitleAsync"/>).
+    /// </summary>
+    private static IEnumerable<ComicVolume> VolumesFromNames(string? series, string? title, string? issue, string filePath, IReadOnlyCollection<string?> seriesNames)
     {
         ComicVolume?[] found =
         [
             ComicVolume.FromSeriesName(series),
             ComicVolume.FromFileName(Path.GetFileName(filePath)),
-            FileNameTitle.IsFileName(title, series, issue) ? ComicVolume.FromFileNameStem(title) : null,
+            FileNameTitle.IsFileName(title, seriesNames, issue) ? ComicVolume.FromFileNameStem(title) : null,
             ComicVolume.FromSeriesName(Path.GetFileName(Path.GetDirectoryName(filePath)))
         ];
         return found.OfType<ComicVolume>();
@@ -618,7 +632,7 @@ public partial class ComicProcessorService
     /// volume did not come out in 1995. A year already set is never replaced, except
     /// <see cref="UnknownYear"/>.
     /// </summary>
-    private static int? YearToFill(ComicMetadata metadata, string filePath)
+    private static int? YearToFill(ComicMetadata metadata, string filePath, IReadOnlyCollection<string?> seriesNames)
     {
         if (metadata.Year is > 0 and not UnknownYear)
         {
@@ -626,7 +640,7 @@ public partial class ComicProcessorService
         }
 
         var cover = FileNameTitle.CoverYear(Path.GetFileNameWithoutExtension(filePath))
-                    ?? (TitleNamesThisIssue(metadata)
+                    ?? (TitleNamesThisIssue(metadata, seriesNames)
                         ? FileNameTitle.CoverYear(metadata.Title)
                         : null);
         return cover == metadata.Year ? null : cover;
@@ -639,9 +653,9 @@ public partial class ComicProcessorService
     /// is another issue's name (<c>v2 008 (2016)</c> on volume 1 is not this issue's), so nothing
     /// that issue alone has, its cover year or tie-in suffix, is read from it: the tags are trusted.
     /// </summary>
-    private static bool TitleNamesThisIssue(ComicMetadata metadata)
+    private static bool TitleNamesThisIssue(ComicMetadata metadata, IReadOnlyCollection<string?> seriesNames)
     {
-        if (!FileNameTitle.IsLeftoverFileName(metadata.Title, metadata.Series, metadata.Issue))
+        if (!FileNameTitle.IsLeftoverFileName(metadata.Title, seriesNames, metadata.Issue))
         {
             return false;
         }
@@ -666,7 +680,7 @@ public partial class ComicProcessorService
     /// left in the title, gives that number with a suffix; otherwise null. A number already
     /// suffixed, or a different number, is never changed.
     /// </summary>
-    private static string? IssueSuffixToFill(ComicMetadata metadata, string filePath)
+    private static string? IssueSuffixToFill(ComicMetadata metadata, string filePath, IReadOnlyCollection<string?> seriesNames)
     {
         if (string.IsNullOrWhiteSpace(metadata.Issue) || IssueNumberParser.SplitSuffix(metadata.Issue) is not null)
         {
@@ -676,7 +690,7 @@ public partial class ComicProcessorService
         string?[] names =
         [
             Path.GetFileNameWithoutExtension(filePath),
-            TitleNamesThisIssue(metadata) ? metadata.Title : null
+            TitleNamesThisIssue(metadata, seriesNames) ? metadata.Title : null
         ];
         foreach (var name in names)
         {
@@ -689,6 +703,43 @@ public partial class ComicProcessorService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The names an old file name left in the title may start with: the series as the file has
+    /// it, the name normalize resolves it to, and, from the series cache, its canonical title, the
+    /// name the user chose, and its ComicVine and user aliases (<c>ASM</c> for
+    /// <c>The Amazing Spider-Man</c>). The cache is read only when the first two do not already
+    /// make the title a file name, and a failed read leaves just those two.
+    /// </summary>
+    private async Task<IReadOnlyCollection<string?>> SeriesNamesForTitleAsync(
+        ComicMetadata metadata, string? resolvedSeries, string? issue, CancellationToken cancellationToken)
+    {
+        var names = new List<string?> { metadata.Series, resolvedSeries };
+        if (string.IsNullOrWhiteSpace(metadata.Title) || string.IsNullOrWhiteSpace(issue)
+            || FileNameTitle.IsFileName(metadata.Title, names, issue))
+        {
+            return names;
+        }
+
+        foreach (var series in new[] { metadata.Series, resolvedSeries }
+                     .Where(name => !string.IsNullOrWhiteSpace(name))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                if (await _seriesMetadataCache.GetByTitleAsync(series!, cancellationToken) is { } record)
+                {
+                    names.AddRange([record.CanonicalTitle, record.SeriesName, record.ResolvedSeriesName, .. record.Aliases, .. record.UserAliases]);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+            {
+                _logger.LogDebug(ex, "Could not read the aliases of series {Series}", LoggingHelper.SanitizeForLog(series));
+            }
+        }
+
+        return names;
     }
 
     /// <summary>The <c>&lt;Volume&gt;</c> normalize writes: a volume number, or null to remove the element.</summary>
@@ -706,7 +757,7 @@ public partial class ComicProcessorService
     /// <item>a number already set is never replaced.</item>
     /// </list>
     /// </summary>
-    private static VolumeWrite? VolumeToWrite(ComicMetadata metadata, string filePath)
+    private static VolumeWrite? VolumeToWrite(ComicMetadata metadata, string filePath, IReadOnlyCollection<string?> seriesNames)
     {
         var holdsYear = ComicVolume.FromTag(metadata.Volume) is { IsYear: true };
         if (!holdsYear && !IsVolumeUnset(metadata.Volume))
@@ -714,7 +765,7 @@ public partial class ComicProcessorService
             return null;
         }
 
-        var number = VolumesFromNames(metadata.Series, metadata.Title, metadata.Issue, filePath)
+        var number = VolumesFromNames(metadata.Series, metadata.Title, metadata.Issue, filePath, seriesNames)
             .Where(volume => !volume.IsYear)
             .Select(volume => volume.Value.ToString(System.Globalization.CultureInfo.InvariantCulture))
             .FirstOrDefault();
@@ -735,7 +786,7 @@ public partial class ComicProcessorService
     /// lost once normalize replaces the series with its resolved name. The start year never goes
     /// into <c>&lt;Year&gt;</c>: #12 of a 1995 volume did not come out in 1995 (see <see cref="YearToFill"/>).
     /// </summary>
-    private static int? VolumeYearToFill(ComicMetadata metadata, string filePath)
+    private static int? VolumeYearToFill(ComicMetadata metadata, string filePath, IReadOnlyCollection<string?> seriesNames)
     {
         if (metadata.VolumeYear is not null)
         {
@@ -747,7 +798,7 @@ public partial class ComicProcessorService
             return tagged.Value;
         }
 
-        return VolumesFromNames(metadata.Series, metadata.Title, metadata.Issue, filePath)
+        return VolumesFromNames(metadata.Series, metadata.Title, metadata.Issue, filePath, seriesNames)
             .Where(volume => volume.IsYear)
             .Select(volume => (int?)volume.Value)
             .FirstOrDefault();

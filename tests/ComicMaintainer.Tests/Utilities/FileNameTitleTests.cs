@@ -12,13 +12,42 @@ public class FileNameTitleTests
     [InlineData("v2 .Annual 001 (2014)", "Batwoman", "1", true)]
     [InlineData("0_(2011)", "Batwoman", "0", true)]
     [InlineData("Issue #1", "Batwoman", "1", true)]
-    [InlineData("Soulfire Vol 1 03 (of 10) (2011)", "Michael Turner's Soulfire", "3", false)]
+    [InlineData("Soulfire Vol 1 03 (of 10) (2011)", "Michael Turner's Soulfire", "3", true)]
     [InlineData("v4 010 (2018)", "Nightwing", "11", false)]
     [InlineData("The Hunt, Part 10", "Nightwing", "10", false)]
     [InlineData("v4 010 (2018)", null, "10", true)]
     public void IsLeftoverFileName_ATitleWithoutTheSeries_IsAFileNameWhenItHoldsNothingElse(string title, string? series, string issue, bool expected)
     {
         Assert.Equal(expected, FileNameTitle.IsLeftoverFileName(title, series, issue));
+    }
+
+    [Theory]
+    // A shortened series name: its words, in order, then nothing a story title would hold.
+    [InlineData("Soulfire Vol 1 03 (of 10) (2011)", "Michael Turner's Soulfire", "3", true)]
+    [InlineData("Turner's Soulfire 03", "Michael Turner's Soulfire", "3", true)]
+    [InlineData("Batman 003 (2016)", "Batman: The Dark Knight", "3", true)]
+    [InlineData("Dark Knight v1 003", "Batman: The Dark Knight", "3", true)]
+    // Words the series does not hold, out of order, or naming nothing, are not its name.
+    [InlineData("Soulfire Rising 03", "Michael Turner's Soulfire", "3", false)]
+    [InlineData("Soulfire Michael 03", "Michael Turner's Soulfire", "3", false)]
+    [InlineData("Spider-Man 003", "Batman", "3", false)]
+    [InlineData("The 003", "The Flash", "3", false)]
+    [InlineData("Soulfire: The Hunt, Part 3", "Michael Turner's Soulfire", "3", false)]
+    public void IsLeftoverFileName_AShortenedSeriesName_IsTheSeries(string title, string series, string issue, bool expected)
+    {
+        Assert.Equal(expected, FileNameTitle.IsLeftoverFileName(title, series, issue));
+    }
+
+    [Fact]
+    public void IsLeftoverFileName_AnAliasOfTheSeries_IsTheSeries()
+    {
+        string?[] names = ["The Amazing Spider-Man", null, "ASM", " "];
+
+        Assert.True(FileNameTitle.IsLeftoverFileName("ASM 003 (2014)", names, "3"));
+        Assert.True(FileNameTitle.IsLeftoverFileName("ASM Vol. 3 - The Hunt 003", names, "3"));
+        Assert.True(FileNameTitle.IsFileName("ASM 004 (2014)", names, "3"));
+        Assert.False(FileNameTitle.IsLeftoverFileName("ASM 003 (2014)", "The Amazing Spider-Man", "3"));
+        Assert.False(FileNameTitle.IsFileName("ASM: The Hunt, Part 4", names, "3"));
     }
 
     [Theory]

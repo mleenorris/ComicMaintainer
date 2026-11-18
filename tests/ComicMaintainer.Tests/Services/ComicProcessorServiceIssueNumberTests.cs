@@ -370,6 +370,74 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessFileAsync_AnOldFileNameWithAShortenedSeriesName_GivesItsVolumeYearAndTitle()
+    {
+        const string series = "Michael Turner's Soulfire";
+        var path = WriteArchive(series, $"{series} - Chapter x.cbz",
+            $"<ComicInfo><Series>{series}</Series><Number>3</Number><Title>Soulfire Vol 1 03 (of 10) (2011)</Title><Year>1970</Year></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        var archive = Directory.GetFiles(Path.Join(_root, series)).Single();
+        Assert.Equal($"{series} Vol. 1 - Chapter 0003.cbz", Path.GetFileName(archive));
+        var info = ReadComicInfo(archive);
+        Assert.Equal("1", info.Element("Volume")?.Value);
+        Assert.Equal("2011", info.Element("Year")?.Value);
+        Assert.Equal("Chapter 3", info.Element("Title")?.Value);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AnOldFileNameWithAnAliasOfTheSeries_GivesItsVolumeYearAndTitle()
+    {
+        const string series = "The Amazing Spider-Man";
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "amazingspiderman",
+            CanonicalTitle = series,
+            ResolvedSeriesName = series,
+            Aliases = ["ASM"],
+            UserAliases = ["Amazing Spidey"]
+        };
+        var cache = new Mock<ISeriesMetadataCacheService>();
+        cache.Setup(c => c.GetByTitleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(record);
+        using var service = TestServices.CreateComicProcessor(
+            new TestOptionsMonitor<AppSettings>(_settings),
+            NullLogger<ComicProcessorService>.Instance,
+            _fileStore.Object,
+            Mock.Of<IProcessingHistoryService>(),
+            seriesMetadataCache: cache.Object);
+        var asm = WriteArchive(series, $"{series} - Chapter x.cbz",
+            $"<ComicInfo><Series>{series}</Series><Number>3</Number><Title>ASM v3 003 (2014)</Title><Year>1970</Year></ComicInfo>");
+
+        Assert.True(await service.ProcessFileAsync(asm, forceReprocess: true));
+
+        var info = ReadComicInfo(Directory.GetFiles(Path.Join(_root, series)).Single());
+        Assert.Equal("3", info.Element("Volume")?.Value);
+        Assert.Equal("2014", info.Element("Year")?.Value);
+        Assert.Equal("Chapter 3", info.Element("Title")?.Value);
+    }
+
+    [Fact]
+    public async Task Normalize_TheSeriesAliasesCannotBeRead_KeepsTheTitle()
+    {
+        _settings.WatcherEnableRename = false;
+        var cache = new Mock<ISeriesMetadataCacheService>();
+        cache.Setup(c => c.GetByTitleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("db down"));
+        using var service = TestServices.CreateComicProcessor(
+            new TestOptionsMonitor<AppSettings>(_settings),
+            NullLogger<ComicProcessorService>.Instance,
+            _fileStore.Object,
+            Mock.Of<IProcessingHistoryService>(),
+            seriesMetadataCache: cache.Object);
+        var path = WriteArchive("Batman", "Batman - Chapter x.cbz",
+            "<ComicInfo><Series>Batman</Series><Number>3</Number><Title>TDK 003 (2014)</Title></ComicInfo>");
+
+        await service.ProcessFileAsync(path, forceReprocess: true);
+
+        Assert.Equal("TDK 003 (2014)", ReadComicInfo(path).Element("Title")?.Value);
+    }
+
+    [Fact]
     public async Task ProcessFileAsync_AnOldFileNameOfThisIssueAndVolume_StillGivesItsYear()
     {
         var path = WriteArchive("Nightwing", "Nightwing - Chapter x.cbz",

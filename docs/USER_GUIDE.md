@@ -135,6 +135,12 @@ name, the volume and cover year are read from there, and the title is then repla
 to contain the issue's own number, and either start with the series name or hold nothing else than a volume, issue words
 such as `#` or `Annual`, bracketed parts and punctuation. A title you set yourself is kept.
 
+The series name in an old file name may be shortened or different. A title whose first words all appear, in order, in
+the series name, followed only by the parts above, counts: `Soulfire Vol 1 03 (of 10)` under "Michael Turner's
+Soulfire", `Batman 003` under "Batman: The Dark Knight". So does a title that starts with one of the series' aliases:
+the ones ComicVine lists for the matched volume, and the ones you add to the series yourself (`ASM 003` under "The
+Amazing Spider-Man" with the alias `ASM`).
+
 When an old file name in the title disagrees with the tags, the tags are trusted. A title `Vol. 2 003 (2023)` on a file
 whose `<Number>` is 2 names another issue, so the number stays 2, the title still becomes `Chapter 2`, and the year
 (2023, #3's cover year) is not read. Likewise a `<Volume>` already set is never changed by a title naming another

@@ -77,6 +77,26 @@ public class ComicVineIssueFillTests
         Assert.Equal(new ProviderComicInfoFields(Web: "https://comicvine.example/batman-1"), plan.Fill);
     }
 
+    [Fact]
+    public void For_ReplacesWhatAnIssueOfTheWrongVolumeWrote()
+    {
+        // The file was filled from a collected edition before it was matched to its real volume.
+        var wrong = Issue(name: "All-New X-Men Vol. 1: Inevitable", coverDate: "2014-06-01", summary: "Collects issues 1-6.", writers: "Brian Michael Bendis");
+        var filled = Tags("All-New X-Men Vol. 1: Inevitable", 2014, "Collects issues 1-6.", 0, "Brian Michael Bendis");
+
+        var plan = ComicVineIssueFill.For(filled, Issue(), seriesSynopsis: null, previous: wrong);
+
+        Assert.Equal(
+            ComicMetadataFieldFlags.Title | ComicMetadataFieldFlags.Year | ComicMetadataFieldFlags.Summary | ComicMetadataFieldFlags.Authors,
+            plan.Fields);
+        Assert.Equal(("The Gotham Gambit", 2016, "Batman meets Gotham."), (plan.Metadata.Title, plan.Metadata.Year, plan.Metadata.Summary));
+        Assert.Equal(["Tom King"], plan.Metadata.Authors);
+
+        // What the user wrote since is kept.
+        var edited = Tags("A title of my own", 2015, "My summary", 0, "Someone Else");
+        Assert.Equal(ComicMetadataFieldFlags.None, ComicVineIssueFill.For(edited, Issue(), null, wrong).Fields);
+    }
+
     [Theory]
     [InlineData(null, true)]
     [InlineData("Chapter 8", true)]

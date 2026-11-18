@@ -440,6 +440,76 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         Assert.Contains("ComicVine", (await CreateService().GetCoverCandidatesAsync("/c/f.cbz"))!.Reason);
     }
 
+    private void SetUpAllNewXMen()
+    {
+        // Marvel's "All-New X-Men" on ComicVine: the 2013 volume (41 issues), a 4-issue listing of
+        // collected editions (2014) and the 2016 volume (19 issues).
+        _search.Setup(s => s.SearchVolumesAsync("All-New X-Men", It.IsAny<CancellationToken>())).ReturnsAsync(
+        [
+            new ExternalSeriesMetadata { CanonicalTitle = "All-New X-Men", StartYear = 2013, Publisher = "Marvel", SourceId = "53919", TotalChapters = 41 },
+            new ExternalSeriesMetadata { CanonicalTitle = "All-New X-Men", StartYear = 2014, Publisher = "Marvel", SourceId = "77305", TotalChapters = 4 },
+            new ExternalSeriesMetadata { CanonicalTitle = "All-New X-Men", StartYear = 2016, Publisher = "Marvel", SourceId = "88888", TotalChapters = 19 },
+        ]);
+        _client.Setup(c => c.ListVolumeIssuesAsync(77305, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicVineResult<IReadOnlyList<ComicVineIssueSummary>>(
+                Enumerable.Range(1, 4).Select(n => new ComicVineIssueSummary(7700 + n, n.ToString(), $"Collected Vol. {n}", "2014-06-01", null, null)).ToList(), 1));
+        _client.Setup(c => c.ListVolumeIssuesAsync(88888, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicVineResult<IReadOnlyList<ComicVineIssueSummary>>(
+                Enumerable.Range(1, 19).Select(n => new ComicVineIssueSummary(8800 + n, n.ToString(), $"Issue {n}", "2016-02-01", null, null)).ToList(), 1));
+        _client.Setup(c => c.GetIssueDetailsAsync(It.IsInRange(7700, 8900, Moq.Range.Inclusive), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int id, CancellationToken _) => new ComicVineIssueDetails(id, [], []));
+        for (var n = 1; n <= 19; n++)
+        {
+            AddFile($"/c/ANXM/All-New X-Men - Vol. 2 Chapter {n:0000}.cbz", n.ToString(), volumeYear: null, series: "All-New X-Men", volume: "2");
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_Vol2_SkipsAComicVineVolumeTooShortForTheIssuesHeld()
+    {
+        SetUpAllNewXMen();
+
+        var summary = await CreateService().RunAsync(null, 100);
+
+        Assert.Equal(19, summary.Filled);
+        Assert.Equal("Issue 5", _writes.Single(w => w.Path.EndsWith("0005.cbz")).Metadata.Title);
+        await using var db = new ComicMaintainerDbContext(_options);
+        Assert.Equal(88888, (await db.ComicVineVolumeLinks.SingleAsync()).VolumeId);
+    }
+
+    [Fact]
+    public async Task RunAsync_AVolumeStoredBeforeTooShortForTheIssuesHeld_IsFoundAgain_AndItsWritesReplaced()
+    {
+        SetUpAllNewXMen();
+        // Matched before this check: Vol. 2 linked to the 4-issue listing, and #1 filled from it.
+        await using (var db = new ComicMaintainerDbContext(_options))
+        {
+            db.ComicVineVolumeLinks.Add(new ComicVineVolumeLinkEntity { SeriesKey = "allnewxmen", VolumeNumber = 2, VolumeId = 77305, LinkedUtc = DateTime.UtcNow, IssuesListedUtc = DateTime.UtcNow });
+            db.ComicVineIssues.AddRange(Enumerable.Range(1, 4).Select(n => new ComicVineIssueEntity { Id = 7700 + n, VolumeId = 77305, IssueNumber = n.ToString(), Name = $"Collected Vol. {n}", ListedUtc = DateTime.UtcNow, DetailsUtc = DateTime.UtcNow }));
+            db.ComicVineFileStates.Add(new ComicVineFileStateEntity { FilePath = "/c/ANXM/All-New X-Men - Vol. 2 Chapter 0001.cbz", IssueId = 7701, AppliedUtc = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+        }
+
+        _files.Single(f => f.FilePath.EndsWith("0001.cbz")).Metadata!.Title = "Collected Vol. 1";
+
+        await CreateService().RunAsync(null, 100);
+
+        Assert.Equal("Issue 1", _writes.Single(w => w.Path.EndsWith("0001.cbz")).Metadata.Title);
+        await using var check = new ComicMaintainerDbContext(_options);
+        Assert.Equal(88888, (await check.ComicVineVolumeLinks.SingleAsync()).VolumeId);
+        Assert.Equal(8801, (await check.ComicVineFileStates.SingleAsync(s => s.FilePath.EndsWith("0001.cbz"))).IssueId);
+    }
+
+    [Fact]
+    public async Task GetCoverCandidatesAsync_Vol2_ListsTheCoversOfTheRightVolume()
+    {
+        SetUpAllNewXMen();
+
+        var candidates = await CreateService().GetCoverCandidatesAsync("/c/ANXM/All-New X-Men - Vol. 2 Chapter 0005.cbz");
+
+        Assert.Equal(88888, candidates!.VolumeId);
+    }
+
     [Fact]
     public async Task GetStoryArcsAsync_GroupsTheFilesByArc()
     {

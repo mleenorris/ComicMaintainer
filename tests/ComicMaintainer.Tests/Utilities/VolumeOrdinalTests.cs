@@ -83,6 +83,29 @@ public class VolumeOrdinalTests
         }
     }
 
+    // Marvel's "All-New X-Men" on ComicVine: the 2013 volume, a 4-issue listing of 2014 (collected
+    // editions) and the 2016 volume.
+    private static readonly ExternalSeriesMetadata[] AllNewXMen =
+    [
+        Volume("All-New X-Men", 2013, "Marvel", 41),
+        Volume("All-New X-Men", 2014, "Marvel", 4),
+        Volume("All-New X-Men", 2016, "Marvel", 19),
+    ];
+
+    [Theory]
+    // Without knowing the issues held, the 2014 listing counts as Vol. 2.
+    [InlineData(2, 0, 2014)]
+    // Holding issue #19 of Vol. 2 rules out a volume of 4 issues.
+    [InlineData(2, 19, 2016)]
+    [InlineData(2, 4, 2014)]
+    [InlineData(1, 41, 2013)]
+    // No volume is long enough.
+    [InlineData(2, 50, null)]
+    public void Numbered_SkipsAVolumeTooShortForTheIssuesHeld(int number, int highestIssueHeld, int? expectedYear)
+    {
+        Assert.Equal(expectedYear, VolumeOrdinal.Numbered(AllNewXMen, "All-New X-Men", number, highestIssueHeld: highestIssueHeld)?.StartYear);
+    }
+
     [Fact]
     public void Numbered_CountsThePublisherOfTheSeriesOwnMatch()
     {

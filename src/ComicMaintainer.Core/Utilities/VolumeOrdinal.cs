@@ -74,11 +74,19 @@ public static class VolumeOrdinal
     /// series' own ComicVine match) when it is among <paramref name="volumes"/>, otherwise the one
     /// with the most volumes of that name. Null when there are fewer volumes than the number.
     /// </summary>
+    /// <remarks>
+    /// ComicVine also lists, under the series' name, short volumes readers do not count, such as
+    /// a run of collected editions: Marvel's "All-New X-Men" of 2014 has 4 issues, between the
+    /// 2013 volume (41) and the 2016 one (19). A volume with fewer issues than
+    /// <paramref name="highestIssueHeld"/>, the highest issue number the library has of this
+    /// volume, cannot be it, so the next counted volume that can is taken instead.
+    /// </remarks>
     public static ExternalSeriesMetadata? Numbered(
         IEnumerable<ExternalSeriesMetadata> volumes,
         string title,
         int number,
-        string? knownVolumeId = null)
+        string? knownVolumeId = null,
+        int highestIssueHeld = 0)
     {
         var key = Key(title);
         if (number < 1 || key.Length == 0)
@@ -104,7 +112,9 @@ public static class VolumeOrdinal
             .OrderBy(volume => volume.StartYear)
             .ThenByDescending(volume => volume.TotalChapters ?? 0)
             .ToList();
-        return number <= counted.Count ? counted[number - 1] : null;
+        return counted
+            .Skip(number - 1)
+            .FirstOrDefault(volume => volume.TotalChapters is not { } issues || issues >= highestIssueHeld);
     }
 
     /// <summary>Letters and digits only, lower case, so "All-New X-Men" and "All New X-Men" compare equal.</summary>

@@ -33,10 +33,16 @@ public static partial class ComicVineIssueFill
     /// <paramref name="issue"/>. <paramref name="seriesSynopsis"/> is the synopsis the series'
     /// provider match gave, which may already sit in the file's Summary.
     /// </summary>
-    public static Plan For(ComicMetadata current, ComicVineIssueEntity issue, string? seriesSynopsis)
+    /// <remarks>
+    /// <paramref name="previous"/> is the ComicVine issue the file was filled from before, when
+    /// that was a different one (it was matched to the wrong volume): what it wrote counts as not
+    /// filled, so the right issue's details replace it.
+    /// </remarks>
+    public static Plan For(ComicMetadata current, ComicVineIssueEntity issue, string? seriesSynopsis, ComicVineIssueEntity? previous = null)
     {
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(issue);
+        var (previousYear, _) = CoverDate(previous?.CoverDate);
 
         var locked = (ComicMetadataFieldFlags)current.UserLockedFieldsMask;
         var update = new ComicMetadata();
@@ -44,7 +50,7 @@ public static partial class ComicVineIssueFill
 
         if (!locked.HasFlag(ComicMetadataFieldFlags.Title)
             && !string.IsNullOrWhiteSpace(issue.Name)
-            && IsPlaceholderTitle(current.Title, current.Series, current.Issue)
+            && (IsPlaceholderTitle(current.Title, current.Series, current.Issue) || WrittenBy(previous?.Name, current.Title))
             && !string.Equals(current.Title, issue.Name, StringComparison.Ordinal))
         {
             update.Title = issue.Name.Trim();
@@ -54,7 +60,7 @@ public static partial class ComicVineIssueFill
         var (year, month) = CoverDate(issue.CoverDate);
         if (!locked.HasFlag(ComicMetadataFieldFlags.Year)
             && year is { } coverYear
-            && current.Year is null or <= 0 or UnknownYear
+            && (current.Year is null or <= 0 or UnknownYear || (previousYear is not null && current.Year == previousYear))
             && current.Year != coverYear)
         {
             update.Year = coverYear;
@@ -64,7 +70,8 @@ public static partial class ComicVineIssueFill
         var summary = SynopsisTextNormalizer.ToComicInfoSummary(issue.Summary);
         if (!locked.HasFlag(ComicMetadataFieldFlags.Summary)
             && !string.IsNullOrWhiteSpace(summary)
-            && (string.IsNullOrWhiteSpace(current.Summary) || IsSeriesSynopsis(current.Summary, seriesSynopsis))
+            && (string.IsNullOrWhiteSpace(current.Summary) || IsSeriesSynopsis(current.Summary, seriesSynopsis)
+                || WrittenBy(SynopsisTextNormalizer.ToComicInfoSummary(previous?.Summary), current.Summary))
             && !string.Equals(current.Summary?.Trim(), summary.Trim(), StringComparison.Ordinal))
         {
             update.Summary = summary;
@@ -72,7 +79,10 @@ public static partial class ComicVineIssueFill
         }
 
         var writers = SplitList(issue.Writers);
-        if (!locked.HasFlag(ComicMetadataFieldFlags.Authors) && current.Authors.Count == 0 && writers.Count > 0)
+        var previousWriters = SplitList(previous?.Writers);
+        var authorsFromPrevious = previousWriters.Count > 0 && current.Authors.SequenceEqual(previousWriters, StringComparer.Ordinal);
+        if (!locked.HasFlag(ComicMetadataFieldFlags.Authors) && (current.Authors.Count == 0 || authorsFromPrevious) && writers.Count > 0
+            && !current.Authors.SequenceEqual(writers, StringComparer.Ordinal))
         {
             update.Authors = writers;
             fields |= ComicMetadataFieldFlags.Authors;
@@ -160,6 +170,10 @@ public static partial class ComicVineIssueFill
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>True when <paramref name="current"/> is exactly what an earlier issue wrote.</summary>
+    private static bool WrittenBy(string? written, string? current)
+        => !string.IsNullOrWhiteSpace(written) && string.Equals(written.Trim(), current?.Trim(), StringComparison.Ordinal);
 
     private static bool IsSeriesSynopsis(string summary, string? seriesSynopsis)
         => SynopsisTextNormalizer.ToComicInfoSummary(seriesSynopsis) is { Length: > 0 } synopsis

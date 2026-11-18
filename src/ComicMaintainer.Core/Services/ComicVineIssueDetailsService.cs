@@ -90,7 +90,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             ? (await _fileStore.GetAllFilesAsync(cancellationToken)).ToList()
             : await LoadFilesAsync(filePaths, cancellationToken);
 
-        var run = new Run(this, maxRequests, retryNotFound: false);
+        var run = new Run(this, maxRequests, retryNotFound: false) { LibraryFiles = files };
         await run.LoadAsync(cancellationToken);
         foreach (var file in files.OrderBy(f => f.FilePath, StringComparer.Ordinal))
         {
@@ -312,6 +312,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
         private readonly int[] _counts = new int[Enum.GetValues<Outcome>().Length];
         private readonly HashSet<int> _listedThisRun = new();
         private readonly HashSet<(string Key, int Year, int Number)> _searchedThisRun = new();
+        private Dictionary<(string Key, int Year, int Number), int>? _highestIssueHeld;
         private int _requests;
         private bool _stoppedEarly;
 
@@ -319,6 +320,9 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
 
         /// <summary>True for the cover picker: a volume whose stored issues have no covers is listed again.</summary>
         public bool ListForCovers { get; init; }
+
+        /// <summary>The library's files, when the run already has them; otherwise read when first needed.</summary>
+        public IReadOnlyCollection<ComicFile>? LibraryFiles { get; init; }
 
         public async Task LoadAsync(CancellationToken cancellationToken)
         {
@@ -415,7 +419,12 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 return (Outcome.Unchanged, null);
             }
 
-            var plan = ComicVineIssueFill.For(metadata, issue, synopsis);
+            // A file filled from another ComicVine issue before was matched to the wrong volume:
+            // what that issue wrote may be replaced.
+            var previous = state is not null && state.IssueId != issue.Id
+                ? await StoredIssueAsync(state.IssueId, cancellationToken)
+                : null;
+            var plan = ComicVineIssueFill.For(metadata, issue, synopsis, previous);
             var outcome = Outcome.Unchanged;
             if (!plan.IsEmpty)
             {
@@ -556,10 +565,23 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             }
             else
             {
+                // A volume found by its number is checked against the issues the library holds:
+                // one with fewer issues than that cannot be it (see VolumeOrdinal.Numbered), even
+                // when it was stored before this check existed.
+                var highestHeld = startYear == 0 ? await HighestIssueHeldAsync(key, cancellationToken) : 0;
+                var tooShort = link?.VolumeId is { } linkedVolume && highestHeld > 0
+                               && await HighestListedIssueAsync(linkedVolume, cancellationToken) is { } listed
+                               && listed < highestHeld;
                 if (link is not null
+                    && !tooShort
                     && (link.VolumeId is not null
                         || _searchedThisRun.Contains(key)
                         || (!retryNotFound && DateTime.UtcNow - link.LinkedUtc < NotFoundRetry)))
+                {
+                    return (link, false);
+                }
+
+                if (tooShort && _searchedThisRun.Contains(key))
                 {
                     return (link, false);
                 }
@@ -575,7 +597,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 _searchedThisRun.Add(key);
                 volume = startYear > 0
                     ? VolumeOrdinal.Suggest(volumes, title, startYear)?.Match
-                    : VolumeOrdinal.Numbered(volumes, title, volumeNumber, (await SeriesMatchAsync(series, cancellationToken))?.SourceId);
+                    : VolumeOrdinal.Numbered(volumes, title, volumeNumber, (await SeriesMatchAsync(series, cancellationToken))?.SourceId, highestHeld);
             }
 
             link ??= new ComicVineVolumeLinkEntity { SeriesKey = key.Item1, StartYear = startYear, VolumeNumber = volumeNumber };
@@ -598,6 +620,57 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             await db.SaveChangesAsync(cancellationToken);
             _links[key] = link;
             return (link, false);
+        }
+
+        /// <summary>
+        /// The highest whole issue number the library has of one series volume (regular issues,
+        /// not duplicates); 0 when it has none.
+        /// </summary>
+        private async Task<int> HighestIssueHeldAsync((string Key, int Year, int Number) key, CancellationToken cancellationToken)
+        {
+            if (_highestIssueHeld is null)
+            {
+                var files = LibraryFiles ?? (await owner._fileStore.GetAllFilesAsync(cancellationToken)).ToList();
+                _highestIssueHeld = new();
+                foreach (var file in files)
+                {
+                    var metadata = file.Metadata;
+                    if (file.IsDuplicate || metadata is null || string.IsNullOrWhiteSpace(metadata.Series)
+                        || !decimal.TryParse(metadata.Issue, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var number)
+                        || number < 1 || number > 100000
+                        || IssueFormat.Of(metadata.Format, metadata.Series, metadata.Issue, file.FileName, metadata.Title) is not null)
+                    {
+                        continue;
+                    }
+
+                    var (startYear, volumeNumber) = VolumeOf(metadata);
+                    var group = (SeriesKey(metadata.Series), startYear, volumeNumber);
+                    _highestIssueHeld[group] = Math.Max(_highestIssueHeld.GetValueOrDefault(group), (int)number);
+                }
+            }
+
+            return _highestIssueHeld.GetValueOrDefault(key);
+        }
+
+        private async Task<ComicVineIssueEntity?> StoredIssueAsync(int issueId, CancellationToken cancellationToken)
+        {
+            await using var db = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
+            return await db.ComicVineIssues.AsNoTracking().FirstOrDefaultAsync(issue => issue.Id == issueId, cancellationToken);
+        }
+
+        /// <summary>The highest whole issue number stored for a ComicVine volume; null when none is stored yet.</summary>
+        private async Task<int?> HighestListedIssueAsync(int volumeId, CancellationToken cancellationToken)
+        {
+            await using var db = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var numbers = await db.ComicVineIssues.AsNoTracking()
+                .Where(issue => issue.VolumeId == volumeId)
+                .Select(issue => issue.IssueNumber)
+                .ToListAsync(cancellationToken);
+            var parsed = numbers
+                .Select(text => decimal.TryParse(text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var n) ? (int?)n : null)
+                .Where(n => n is not null)
+                .ToList();
+            return parsed.Count == 0 ? null : parsed.Max();
         }
 
         /// <summary>The series' own ComicVine match, or null when its match is another provider's or there is none.</summary>

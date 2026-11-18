@@ -92,7 +92,10 @@ ComicVine knows each issue's title, cover date, summary, writers and story arcs.
 A field you changed yourself is never touched. Each issue is matched to a ComicVine volume through its series:
 
 - by the year its volume started, as for volume numbers;
-- else by its volume number: Vol. 2 is the publisher's second volume of that name, one-shots not counted;
+- else by its volume number: Vol. 2 is the publisher's second volume of that name, one-shots not counted. A volume
+  with fewer issues than the highest issue you have of that volume cannot be it and is passed over: ComicVine lists
+  Marvel's collected editions of All-New X-Men (4 issues) between its 2013 and 2016 volumes, and your Vol. 2 #19 shows
+  they are not Vol. 2;
 - else, when it knows neither, by the series' own ComicVine match. Matching the series to ComicVine takes effect the next
   time.
 

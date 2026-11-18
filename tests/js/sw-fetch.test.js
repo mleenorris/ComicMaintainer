@@ -552,6 +552,25 @@ test('an image cached in the last 10 minutes is served without asking the server
     assert.equal(await sw.caches.text(IMAGE_CACHE, OLDER), 'cover from the server');
 });
 
+test('a page that knows an image changed gets the server\'s copy, which replaces the cached one', async () => {
+    const sw = await installedWorker();
+    const recent = reply(200, 'old cover', { headers: { 'Content-Type': 'image/jpeg', Date: new Date().toUTCString() } });
+    await sw.caches.seed(IMAGE_CACHE, { [COVER]: recent });
+    sw.network.route('GET /api/ComicReader/cover', image('replaced cover'));
+
+    // A replaced cover is asked for with cache: 'reload' (refreshFileCover in series.js).
+    assert.equal(await (await sw.respond(COVER, { cache: 'reload' })).text(), 'replaced cover');
+    await sw.idle();
+    assert.equal(await sw.caches.text(IMAGE_CACHE, COVER), 'replaced cover');
+
+    // Every later view shows it.
+    assert.equal(await (await sw.respond(COVER)).text(), 'replaced cover');
+
+    // 'no-cache' bypasses the cached copy the same way.
+    sw.network.route('GET /api/ComicReader/cover', image('newer cover'));
+    assert.equal(await (await sw.respond(COVER, { cache: 'no-cache' })).text(), 'newer cover');
+});
+
 test('refreshing an image already cached does not trim the cache; storing a new one does', async () => {
     const sw = await installedWorker();
     const covers = {};

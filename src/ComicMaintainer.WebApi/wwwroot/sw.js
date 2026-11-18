@@ -694,11 +694,16 @@ function cacheKeyForRequest(request) {
 // outlasts the response, so it is passed to the fetch `event`'s waitUntil():
 // the browser may stop the worker once the response is delivered, cutting off
 // anything not passed to it.
+//
+// A page that knows the image changed (a cover it just replaced) asks with
+// `cache: 'reload'` or `'no-cache'`: that request gets the server's copy, which
+// replaces the cached one, so every later view shows the new image.
 async function serveImageFromCache(request, event) {
   const { cacheName, maxEntries } = imageCacheFor(request, new URL(request.url));
   const cache = await caches.open(cacheName);
   const cacheKey = cacheKeyForRequest(request);
-  const cached = await cache.match(cacheKey);
+  const reload = request.cache === 'reload' || request.cache === 'no-cache';
+  const cached = reload ? undefined : await cache.match(cacheKey);
 
   if (cached && isRecentlyFetched(cached)) {
     return cached;

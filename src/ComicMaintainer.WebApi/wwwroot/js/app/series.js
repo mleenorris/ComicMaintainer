@@ -1410,9 +1410,7 @@
                 return '';
             }
             const volumes = entry.volumes || [];
-            const worthShowing = volume => volume.site_url || volume.decision === 'review'
-                || listOf(volume.conflicts).length || listOf(volume.mixed_years).length;
-            if (!volumes.some(worthShowing)) return '';
+            if (!volumes.some(volumeWorthShowing)) return '';
             const items = volumes.map((volume, index) => {
                 const label = [volume.volume_number ? `Vol. ${Number(volume.volume_number)}` : '', volume.start_year ? `(${Number(volume.start_year)})` : '']
                     .filter(Boolean).join(' ') || 'No volume';
@@ -1426,10 +1424,12 @@
                 } else {
                     state = link
                         ? `<a class="series-detail-link" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(volume.name || 'ComicVine')} on ComicVine</a>${volume.publisher ? ` (${escapeHtml(volume.publisher)})` : ''}`
-                        : volume.decision === 'manual' ? 'no ComicVine volume, as you chose' : 'not linked to ComicVine yet';
+                        : volume.decision === 'manual' ? 'no ComicVine volume, as you chose'
+                            : volume.searched ? 'not found on ComicVine' : 'not linked to ComicVine yet';
                     if (volume.decision === 'manual') state += ' · your choice';
-                    if (listOf(volume.candidates).length > 1 || volume.decision === 'manual' || link) {
-                        state += ` <button type="button" class="btn btn-sm" data-requires-write onclick="openChooseVolumeModal(${index})">Change…</button>`;
+                    if (link || volume.searched || volume.decision || listOf(volume.candidates).length) {
+                        const label = link || volume.decision === 'manual' ? 'Change…' : 'Choose Volume…';
+                        state += ` <button type="button" class="btn btn-sm" data-requires-write onclick="openChooseVolumeModal(${index})">${label}</button>`;
                     }
                 }
                 const conflicts = listOf(volume.conflicts);
@@ -1510,6 +1510,13 @@
 
         function listOf(value) {
             return Array.isArray(value) ? value : [];
+        }
+
+        // A volume shown under the synopsis: linked, looked for on ComicVine, left for review, or with
+        // issues dated or filed wrongly. A series never looked for (no ComicVine) shows none.
+        function volumeWorthShowing(volume) {
+            return !!(volume.site_url || volume.searched || volume.decision || listOf(volume.candidates).length
+                || listOf(volume.conflicts).length || listOf(volume.mixed_years).length);
         }
 
         // "Choose Volume…": the ComicVine volumes weighed for a series volume, best first with
@@ -1600,7 +1607,12 @@
             try {
                 await apiFetch(`/api/metadata/volumes/series/${encodeURIComponent(current.seriesId)}/choose`, {
                     method: 'POST',
-                    body: { start_year: current.volume.start_year || 0, volume_number: current.volume.volume_number || 0, volume_id: volumeId },
+                    body: {
+                        series_key: current.volume.series_key || null,
+                        start_year: current.volume.start_year || 0,
+                        volume_number: current.volume.volume_number || 0,
+                        volume_id: volumeId
+                    },
                     errorMessage: 'Failed to choose the volume'
                 });
             } catch (error) {
@@ -1628,9 +1640,7 @@
             // Dropped when the issues reloaded meanwhile: that load asks again.
             if (seriesVolumeLinksCache.get(seriesId) !== entry) return;
             seriesVolumeLinksCache.set(seriesId, { volumes });
-            const worthShowing = volume => volume.site_url || volume.decision === 'review'
-                || listOf(volume.conflicts).length || listOf(volume.mixed_years).length;
-            if (volumes.some(worthShowing) && currentSeriesDetailId === seriesId) renderSeriesDetail(seriesId);
+            if (volumes.some(volumeWorthShowing) && currentSeriesDetailId === seriesId) renderSeriesDetail(seriesId);
         }
 
         function renderSeriesStoryArcs(seriesId) {

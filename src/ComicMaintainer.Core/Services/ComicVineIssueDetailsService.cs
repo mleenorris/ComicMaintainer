@@ -264,6 +264,8 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 volume.Id is { } id ? VolumeSiteUrl(id) : null)
             {
                 Decision = volume.Link?.Decision,
+                SeriesKey = key,
+                Searched = volume.Link is not null,
                 ReviewReason = volume.Link?.ReviewReason,
                 Candidates = ReadCandidates(volume.Link?.CandidatesJson),
                 Conflicts = conflicts.OrderBy(conflict => conflict.FilePath, StringComparer.Ordinal).ToList(),
@@ -279,45 +281,75 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
     }
 
     /// <inheritdoc />
-    public async Task<bool> ChooseVolumeAsync(
+    public async Task<ChooseVolumeOutcome> ChooseVolumeAsync(
         IReadOnlyCollection<string> filePaths,
+        string? seriesKey,
         int startYear,
         int volumeNumber,
         int? volumeId,
         CancellationToken cancellationToken = default)
     {
-        var groups = await VolumeGroupsAsync(filePaths, cancellationToken);
-        var group = groups.FirstOrDefault(entry => entry.Key.Year == startYear && entry.Key.Number == volumeNumber);
-        if (group.Value.Files is null || (volumeId is { } chosen && chosen <= 0))
+        var groups = (await VolumeGroupsAsync(filePaths, cancellationToken))
+            .Where(entry => entry.Key.Year == startYear && entry.Key.Number == volumeNumber
+                            && (seriesKey is null || entry.Key.Key == seriesKey))
+            .ToList();
+        if (groups.Count != 1 || (volumeId is { } invalid && invalid <= 0))
         {
-            return false;
+            return ChooseVolumeOutcome.NoSuchSeriesVolume;
         }
 
+        var key = groups[0].Key.Key;
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var link = await db.ComicVineVolumeLinks.FirstOrDefaultAsync(
-            entry => entry.SeriesKey == group.Key.Key && entry.StartYear == startYear && entry.VolumeNumber == volumeNumber,
+            entry => entry.SeriesKey == key && entry.StartYear == startYear && entry.VolumeNumber == volumeNumber,
             cancellationToken);
+
+        // A volume that was weighed keeps its name and publisher; another is checked on ComicVine
+        // and named from it (when ComicVine cannot be asked, it is kept unnamed).
+        string? name = null;
+        string? publisher = null;
+        if (volumeId is { } chosen)
+        {
+            var candidate = ReadCandidates(link?.CandidatesJson).FirstOrDefault(entry => entry.VolumeId == chosen);
+            (name, publisher) = (candidate?.Name, candidate?.Publisher);
+            if (candidate is null)
+            {
+                try
+                {
+                    var volume = await _volumeSearch.GetVolumeAsync(chosen, cancellationToken);
+                    if (volume is null && _client.IsConfigured)
+                    {
+                        return ChooseVolumeOutcome.NoSuchComicVineVolume;
+                    }
+
+                    (name, publisher) = (volume?.CanonicalTitle, volume?.Publisher);
+                }
+                catch (ExternalMetadataUnavailableException ex)
+                {
+                    _logger.LogInformation("ComicVine could not name volume {VolumeId}: {Reason}", chosen, LoggingHelper.SanitizeForLog(ex.Message));
+                }
+            }
+        }
+
         if (link is null)
         {
-            link = new ComicVineVolumeLinkEntity { SeriesKey = group.Key.Key, StartYear = startYear, VolumeNumber = volumeNumber };
+            link = new ComicVineVolumeLinkEntity { SeriesKey = key, StartYear = startYear, VolumeNumber = volumeNumber };
             db.ComicVineVolumeLinks.Add(link);
         }
 
-        // A volume that was weighed keeps its name and publisher; another one is named when listed.
-        var candidate = ReadCandidates(link.CandidatesJson).FirstOrDefault(entry => entry.VolumeId == volumeId);
         if (link.VolumeId != volumeId)
         {
             link.IssuesListedUtc = null;
         }
 
         link.VolumeId = volumeId;
-        link.VolumeName = volumeId is null ? null : Truncate(candidate?.Name, 512);
-        link.Publisher = volumeId is null ? null : Truncate(candidate?.Publisher, 256);
+        link.VolumeName = Truncate(name, 512);
+        link.Publisher = Truncate(publisher, 256);
         link.Decision = ComicVineVolumeDecision.Manual;
         link.ReviewReason = null;
         link.LinkedUtc = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
-        return true;
+        return ChooseVolumeOutcome.Chosen;
     }
 
     /// <summary>
@@ -396,13 +428,19 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
         }
     }
 
-    /// <summary>The weighed volumes as stored with a link: the best six, fewer when they do not fit the column.</summary>
+    /// <summary>
+    /// The weighed volumes as stored with a link: the fitting ones first, best first, six at most,
+    /// fewer when they do not fit the column.
+    /// </summary>
     private static string? WriteCandidates(IReadOnlyList<VolumeCandidate> ranked)
     {
-        for (var count = Math.Min(ranked.Count, 6); count > 0; count--)
+        var shown = ranked.Where(candidate => candidate.Identity >= VolumeEvidence.MinimumScore)
+            .Concat(ranked.Where(candidate => candidate.Identity < VolumeEvidence.MinimumScore))
+            .ToList();
+        for (var count = Math.Min(shown.Count, 6); count > 0; count--)
         {
             var json = JsonSerializer.Serialize(
-                ranked.Take(count).Select(candidate => new VolumeChoice(
+                shown.Take(count).Select(candidate => new VolumeChoice(
                     int.TryParse(candidate.Volume.SourceId, NumberStyles.None, CultureInfo.InvariantCulture, out var id) ? id : null,
                     candidate.Volume.CanonicalTitle,
                     candidate.Volume.StartYear,
@@ -685,6 +723,9 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
 
         // Names of the volumes of issues read by their id this run.
         private readonly Dictionary<int, string> _volumeNames = new();
+
+        // Issue listings read while weighing volumes, by volume, and whether each is complete.
+        private readonly Dictionary<int, (ComicVineResult<IReadOnlyList<ComicVineIssueSummary>> Listing, bool Complete)> _weighedListings = new();
         private readonly Dictionary<int, List<ComicVineIssueEntity>> _issuesByVolume = new();
         private readonly Dictionary<string, string?> _synopsisBySeries = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, ComicVineFileStateEntity> _states = new(StringComparer.Ordinal);
@@ -829,6 +870,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                     if (VolumeEvidence.KnownYear(metadata.Year) is { } heldYear
                         && VolumeEvidence.CoverYear(issue.CoverDate) is { } listedYear
                         && Math.Abs(listedYear - heldYear) > 1
+                        && state?.IssueId != issue.Id
                         && !(state is not null && VolumeEvidence.CoverYear((await StoredIssueAsync(state.IssueId, cancellationToken))?.CoverDate) == heldYear))
                     {
                         return (Outcome.NoIssue,
@@ -1142,26 +1184,18 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 return;
             }
 
-            var link = existing ?? new ComicVineVolumeLinkEntity { SeriesKey = key.Item1, StartYear = startYear, VolumeNumber = volumeNumber };
-            link.VolumeId = issue.VolumeId;
-            link.VolumeName = _volumeNames.GetValueOrDefault(issue.VolumeId);
-            link.Publisher = null;
-            link.Decision = ComicVineVolumeDecision.Tagged;
-            link.ReviewReason = null;
-            link.LinkedUtc = DateTime.UtcNow;
-            link.IssuesListedUtc = null;
-            await using var db = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
-            if (link.Id == 0)
-            {
-                db.ComicVineVolumeLinks.Add(link);
-            }
-            else
-            {
-                db.ComicVineVolumeLinks.Update(link);
-            }
-
-            await db.SaveChangesAsync(cancellationToken);
-            _links[key] = link;
+            await SaveLinkAsync(
+                new ComicVineVolumeLinkEntity
+                {
+                    SeriesKey = key.Item1,
+                    StartYear = startYear,
+                    VolumeNumber = volumeNumber,
+                    VolumeId = issue.VolumeId,
+                    VolumeName = _volumeNames.GetValueOrDefault(issue.VolumeId),
+                    LinkedUtc = DateTime.UtcNow,
+                    Decision = ComicVineVolumeDecision.Tagged,
+                },
+                cancellationToken);
         }
 
         private static CoverCandidates NoCovers(string reason) => new(null, null, null, reason, []);
@@ -1264,11 +1298,14 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 var tooShort = link?.VolumeId is { } linkedVolume && highestHeld > 0 && link.IssuesListedUtc is not null
                                && await HighestListedIssueAsync(linkedVolume, cancellationToken) is { } listed
                                && listed < highestHeld;
+                // A volume left for review waits for the user, or the retry period, even on a run the
+                // user started: weighing it again would cost the same and decide the same.
                 if (link is not null
                     && !tooShort
                     && (link.VolumeId is not null
                         || _searchedThisRun.Contains(key)
-                        || (!retryNotFound && DateTime.UtcNow - link.LinkedUtc < NotFoundRetry)))
+                        || ((!retryNotFound || link.Decision == ComicVineVolumeDecision.Review)
+                            && DateTime.UtcNow - link.LinkedUtc < NotFoundRetry)))
                 {
                     return (link, false);
                 }
@@ -1321,31 +1358,71 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 decision = choice is not null ? ComicVineVolumeDecision.Weighed : ambiguous ? ComicVineVolumeDecision.Review : null;
             }
 
-            link ??= new ComicVineVolumeLinkEntity { SeriesKey = key.Item1, StartYear = startYear, VolumeNumber = volumeNumber };
-            link.VolumeId = int.TryParse(volume?.SourceId, NumberStyles.None, CultureInfo.InvariantCulture, out var id) ? id : null;
-            link.VolumeName = Truncate(volume?.CanonicalTitle, 512);
-            link.Publisher = Truncate(volume?.Publisher, 256);
-            link.LinkedUtc = DateTime.UtcNow;
-            link.IssuesListedUtc = null;
-            link.Decision = decision;
-            link.CandidatesJson = ranked.Count > 0 ? WriteCandidates(ranked) : null;
-            link.ReviewReason = decision == ComicVineVolumeDecision.Review
-                ? $"{ranked.Count} ComicVine volumes named {title} fit about equally well"
-                : null;
+            var updated = new ComicVineVolumeLinkEntity
+            {
+                SeriesKey = key.Item1,
+                StartYear = startYear,
+                VolumeNumber = volumeNumber,
+                VolumeId = int.TryParse(volume?.SourceId, NumberStyles.None, CultureInfo.InvariantCulture, out var id) ? id : null,
+                VolumeName = Truncate(volume?.CanonicalTitle, 512),
+                Publisher = Truncate(volume?.Publisher, 256),
+                LinkedUtc = DateTime.UtcNow,
+                Decision = decision,
+                CandidatesJson = ranked.Count > 0 ? WriteCandidates(ranked) : null,
+                ReviewReason = decision == ComicVineVolumeDecision.Review
+                    ? $"{VolumeEvidence.CloseCalls(ranked)} ComicVine volumes named {title} fit about equally well"
+                    : null,
+            };
+            return (await SaveLinkAsync(updated, cancellationToken), false);
+        }
 
+        /// <summary>
+        /// Stores <paramref name="link"/> as its series volume's link, over the stored one, and returns
+        /// the link now stored. A choice the user made meanwhile is kept instead: this run's copy of
+        /// the links is from its start, and a job runs for a while. A link another run stored first
+        /// is taken as it is.
+        /// </summary>
+        private async Task<ComicVineVolumeLinkEntity> SaveLinkAsync(ComicVineVolumeLinkEntity link, CancellationToken cancellationToken)
+        {
+            var key = (link.SeriesKey, link.StartYear, link.VolumeNumber);
             await using var db = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
-            if (link.Id == 0)
+            var stored = await db.ComicVineVolumeLinks.FirstOrDefaultAsync(
+                entry => entry.SeriesKey == link.SeriesKey && entry.StartYear == link.StartYear && entry.VolumeNumber == link.VolumeNumber,
+                cancellationToken);
+            if (stored?.Decision == ComicVineVolumeDecision.Manual)
             {
-                db.ComicVineVolumeLinks.Add(link);
-            }
-            else
-            {
-                db.ComicVineVolumeLinks.Update(link);
+                _links[key] = stored;
+                return stored;
             }
 
-            await db.SaveChangesAsync(cancellationToken);
-            _links[key] = link;
-            return (link, false);
+            if (stored is null)
+            {
+                stored = new ComicVineVolumeLinkEntity { SeriesKey = link.SeriesKey, StartYear = link.StartYear, VolumeNumber = link.VolumeNumber };
+                db.ComicVineVolumeLinks.Add(stored);
+            }
+
+            stored.VolumeId = link.VolumeId;
+            stored.VolumeName = link.VolumeName;
+            stored.Publisher = link.Publisher;
+            stored.LinkedUtc = link.LinkedUtc;
+            stored.IssuesListedUtc = null;
+            stored.Decision = link.Decision;
+            stored.CandidatesJson = link.CandidatesJson;
+            stored.ReviewReason = link.ReviewReason;
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                await using var again = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
+                stored = await again.ComicVineVolumeLinks.AsNoTracking().FirstAsync(
+                    entry => entry.SeriesKey == link.SeriesKey && entry.StartYear == link.StartYear && entry.VolumeNumber == link.VolumeNumber,
+                    cancellationToken);
+            }
+
+            _links[key] = stored;
+            return stored;
         }
 
         /// <summary>
@@ -1430,15 +1507,24 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                     continue;
                 }
 
-                await using var db = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
-                var listed = await db.ComicVineIssues.AsNoTracking()
-                    .Where(issue => issue.VolumeId == volumeId)
-                    .Select(issue => new ListedIssue(issue.IssueNumber, issue.CoverDate, issue.Name))
-                    .ToListAsync(cancellationToken);
-                if (listed.Count == 0 && RequestsLeft > 0)
+                // Issues stored for a volume listed in full; a volume reached through a tag holds one.
+                List<ListedIssue> listed = [];
+                if (_links.Values.Any(link => link.VolumeId == volumeId && link.IssuesListedUtc is not null))
                 {
-                    var listing = await owner._client.ListVolumeIssuesAsync(volumeId, Math.Min(RequestsLeft, 2), cancellationToken);
+                    await using var db = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
+                    listed = await db.ComicVineIssues.AsNoTracking()
+                        .Where(issue => issue.VolumeId == volumeId)
+                        .Select(issue => new ListedIssue(issue.IssueNumber, issue.CoverDate, issue.Name))
+                        .ToListAsync(cancellationToken);
+                }
+
+                // A request is kept for listing the volume chosen; a listing read in full is kept for it.
+                if (listed.Count == 0 && RequestsLeft > 1)
+                {
+                    var budget = Math.Min(RequestsLeft - 1, 2);
+                    var listing = await owner._client.ListVolumeIssuesAsync(volumeId, budget, cancellationToken);
                     _requests += listing.Requests;
+                    _weighedListings[volumeId] = (listing, owner._client.IsConfigured && listing.Value.Count < listing.Requests * 100);
                     listed = listing.Value.Select(issue => new ListedIssue(issue.IssueNumber, issue.CoverDate, issue.Name)).ToList();
                 }
 
@@ -1495,24 +1581,36 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 return issues;
             }
 
-            if (RequestsLeft <= 0)
+            ComicVineResult<IReadOnlyList<ComicVineIssueSummary>> listing;
+            bool complete;
+            if (_weighedListings.Remove(volumeId, out var weighed) && weighed.Complete)
             {
-                _stoppedEarly = true;
-                return issues;
+                // Listed in full when the volume was weighed: no need to ask again.
+                listing = weighed.Listing;
+                complete = true;
+                _listedThisRun.Add(volumeId);
             }
-
-            var budget = RequestsLeft;
-            var listing = await owner._client.ListVolumeIssuesAsync(volumeId, budget, cancellationToken);
-            _requests += listing.Requests;
-            _listedThisRun.Add(volumeId);
-
-            // The list is complete only when ComicVine was asked and the last page was not cut
-            // off by the budget (a full last page with the budget used up means more pages exist).
-            var complete = owner._client.IsConfigured
-                           && !(listing.Requests >= budget && listing.Value.Count >= listing.Requests * 100);
-            if (!complete)
+            else
             {
-                _stoppedEarly = true;
+                if (RequestsLeft <= 0)
+                {
+                    _stoppedEarly = true;
+                    return issues;
+                }
+
+                var budget = RequestsLeft;
+                listing = await owner._client.ListVolumeIssuesAsync(volumeId, budget, cancellationToken);
+                _requests += listing.Requests;
+                _listedThisRun.Add(volumeId);
+
+                // The list is complete only when ComicVine was asked and the last page was not cut
+                // off by the budget (a full last page with the budget used up means more pages exist).
+                complete = owner._client.IsConfigured
+                           && !(listing.Requests >= budget && listing.Value.Count >= listing.Requests * 100);
+                if (!complete)
+                {
+                    _stoppedEarly = true;
+                }
             }
 
             var now = DateTime.UtcNow;
@@ -1554,15 +1652,19 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 }
             }
 
+            await db.SaveChangesAsync(cancellationToken);
+
             // An incomplete list is not stamped, so the next run lists the volume again; nor is a
-            // link that is not stored (a tagged Annual's volume).
+            // link that is not stored (a tagged Annual's volume). Only the listing date is written,
+            // and only while the link is still to this volume: the user may have chosen another.
             if (complete && link.Id != 0)
             {
                 link.IssuesListedUtc = now;
-                db.ComicVineVolumeLinks.Update(link);
+                await db.ComicVineVolumeLinks
+                    .Where(entry => entry.Id == link.Id && entry.VolumeId == volumeId)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(entry => entry.IssuesListedUtc, now), cancellationToken);
             }
 
-            await db.SaveChangesAsync(cancellationToken);
             return issues;
         }
 

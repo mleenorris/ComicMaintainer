@@ -496,6 +496,8 @@ public class MetadataController : ControllerBase
                 name = volume.Name,
                 publisher = volume.Publisher,
                 site_url = volume.SiteUrl,
+                series_key = volume.SeriesKey,
+                searched = volume.Searched,
                 decision = volume.Decision,
                 review_reason = volume.ReviewReason,
                 candidates = volume.Candidates.Select(candidate => new
@@ -522,10 +524,12 @@ public class MetadataController : ControllerBase
     }
 
     /// <summary>A volume of a series and the ComicVine volume the user chose for it.</summary>
+    /// <param name="SeriesKey">Which series' volume, on a series page that merges aliases; null when there is one.</param>
     /// <param name="StartYear">The volume's start year as its issues name it; null or 0 when they do not.</param>
     /// <param name="VolumeNumber">The volume number as its issues name it; null or 0 when they do not.</param>
     /// <param name="VolumeId">ComicVine's id of the chosen volume; null for none.</param>
     public sealed record ChooseVolumeRequest(
+        [property: System.Text.Json.Serialization.JsonPropertyName("series_key")] string? SeriesKey,
         [property: System.Text.Json.Serialization.JsonPropertyName("start_year")] int? StartYear,
         [property: System.Text.Json.Serialization.JsonPropertyName("volume_number")] int? VolumeNumber,
         [property: System.Text.Json.Serialization.JsonPropertyName("volume_id")] int? VolumeId);
@@ -533,7 +537,8 @@ public class MetadataController : ControllerBase
     /// <summary>
     /// Sets the ComicVine volume of one volume of series <paramref name="seriesId"/> as the user
     /// chose it (see <see cref="IComicVineIssueDetailsService.ChooseVolumeAsync"/>): never searched
-    /// for again. <c>404</c> for an unknown series or volume; <c>400</c> for a volume id below 1.
+    /// for again. <c>404</c> for an unknown series or volume; <c>400</c> for a volume id below 1, or
+    /// one ComicVine does not have.
     /// </summary>
     [HttpPost("volumes/series/{seriesId}/choose")]
     [FailureMessage("Error choosing the series volume's ComicVine volume")]
@@ -550,8 +555,13 @@ public class MetadataController : ControllerBase
             return NotFound(new { error = "Series not found" });
         }
 
-        var chosen = await _issueDetails.ChooseVolumeAsync(paths, request.StartYear ?? 0, request.VolumeNumber ?? 0, request.VolumeId, cancellationToken);
-        return chosen ? Ok(new { success = true }) : NotFound(new { error = "The series has no such volume" });
+        var outcome = await _issueDetails.ChooseVolumeAsync(paths, request.SeriesKey, request.StartYear ?? 0, request.VolumeNumber ?? 0, request.VolumeId, cancellationToken);
+        return outcome switch
+        {
+            ChooseVolumeOutcome.Chosen => Ok(new { success = true }),
+            ChooseVolumeOutcome.NoSuchComicVineVolume => BadRequest(new { error = $"ComicVine has no volume {request.VolumeId}" }),
+            _ => NotFound(new { error = "The series has no such volume" }),
+        };
     }
 
     /// <summary>

@@ -88,9 +88,17 @@ public static class VolumeEvidence
         var numbered = volumeNumber > 0
             ? VolumeOrdinal.Numbered(named, title, volumeNumber, knownVolumeId, holdings.HighestIssue)
             : null;
-        var longestOfTheYear = startYear > 0
-            ? named.Where(volume => volume.StartYear == startYear).MaxBy(volume => volume.TotalChapters ?? 0)
-            : null;
+        var ofTheYear = startYear > 0
+            ? named.Where(volume => volume.StartYear == startYear).OrderByDescending(volume => volume.TotalChapters ?? 0).ToList()
+            : [];
+        var longestOfTheYear = ofTheYear.FirstOrDefault();
+
+        // The longest counts for much when the next is far shorter (the series beside its one-shots),
+        // little when they are alike (a reprint or foreign edition of the whole run).
+        var longestWeight = ofTheYear.Count > 1
+                            && (longestOfTheYear!.TotalChapters ?? 0) >= 2 * Math.Max(1, ofTheYear[1].TotalChapters ?? 0)
+            ? 3d
+            : 1d;
 
         var ranked = new List<VolumeCandidate>();
         foreach (var volume in named)
@@ -109,9 +117,9 @@ public static class VolumeEvidence
 
                 identity += off == 0 ? 4 : 2;
                 reasons.Add(off == 0 ? $"started in {started}" : $"started in {started}, a year off {startYear}");
-                if (ReferenceEquals(volume, longestOfTheYear) && named.Count(other => other.StartYear == startYear) > 1)
+                if (ReferenceEquals(volume, longestOfTheYear) && ofTheYear.Count > 1)
                 {
-                    identity += 1;
+                    identity += longestWeight;
                     reasons.Add($"the longest volume of that name started in {started}");
                 }
             }
@@ -142,6 +150,12 @@ public static class VolumeEvidence
                     score -= 3;
                     reasons.Add($"published by {volume.Publisher}, not {string.Join(" or ", holdings.Publishers)}");
                 }
+            }
+
+            if (volume.TotalChapters == 1)
+            {
+                score -= 2;
+                reasons.Add("a single issue: a one-shot or giveaway");
             }
 
             if (volume.TotalChapters is { } count && holdings.HighestIssue > 0)
@@ -176,23 +190,35 @@ public static class VolumeEvidence
     }
 
     /// <summary>
-    /// The volume to take from <paramref name="ranked"/>: of those that fit (with an
-    /// <see cref="VolumeCandidate.Identity"/> of at least <see cref="MinimumScore"/>), the only one,
-    /// or the best when it scores at least <see cref="Margin"/> above the next. <c>Ambiguous</c> is
-    /// true when several fit about equally well, for the user to choose; both null and false when
-    /// none fits.
+    /// The volume to take from <paramref name="ranked"/>: the best of those that fit (with an
+    /// <see cref="VolumeCandidate.Identity"/> of at least <see cref="MinimumScore"/>), when its score
+    /// is positive and at least <see cref="Margin"/> above every other volume's, fitting or not: a
+    /// volume the evidence names only by its start year, which another outscores on everything
+    /// else, is not taken. <c>Ambiguous</c> is true when some volume fits but none is clearly best,
+    /// for the user to choose; both null and false when none fits.
     /// </summary>
     public static (VolumeCandidate? Choice, bool Ambiguous) Decide(IReadOnlyList<VolumeCandidate> ranked)
     {
         ArgumentNullException.ThrowIfNull(ranked);
-        var fitting = ranked.Where(candidate => candidate.Identity >= MinimumScore).ToList();
-        return fitting.Count switch
+        var best = ranked.Where(candidate => candidate.Identity >= MinimumScore).MaxBy(candidate => candidate.Score);
+        if (best is null)
         {
-            0 => (null, false),
-            1 => (fitting[0], false),
-            _ when fitting[0].Score - fitting[1].Score >= Margin => (fitting[0], false),
-            _ => (null, true),
-        };
+            return (null, false);
+        }
+
+        var rival = ranked.Where(candidate => !ReferenceEquals(candidate, best)).Select(candidate => (double?)candidate.Score).Max();
+        return best.Score > 0 && (rival is null || best.Score - rival >= Margin) ? (best, false) : (null, true);
+    }
+
+    /// <summary>
+    /// How many of <paramref name="ranked"/> are about as good as the best fitting volume (within
+    /// <see cref="Margin"/> of it), the best included: what a review is between.
+    /// </summary>
+    public static int CloseCalls(IReadOnlyList<VolumeCandidate> ranked)
+    {
+        ArgumentNullException.ThrowIfNull(ranked);
+        var best = ranked.Where(candidate => candidate.Identity >= MinimumScore).MaxBy(candidate => candidate.Score);
+        return best is null ? 0 : ranked.Count(candidate => best.Score - candidate.Score < Margin);
     }
 
     /// <summary>

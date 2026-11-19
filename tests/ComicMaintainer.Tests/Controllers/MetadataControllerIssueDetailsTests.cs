@@ -102,8 +102,8 @@ public class MetadataControllerIssueDetailsTests
         var body = Json(Assert.IsType<OkObjectResult>((await CreateController().SeriesVolumes("batman", CancellationToken.None)).Result).Value);
 
         Assert.Equal(
-            """[{"volume_number":2,"start_year":2016,"issues":19,"comicvine_volume_id":88888,"name":"All-New X-Men","publisher":"Marvel","site_url":"https://comicvine.gamespot.com/volume/4050-88888/","decision":"weighed","review_reason":null,"candidates":[{"volume_id":88888,"name":"All-New X-Men","start_year":2016,"publisher":"Marvel","issues":19,"score":9.0,"reasons":["started in 2016"],"site_url":"https://comicvine.gamespot.com/volume/4050-88888/"}],"conflicts":[{"file_path":"/c/x.cbz","issue":"3","year":2010,"comicvine_year":2016}],"mixed_years":[]},"""
-            + """{"volume_number":null,"start_year":null,"issues":3,"comicvine_volume_id":null,"name":null,"publisher":null,"site_url":null,"decision":"review","review_reason":"2 fit","candidates":[],"conflicts":[],"mixed_years":[2011,2016]}]""",
+            """[{"volume_number":2,"start_year":2016,"issues":19,"comicvine_volume_id":88888,"name":"All-New X-Men","publisher":"Marvel","site_url":"https://comicvine.gamespot.com/volume/4050-88888/","series_key":"","searched":false,"decision":"weighed","review_reason":null,"candidates":[{"volume_id":88888,"name":"All-New X-Men","start_year":2016,"publisher":"Marvel","issues":19,"score":9.0,"reasons":["started in 2016"],"site_url":"https://comicvine.gamespot.com/volume/4050-88888/"}],"conflicts":[{"file_path":"/c/x.cbz","issue":"3","year":2010,"comicvine_year":2016}],"mixed_years":[]},"""
+            + """{"volume_number":null,"start_year":null,"issues":3,"comicvine_volume_id":null,"name":null,"publisher":null,"site_url":null,"series_key":"","searched":false,"decision":"review","review_reason":"2 fit","candidates":[],"conflicts":[],"mixed_years":[2011,2016]}]""",
             body["volumes"]!.ToString(Newtonsoft.Json.Formatting.None));
         Assert.IsType<NotFoundObjectResult>((await CreateController().SeriesVolumes("nope", CancellationToken.None)).Result);
     }
@@ -111,13 +111,16 @@ public class MetadataControllerIssueDetailsTests
     [Fact]
     public async Task ChooseSeriesVolume_SetsTheUsersChoice()
     {
-        _details.Setup(d => d.ChooseVolumeAsync(It.IsAny<IReadOnlyCollection<string>>(), 2016, 0, 88888, It.IsAny<CancellationToken>())).ReturnsAsync(true);
-        _details.Setup(d => d.ChooseVolumeAsync(It.IsAny<IReadOnlyCollection<string>>(), 0, 0, null, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        _details.Setup(d => d.ChooseVolumeAsync(It.IsAny<IReadOnlyCollection<string>>(), "batman", 2016, 0, 88888, It.IsAny<CancellationToken>())).ReturnsAsync(ChooseVolumeOutcome.Chosen);
+        _details.Setup(d => d.ChooseVolumeAsync(It.IsAny<IReadOnlyCollection<string>>(), null, 0, 0, null, It.IsAny<CancellationToken>())).ReturnsAsync(ChooseVolumeOutcome.NoSuchSeriesVolume);
+        _details.Setup(d => d.ChooseVolumeAsync(It.IsAny<IReadOnlyCollection<string>>(), null, 2016, 0, 999, It.IsAny<CancellationToken>())).ReturnsAsync(ChooseVolumeOutcome.NoSuchComicVineVolume);
 
-        Assert.IsType<OkObjectResult>((await CreateController().ChooseSeriesVolume("batman", new MetadataController.ChooseVolumeRequest(2016, null, 88888), CancellationToken.None)).Result);
-        Assert.IsType<NotFoundObjectResult>((await CreateController().ChooseSeriesVolume("batman", new MetadataController.ChooseVolumeRequest(null, null, null), CancellationToken.None)).Result);
-        Assert.IsType<NotFoundObjectResult>((await CreateController().ChooseSeriesVolume("nope", new MetadataController.ChooseVolumeRequest(2016, null, 88888), CancellationToken.None)).Result);
-        Assert.IsType<BadRequestObjectResult>((await CreateController().ChooseSeriesVolume("batman", new MetadataController.ChooseVolumeRequest(2016, null, 0), CancellationToken.None)).Result);
+        Assert.IsType<OkObjectResult>((await CreateController().ChooseSeriesVolume("batman", new MetadataController.ChooseVolumeRequest("batman", 2016, null, 88888), CancellationToken.None)).Result);
+        Assert.IsType<NotFoundObjectResult>((await CreateController().ChooseSeriesVolume("batman", new MetadataController.ChooseVolumeRequest(null, null, null, null), CancellationToken.None)).Result);
+        Assert.IsType<NotFoundObjectResult>((await CreateController().ChooseSeriesVolume("nope", new MetadataController.ChooseVolumeRequest(null, 2016, null, 88888), CancellationToken.None)).Result);
+        Assert.IsType<BadRequestObjectResult>((await CreateController().ChooseSeriesVolume("batman", new MetadataController.ChooseVolumeRequest(null, 2016, null, 0), CancellationToken.None)).Result);
+        var unknown = Assert.IsType<BadRequestObjectResult>((await CreateController().ChooseSeriesVolume("batman", new MetadataController.ChooseVolumeRequest(null, 2016, null, 999), CancellationToken.None)).Result);
+        Assert.Contains("ComicVine has no volume 999", Json(unknown.Value).ToString());
     }
 
     [Fact]

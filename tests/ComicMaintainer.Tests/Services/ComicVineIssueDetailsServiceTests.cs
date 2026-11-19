@@ -925,9 +925,10 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         await CreateService().RunAsync(null, 20);
         var paths = _files.Select(f => f.FilePath).ToList();
 
-        Assert.False(await CreateService().ChooseVolumeAsync(paths, 1999, 0, BatmanVolume));
-        Assert.False(await CreateService().ChooseVolumeAsync(paths, 2016, 0, 0));
-        Assert.True(await CreateService().ChooseVolumeAsync(paths, 2016, 0, BatmanVolume));
+        Assert.Equal(ChooseVolumeOutcome.NoSuchSeriesVolume, await CreateService().ChooseVolumeAsync(paths, null, 1999, 0, BatmanVolume));
+        Assert.Equal(ChooseVolumeOutcome.NoSuchSeriesVolume, await CreateService().ChooseVolumeAsync(paths, "other", 2016, 0, BatmanVolume));
+        Assert.Equal(ChooseVolumeOutcome.NoSuchSeriesVolume, await CreateService().ChooseVolumeAsync(paths, null, 2016, 0, 0));
+        Assert.Equal(ChooseVolumeOutcome.Chosen, await CreateService().ChooseVolumeAsync(paths, "batman", 2016, 0, BatmanVolume));
         _search.Invocations.Clear();
 
         var summary = await CreateService().RunAsync(null, 20);
@@ -939,7 +940,7 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         Assert.Equal((ComicVineVolumeDecision.Manual, "Batman", (string?)null), (volume.Decision, volume.Name, volume.ReviewReason));
 
         // None of them: never searched for, and the file says why it is not filled.
-        Assert.True(await CreateService().ChooseVolumeAsync(paths, 2016, 0, null));
+        Assert.Equal(ChooseVolumeOutcome.Chosen, await CreateService().ChooseVolumeAsync(paths, null, 2016, 0, null));
         file.Metadata!.Title = "Chapter 1";
         await using (var db = new ComicMaintainerDbContext(_options))
         {
@@ -950,6 +951,124 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         var none = await CreateService().RunAsync(null, 20);
         Assert.Equal(1, none.NoVolume);
         _search.Verify(s => s.SearchVolumesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ChooseVolumeAsync_AVolumeNotWeighed_IsCheckedAndNamedOnComicVine()
+    {
+        AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");
+        var paths = _files.Select(f => f.FilePath).ToList();
+        _search.Setup(s => s.GetVolumeAsync(42721, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata { CanonicalTitle = "Batman", Publisher = "DC Comics", SourceId = "42721", StartYear = 2011 });
+
+        Assert.Equal(ChooseVolumeOutcome.NoSuchComicVineVolume, await CreateService().ChooseVolumeAsync(paths, null, 2016, 0, 999999));
+        Assert.Equal(ChooseVolumeOutcome.Chosen, await CreateService().ChooseVolumeAsync(paths, null, 2016, 0, 42721));
+        var volume = Assert.Single(await CreateService().GetVolumeLinksAsync(paths));
+        Assert.Equal((42721, "Batman", "DC Comics", "batman", true), (volume.ComicVineVolumeId!.Value, volume.Name, volume.Publisher, volume.SeriesKey, volume.Searched));
+
+        // ComicVine cannot be asked: kept unnamed.
+        _search.Setup(s => s.GetVolumeAsync(7, It.IsAny<CancellationToken>())).ThrowsAsync(new ExternalMetadataUnavailableException("ComicVine", ExternalMetadataFailureKind.RateLimited, "slow down"));
+        Assert.Equal(ChooseVolumeOutcome.Chosen, await CreateService().ChooseVolumeAsync(paths, null, 2016, 0, 7));
+        Assert.Null(Assert.Single(await CreateService().GetVolumeLinksAsync(paths)).Name);
+    }
+
+    [Fact]
+    public async Task ChooseVolumeAsync_TwoSeriesOfOnePage_AreToldApartByTheirKey()
+    {
+        AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");
+        AddFile("/c/Batman/The Batman (2016) - Chapter 0001.cbz", "1", series: "The Batman");
+        var paths = _files.Select(f => f.FilePath).ToList();
+
+        Assert.Equal(ChooseVolumeOutcome.NoSuchSeriesVolume, await CreateService().ChooseVolumeAsync(paths, null, 2016, 0, null));
+        Assert.Equal(ChooseVolumeOutcome.Chosen, await CreateService().ChooseVolumeAsync(paths, "thebatman", 2016, 0, null));
+        Assert.Equal(["batman", "thebatman"], (await CreateService().GetVolumeLinksAsync(paths)).Select(volume => volume.SeriesKey).Order());
+    }
+
+    [Fact]
+    public async Task RunAsync_AVolumeLeftForReview_IsNotWeighedAgainOnEveryRun()
+    {
+        AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");
+        TwoBatmans2016();
+        await CreateService().RunAsync(null, 20);
+        _search.Invocations.Clear();
+
+        // A user's job, and the cover picker, ask nothing more.
+        BatchJobDefinition? definition = null;
+        _jobs.Setup(j => j.StartJob(It.IsAny<BatchJobDefinition>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Callback((BatchJobDefinition d, IEnumerable<string> _, CancellationToken _) => definition = d)
+            .Returns(Guid.NewGuid());
+        CreateService().StartJob([_files[0].FilePath]);
+        var item = await definition!.ItemOperation(_files[0].FilePath, CancellationToken.None);
+        var covers = await CreateService().GetCoverCandidatesAsync(_files[0].FilePath);
+
+        Assert.False(item.Success);
+        Assert.Contains("choose it under Volumes on the series page", item.Error);
+
+        _search.Verify(s => s.SearchVolumesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Contains("choose it under Volumes on the series page", covers!.Reason);
+    }
+
+    [Fact]
+    public async Task RunAsync_WeighingVolumes_KeepsARequestForTheChosenOne_AndReusesItsListing()
+    {
+        // Two volumes fit equally until their issues are read: the cover years pick 2016. Its listing,
+        // read while weighing, fills the files without being asked for again.
+        AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1").Metadata!.Year = 2016;
+        AddFile("/c/Batman/Batman (2016) - Chapter 0002.cbz", "2").Metadata!.Year = 2016;
+        TwoBatmans2016();
+        _client.Setup(c => c.ListVolumeIssuesAsync(5555, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicVineResult<IReadOnlyList<ComicVineIssueSummary>>(
+                [new ComicVineIssueSummary(9001, "1", "Reprint One", "1990-01-01", null, null), new ComicVineIssueSummary(9002, "2", "Reprint Two", "1990-02-01", null, null)], 1));
+
+        var summary = await CreateService().RunAsync(null, 20);
+
+        Assert.Equal(2, summary.Filled);
+        _client.Verify(c => c.ListVolumeIssuesAsync(BatmanVolume, It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
+
+        // With only enough requests to search and list one volume, nothing is listed for weighing.
+        _client.Invocations.Clear();
+        await using (var db = new ComicMaintainerDbContext(_options))
+        {
+            db.ComicVineVolumeLinks.RemoveRange(db.ComicVineVolumeLinks);
+            db.ComicVineIssues.RemoveRange(db.ComicVineIssues);
+            db.ComicVineFileStates.RemoveRange(db.ComicVineFileStates);
+            await db.SaveChangesAsync();
+        }
+
+        await CreateService().RunAsync(null, 2);
+        _client.Verify(c => c.ListVolumeIssuesAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunAsync_AChoiceMadeWhileAJobRuns_IsNotOverwrittenByIt()
+    {
+        AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");
+        var paths = _files.Select(f => f.FilePath).ToList();
+
+        // The user chooses volume 42721 after the run has read the links but before it stores its own.
+        _search.Setup(s => s.SearchVolumesAsync("Batman", It.IsAny<CancellationToken>()))
+            .Callback(() => CreateService().ChooseVolumeAsync(paths, null, 2016, 0, 42721).GetAwaiter().GetResult())
+            .ReturnsAsync([new ExternalSeriesMetadata { CanonicalTitle = "Batman", StartYear = 2016, Publisher = "DC Comics", SourceId = BatmanVolume.ToString(), TotalChapters = 158 }]);
+        _search.Setup(s => s.GetVolumeAsync(42721, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata { CanonicalTitle = "Batman", SourceId = "42721" });
+
+        await CreateService().RunAsync(null, 20);
+
+        await using var db = new ComicMaintainerDbContext(_options);
+        var link = Assert.Single(db.ComicVineVolumeLinks);
+        Assert.Equal((42721, ComicVineVolumeDecision.Manual), (link.VolumeId!.Value, link.Decision));
+    }
+
+    [Fact]
+    public async Task RunAsync_AFileAlreadyFilledFromTheIssue_IsNotRefusedForItsOwnYear()
+    {
+        var file = AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");
+        await CreateService().RunAsync(null, 20);
+        file.Metadata!.Year = 2010;
+
+        var summary = await CreateService().RunAsync(null, 20);
+
+        Assert.Equal((0, 1), (summary.NoIssue, summary.Unchanged));
     }
 
     [Fact]

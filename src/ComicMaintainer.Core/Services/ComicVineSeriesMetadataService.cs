@@ -205,6 +205,10 @@ public partial class ComicVineSeriesMetadataService : ExternalSeriesMetadataProv
         return new ComicVineVolumeList(volumes, requests, Complete: false);
     }
 
+    /// <inheritdoc />
+    public Task<ExternalSeriesMetadata?> GetVolumeAsync(int volumeId, CancellationToken cancellationToken = default)
+        => LookupMatchAsync(ProviderName, volumeId.ToString(System.Globalization.CultureInfo.InvariantCulture), $"volume {volumeId}", cancellationToken);
+
     private static string NameKey(string? text)
         => new((text ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 

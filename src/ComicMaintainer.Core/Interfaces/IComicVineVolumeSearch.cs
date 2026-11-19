@@ -28,4 +28,10 @@ public interface IComicVineVolumeSearch
         string title,
         int maxRequests,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// ComicVine's volume <paramref name="volumeId"/>; null when it has none, or ComicVine is not
+    /// configured. Throws <see cref="ExternalMetadataUnavailableException"/> when ComicVine cannot answer.
+    /// </summary>
+    Task<ExternalSeriesMetadata?> GetVolumeAsync(int volumeId, CancellationToken cancellationToken = default);
 }

@@ -22,7 +22,7 @@ const REVIEW = {
     volumes: [
         {
             volume_number: null, start_year: 2016, issues: 2, comicvine_volume_id: null, name: null, publisher: null, site_url: null,
-            decision: 'review', review_reason: '2 ComicVine volumes named Batman fit about equally well',
+            series_key: 'batman', searched: true, decision: 'review', review_reason: '2 ComicVine volumes named Batman fit about equally well',
             candidates: [candidate(91273, 'Batman', 2016, ['started in 2016', 'published by DC Comics, as your issues say']), candidate(5555, 'Batman', 2016, ['started in 2016'])],
             conflicts: [], mixed_years: []
         },
@@ -98,7 +98,7 @@ test('Choose Volume lists the volumes weighed, with their evidence, and sets the
     await page.settle();
 
     const [call] = callsTo(page, 'POST', '/api/metadata/volumes/series/batman/choose');
-    assert.deepEqual(JSON.parse(JSON.stringify(call.body)), { start_year: 2016, volume_number: 0, volume_id: 5555 });
+    assert.deepEqual(JSON.parse(JSON.stringify(call.body)), { series_key: 'batman', start_year: 2016, volume_number: 0, volume_id: 5555 });
     assert.ok(!isModalOpen(page, 'chooseVolumeModal'));
     assert.deepEqual(messageTexts(page, 'success'), ['Volume chosen: run Fetch Issue Details to fill its issues']);
     // The volumes are read again.
@@ -121,14 +121,14 @@ test('another volume can be given by its ComicVine link or id, or none chosen', 
     page.click(page.$('#chooseVolumeApplyBtn'));
     await page.settle();
     assert.deepEqual(JSON.parse(JSON.stringify(callsTo(page, 'POST', '/api/metadata/volumes/series/batman/choose')[0].body)),
-        { start_year: 0, volume_number: 1, volume_id: 42721 });
+        { series_key: null, start_year: 0, volume_number: 1, volume_id: 42721 });
 
     await openChoose(page, 2);
     type(page, page.$('#chooseVolumeLink'), '796');
     page.click(page.$$('#chooseVolumeModal .modal-footer .btn')[1]);
     await page.settle();
     assert.deepEqual(JSON.parse(JSON.stringify(callsTo(page, 'POST', '/api/metadata/volumes/series/batman/choose')[1].body)),
-        { start_year: 0, volume_number: 0, volume_id: null });
+        { series_key: null, start_year: 0, volume_number: 0, volume_id: null });
     assert.deepEqual(messageTexts(page, 'success').slice(-1), ['The volume is kept off ComicVine']);
 });
 
@@ -151,6 +151,21 @@ test('a choice that fails says so and keeps the dialog open; Cancel closes it', 
     await page.run('applyChooseVolume(false)');
     page.run('selectChooseVolume(1); chooseVolumeLinkTyped()');
     assert.equal(callsTo(page, 'POST', '/api/metadata/volumes/series/batman/choose').length, 1);
+});
+
+test('a volume looked for and not found offers a choice; one never looked for shows nothing', async t => {
+    const page = await boot({ [VOLUMES]: { volumes: [
+        { volume_number: 2, issues: 3, site_url: null, searched: true, decision: null, candidates: [], conflicts: [], mixed_years: [] },
+        { volume_number: 3, issues: 1, site_url: null, searched: false, decision: null, candidates: [candidate(7, 'Batman', 2012, ['started in 2012, a year off 2011'])], conflicts: [], mixed_years: [] },
+        { volume_number: 4, issues: 1, site_url: null, searched: false, decision: null, candidates: [], conflicts: [], mixed_years: [] }
+    ] } });
+    t.after(() => page.close());
+    await page.settle();
+    assert.deepEqual(items(page), [
+        'Vol. 2 · 3 issues · not found on ComicVine Choose Volume…',
+        'Vol. 3 · 1 issue · not linked to ComicVine yet Choose Volume…',
+        'Vol. 4 · 1 issue · not linked to ComicVine yet'
+    ]);
 });
 
 test('a series with only volumes that are fine and unlinked lists none, and a missing volume opens nothing', async t => {

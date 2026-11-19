@@ -19,9 +19,12 @@ public class VolumeEvidenceTests
             [Volume("1", 2016, issues: 158), Volume("2", 2016, issues: 1), Volume("3", 2015), Volume("4", 2011), Volume("5", 2016, name: "Batman Beyond")],
             "Batman", 2016, 0, null, Held());
 
-        Assert.Equal(["1", "2", "3"], ranked.Select(candidate => candidate.Volume.SourceId));
+        // The longest of 2016 is far longer than the one-shot beside it: +3. The one-shot loses 2.
+        Assert.Equal(["1", "3", "2"], ranked.Select(candidate => candidate.Volume.SourceId));
         Assert.Contains("the longest volume of that name started in 2016", ranked[0].Reasons);
-        Assert.Equal((5d, 4d, 2d), (ranked[0].Score, ranked[1].Score, ranked[2].Score));
+        Assert.Contains("a single issue: a one-shot or giveaway", ranked[2].Reasons);
+        Assert.Equal((7d, 2d, 2d), (ranked[0].Score, ranked[1].Score, ranked[2].Score));
+        Assert.Equal("1", VolumeEvidence.Decide(ranked).Choice!.Volume.SourceId);
     }
 
     [Fact]
@@ -51,9 +54,9 @@ public class VolumeEvidenceTests
         Assert.Contains("the publisher's volume 3 of that name", third.Reasons);
         Assert.Contains("started in 2016, after your issues of 2012", third.Reasons);
         // 2016: Nth 4, count 1, too late -3 = 2; the others: count 1, earliest 1 = 2. Only the 2016
-        // volume is named by the evidence, so it fits; an issue dated before it is caught when filled.
+        // volume is named by the evidence, so it fits, but the dates say otherwise: the user decides.
         Assert.All(ranked, candidate => Assert.Equal(2d, candidate.Score));
-        Assert.Equal("2016", VolumeEvidence.Decide(ranked).Choice!.Volume.SourceId);
+        Assert.Equal((null, true), VolumeEvidence.Decide(ranked));
     }
 
     [Fact]
@@ -65,11 +68,25 @@ public class VolumeEvidenceTests
         // Fitting is decided by the evidence that names a volume, not by the score.
         Assert.Equal((null, false), VolumeEvidence.Decide([Scored("a", 9, identity: 3)]));
         Assert.Equal("a", VolumeEvidence.Decide([Scored("a", 1)]).Choice!.Volume.SourceId);
-        Assert.Equal("b", VolumeEvidence.Decide([Scored("a", 9, identity: 0), Scored("b", 5)]).Choice!.Volume.SourceId);
         Assert.Equal("a", VolumeEvidence.Decide([Scored("a", 4)]).Choice!.Volume.SourceId);
         Assert.Equal("a", VolumeEvidence.Decide([Scored("a", 8), Scored("b", 5)]).Choice!.Volume.SourceId);
-        Assert.Equal("a", VolumeEvidence.Decide([Scored("a", 5), Scored("b", 3, identity: 2)]).Choice!.Volume.SourceId);
+        Assert.Equal("a", VolumeEvidence.Decide([Scored("a", 8), Scored("b", 5, identity: 2)]).Choice!.Volume.SourceId);
         Assert.Equal((null, true), VolumeEvidence.Decide([Scored("a", 8), Scored("b", 6)]));
+        // The only volume that fits is not taken when one that does not fit outscores it, or comes close,
+        // or when the evidence against it outweighs what names it.
+        Assert.Equal((null, true), VolumeEvidence.Decide([Scored("a", 9, identity: 2), Scored("b", 5)]));
+        Assert.Equal((null, true), VolumeEvidence.Decide([Scored("a", 5), Scored("b", 3, identity: 2)]));
+        Assert.Equal((null, true), VolumeEvidence.Decide([Scored("a", 0)]));
+    }
+
+    [Fact]
+    public void CloseCalls_CountsTheVolumesAboutAsGoodAsTheBestFittingOne()
+    {
+        VolumeCandidate Scored(string id, double score, double identity = 4) => new(Volume(id, 2016), score, [], identity);
+
+        Assert.Equal(0, VolumeEvidence.CloseCalls([Scored("a", 9, identity: 2)]));
+        Assert.Equal(2, VolumeEvidence.CloseCalls([Scored("a", 8), Scored("b", 6), Scored("c", 1, identity: 0)]));
+        Assert.Equal(3, VolumeEvidence.CloseCalls([Scored("a", 5), Scored("b", 6, identity: 0), Scored("c", 4)]));
     }
 
     [Fact]

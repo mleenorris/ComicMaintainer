@@ -29,8 +29,10 @@ public class MetadataControllerTests
             Mock.Of<ISeriesLanguagePreferenceRetagService>(),
             Mock.Of<IComicVineVolumeSearch>(),
             Mock.Of<IComicVineIssueDetailsService>(),
-            Mock.Of<IMetronClient>());
+            _metron.Object);
     }
+
+    private readonly Mock<IMetronClient> _metron = new();
 
     [Fact]
     public async Task RefreshAll_QueuesJobForEveryLibrarySeries()
@@ -286,15 +288,16 @@ public class MetadataControllerTests
                 Reachable = true,
                 StatusMessage = "Reachable"
             });
+        _metron.Setup(m => m.CheckHealthAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProviderHealth { Name = "Metron", StatusMessage = "Disabled in settings" });
 
         var result = await _controller.GetProviders(CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var providersProp = ok.Value!.GetType().GetProperty("providers")!.GetValue(ok.Value);
         var providers = Assert.IsAssignableFrom<IEnumerable<ProviderHealth>>(providersProp!).ToList();
-        // The series provider, then Metron's own entry (its mock gives none here).
-        Assert.Equal(2, providers.Count);
-        Assert.Equal("ComicVine", providers[0].Name);
+        // The series provider, then Metron's own entry.
+        Assert.Equal(new[] { "ComicVine", "Metron" }, providers.Select(p => p.Name));
         Assert.True(providers[0].Reachable);
     }
 

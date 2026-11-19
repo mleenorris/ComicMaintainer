@@ -101,6 +101,7 @@ public sealed class MetronClient : IMetronClient
         }
 
         var config = _settings.CurrentValue;
+        var account = Account(config);
         if (!Prepare(config, comicVineVolumeId, out var url))
         {
             return MetronAnswer.Unavailable;
@@ -124,7 +125,15 @@ public sealed class MetronClient : IMetronClient
         using (document)
         {
             var series = ParseSeries(document.RootElement);
-            _answers[comicVineVolumeId] = (series, _time.GetUtcNow());
+            lock (_lock)
+            {
+                // Not kept when the settings changed while it was asked: it may be another address's answer.
+                if (_account == account)
+                {
+                    _answers[comicVineVolumeId] = (series, _time.GetUtcNow());
+                }
+            }
+
             return new MetronAnswer(true, series);
         }
     }
@@ -274,7 +283,7 @@ public sealed class MetronClient : IMetronClient
                 _reachable = false;
             }
 
-            Note(config, "The Metron address must be an https address, such as https://metron.cloud/api");
+            Note(account, "The Metron address must be an https address, such as https://metron.cloud/api");
             return false;
         }
 
@@ -294,14 +303,16 @@ public sealed class MetronClient : IMetronClient
     }
 
     // One signed-in request; the parsed answer, or null after recording why there is none. A refused
-    // token is tried again once with the username and password, which are used from then on.
-    private async Task<JsonDocument?> GetAsync(AppSettings config, Uri url, CancellationToken cancellationToken)
+    // token is tried again once with the username and password, which are used from then on. What a
+    // request finds is recorded only while its account is still the one set: a request still out when
+    // the settings change does not speak for the new ones.
+    private async Task<JsonDocument?> GetAsync(AppSettings config, Uri url, CancellationToken cancellationToken, bool tokenAllowed = true)
     {
         var account = Account(config);
         string? token;
         lock (_lock)
         {
-            token = _tokenRejectedAccount == account ? null : CleanToken(config.MetronApiToken);
+            token = !tokenAllowed || _tokenRejectedAccount == account ? null : CleanToken(config.MetronApiToken);
         }
 
         try
@@ -318,31 +329,43 @@ public sealed class MetronClient : IMetronClient
                 {
                     lock (_lock)
                     {
-                        _tokenRejectedAccount = account;
+                        if (_account == account)
+                        {
+                            _tokenRejectedAccount = account;
+                        }
                     }
 
                     _logger.LogWarning("Metron refused the API token; signing in with the username and password instead");
-                    return await GetAsync(config, url, cancellationToken);
+
+                    // The second request counts against the limits like any other; without a permit, the next lookup tries.
+                    return await TakePermitAsync(wait: false, cancellationToken)
+                        ? await GetAsync(config, url, cancellationToken, tokenAllowed: false)
+                        : null;
                 }
 
-                var refused = token is null
-                    ? "Metron refused the username and password: check them under Settings"
-                    : "Metron refused the API token: check it under Settings";
+                var refused = token is not null
+                    ? "Metron refused the API token: check it under Settings"
+                    : CleanToken(config.MetronApiToken) is not null
+                        ? "Metron refused the API token and the username and password: check them under Settings"
+                        : "Metron refused the username and password: check them under Settings";
                 lock (_lock)
                 {
-                    _rejectedAccount = account;
-                    _rejectedAt = _time.GetUtcNow();
-                    _rejectedProblem = refused;
+                    if (_account == account)
+                    {
+                        _rejectedAccount = account;
+                        _rejectedAt = _time.GetUtcNow();
+                        _rejectedProblem = refused;
+                    }
                 }
 
-                Fail(config, refused);
+                Fail(account, refused);
                 return null;
             }
 
             if (!response.IsSuccessStatusCode)
             {
                 // A 404 is not "no such series" (that is an empty list): the address is likely wrong.
-                Pause(config, response.StatusCode == HttpStatusCode.NotFound
+                Pause(account, response.StatusCode == HttpStatusCode.NotFound
                     ? "Metron answered 404: check the Metron address"
                     : $"Metron answered {(int)response.StatusCode}");
                 return null;
@@ -352,10 +375,17 @@ public sealed class MetronClient : IMetronClient
             var document = await JsonDocument.ParseAsync(body, cancellationToken: cancellationToken);
             lock (_lock)
             {
-                _problem = null;
-                _reachable = true;
                 _successes++;
                 _lastSuccessUtc = _time.GetUtcNow().UtcDateTime;
+                if (_account == account)
+                {
+                    _reachable = true;
+
+                    // A refused token is still worth fixing while the password stands in for it.
+                    _problem = _tokenRejectedAccount == account && CleanToken(config.MetronApiToken) is not null
+                        ? "Metron refused the API token: signing in with the username and password instead"
+                        : null;
+                }
             }
 
             return document;
@@ -366,7 +396,7 @@ public sealed class MetronClient : IMetronClient
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Pause(config, ex.Message);
+            Pause(account, ex.Message);
             return null;
         }
     }
@@ -421,36 +451,45 @@ public sealed class MetronClient : IMetronClient
         }
     }
 
-    private void Pause(AppSettings config, string reason)
+    private void Pause(string account, string reason)
     {
         lock (_lock)
         {
-            _pausedUntil = _time.GetUtcNow() + PauseAfterFailure;
+            if (_account == account)
+            {
+                _pausedUntil = _time.GetUtcNow() + PauseAfterFailure;
+            }
         }
 
-        Fail(config, reason);
+        Fail(account, reason);
     }
 
-    private void Fail(AppSettings config, string reason)
+    private void Fail(string account, string reason)
     {
         lock (_lock)
         {
-            _reachable = false;
             _failures++;
             _lastFailureUtc = _time.GetUtcNow().UtcDateTime;
+            if (_account == account)
+            {
+                _reachable = false;
+            }
         }
 
-        Note(config, reason);
+        Note(account, reason);
     }
 
-    private void Note(AppSettings config, string problem)
+    // The account's problem, while it is the one set (Prepare makes it so before any request).
+    private void Note(string account, string problem)
     {
         bool changed;
         lock (_lock)
         {
-            _account = Account(config);
-            changed = _problem != problem;
-            _problem = problem;
+            changed = _account == account && _problem != problem;
+            if (changed)
+            {
+                _problem = problem;
+            }
         }
 
         // Once per problem, not on every request a run makes while it lasts.

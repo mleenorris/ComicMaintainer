@@ -464,6 +464,17 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task GetProviders_MetronCheckFailure_Escapes_AfterTheSeriesChecks()
+    {
+        _external.Setup(e => e.CheckHealthAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new ProviderHealth { Name = "ComicVine" });
+        _metron.Setup(m => m.CheckHealthAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("metron"));
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController().GetProviders(CancellationToken.None));
+
+        Assert.Equal("metron", thrown.Message);
+    }
+
+    [Fact]
     public async Task GetProviders_HealthCheckFailure_Escapes()
     {
         _external.Setup(e => e.CheckHealthAsync(It.IsAny<CancellationToken>()))

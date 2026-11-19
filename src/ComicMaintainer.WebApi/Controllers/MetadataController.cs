@@ -244,20 +244,27 @@ public class MetadataController : ControllerBase
     {
         // Metron is checked alongside the series providers, so a slow Metron does not add to their time.
         var metron = _metron.CheckHealthAsync(cancellationToken);
-        var providers = new List<ProviderHealth>();
-        if (_externalMetadata is CompositeExternalSeriesMetadataService composite)
+        var series = SeriesHealthAsync();
+        try
         {
-            providers.AddRange(await composite.CheckAllHealthAsync(cancellationToken));
+            await Task.WhenAll(series, metron);
         }
-        else
+        catch when (series.IsFaulted || series.IsCanceled)
         {
-            providers.Add(await _externalMetadata.CheckHealthAsync(cancellationToken));
+            // Both are done (neither is left unobserved); the series check's own failure is thrown below.
         }
 
         // Metron is not a series provider: it checks ComicVine's volumes, and has its own entry.
-        var merged = MergeAniListProviders(providers);
+        var merged = MergeAniListProviders(await series);
         merged.Add(await metron);
         return Ok(new { providers = merged });
+
+        async Task<List<ProviderHealth>> SeriesHealthAsync()
+        {
+            return _externalMetadata is CompositeExternalSeriesMetadataService composite
+                ? [.. await composite.CheckAllHealthAsync(cancellationToken)]
+                : [await _externalMetadata.CheckHealthAsync(cancellationToken)];
+        }
     }
 
     /// <summary>

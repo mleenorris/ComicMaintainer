@@ -61,4 +61,18 @@ public interface IComicVineIssueDetailsService
     Task<IReadOnlyList<IssueComicVineLink>> GetIssueLinksAsync(
         IReadOnlyCollection<string> filePaths,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sets the ComicVine volume of the series volume of <paramref name="startYear"/> or
+    /// <paramref name="volumeNumber"/> (both 0 for the issues that name neither) among the files at
+    /// <paramref name="filePaths"/>, as the user chose it: <paramref name="volumeId"/>, or none when
+    /// null. It is never searched for again, and the next Fetch Issue Details fills its issues from
+    /// it. False when none of the files belongs to that series volume.
+    /// </summary>
+    Task<bool> ChooseVolumeAsync(
+        IReadOnlyCollection<string> filePaths,
+        int startYear,
+        int volumeNumber,
+        int? volumeId,
+        CancellationToken cancellationToken = default);
 }

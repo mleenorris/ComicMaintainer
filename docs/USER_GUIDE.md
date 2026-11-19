@@ -113,22 +113,33 @@ versions wrote into `<Web>` after a match is treated the same way while the file
 added later wins over the app's own record. When the tags name an
 issue ComicVine does not have, they are left as they are, and that id is not asked for again.
 
-Any other issue is matched to a ComicVine volume through its series:
+Any other issue is matched to a ComicVine volume through its series. When its issues name neither a start year nor a
+volume number, that is the series' own ComicVine match (matching the series takes effect the next time). Otherwise every
+ComicVine volume with exactly the series' name is weighed against what you have of that volume:
 
-- by the year its volume started, as for volume numbers;
-- else by its volume number: Vol. 2 is the publisher's second volume of that name, one-shots not counted. A volume
-  with fewer issues than the highest issue you have of that volume cannot be it and is passed over: ComicVine lists
-  Marvel's collected editions of All-New X-Men (4 issues) between its 2013 and 2016 volumes, and your Vol. 2 #19 shows
-  they are not Vol. 2;
-- else, when it knows neither, by the series' own ComicVine match. Matching the series to ComicVine takes effect the next
-  time.
+- the start year your issues name: the same year, or one off (with fewer points), and among that year's volumes of the
+  name the longest one, which is the series rather than a reprint or a one-shot;
+- for a volume number, being the publisher's Nth volume of that name, one-shots not counted;
+- being the series' own ComicVine match;
+- the publisher your issues name (`DC Comics`, `DC` and `DC Comics, Inc.` count as the same);
+- having at least as many issues as your highest one: ComicVine lists Marvel's collected editions of All-New X-Men
+  (4 issues) between its 2013 and 2016 volumes, and your Vol. 2 #19 rules them out;
+- having started no later than your earliest issue's cover year.
+
+A volume needs evidence that names it (its start year, its place among the publisher's volumes, or the series' match) to
+fit at all, and the best is taken only when it is clearly ahead of the next. When several fit about equally well, their
+issue lists are read too: the volume whose cover years match your issues' (within a year), and whose story titles match
+your real titles, wins. If that still does not settle it, nothing is guessed: the volume is left for you to review, and
+its issues are not filled until you choose.
 
 The volume is looked for in ComicVine's search first. For a much-used name such as Batman, the search can leave the right
 volume out, so when it finds none that fits, every ComicVine volume with exactly that name is listed, oldest first, and
 looked through too. That takes up to 5 more requests.
 
-Without a tag naming their issue, Annuals and Specials are left out, and duplicates always are. An issue that cannot be matched counts as failed in the job, with the
-reason, such as `ComicVine has no Batman Vol. 7`. Set its volume number or start year with **Update**, or match the series
+Without a tag naming their issue, Annuals and Specials are left out, and duplicates always are. An issue dated more than a
+year away from ComicVine's issue of that number in its volume is not filled from it either: it is another volume's, or its
+date is wrong (a cover year an earlier fill wrote does not count). An issue that cannot be matched counts as failed in the
+job, with the reason, such as `ComicVine has no Batman Vol. 7`. Set its volume number or start year with **Update**, or match the series
 to ComicVine, and run it again. A volume ComicVine did not have is searched for again each time you run **Fetch Issue
 Details**; the scheduled job waits 30 days before searching again.
 
@@ -138,7 +149,17 @@ arcs from the **ComicVine Issue Details** scheduled job, which does the whole li
 on. Its `maxRequests` option sets how many requests each run may use.
 
 The series page lists its volumes under the synopsis, each with its number or start year, how many issues you have,
-and a link to the ComicVine volume it is matched to, or "not linked to ComicVine yet".
+and a link to the ComicVine volume it is matched to, or "not linked to ComicVine yet". It also shows:
+
+- **needs review**, with **Choose Volume…**, for a volume left for you to choose;
+- **Change…** beside a linked volume, to choose another;
+- issues dated years away from ComicVine's issue of that number, with the years when you point at them;
+- for the issues that name no volume, the cover years across which their numbers repeat (`#1` of 2011 and of 2016): they
+  are likely several volumes, filed as one. Set their volume years with **Update**.
+
+**Choose Volume…** lists the volumes that were weighed, best first, each with what counted for and against it and a link
+to it on ComicVine. Choose one, or paste the link (or id) of another ComicVine volume, or choose **None of These**. Your
+choice is final: the volume is never searched for again, and the next **Fetch Issue Details** fills its issues from it.
 
 Each issue links to its ComicVine page too: **ComicVine** on its card, and **Open on ComicVine** in its menu. An issue
 filled by **Fetch Issue Details** links to the issue it was filled from. Another one links to the issue of its number

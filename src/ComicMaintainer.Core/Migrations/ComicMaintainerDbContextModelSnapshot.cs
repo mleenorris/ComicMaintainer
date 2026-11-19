@@ -323,6 +323,14 @@ namespace ComicMaintainer.Core.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("CandidatesJson")
+                        .HasMaxLength(8000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Decision")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("IssuesListedUtc")
                         .HasColumnType("TEXT");
 
@@ -331,6 +339,10 @@ namespace ComicMaintainer.Core.Migrations
 
                     b.Property<string>("Publisher")
                         .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReviewReason")
+                        .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SeriesKey")

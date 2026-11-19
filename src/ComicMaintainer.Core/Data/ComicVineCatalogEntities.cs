@@ -31,6 +31,38 @@ public class ComicVineVolumeLinkEntity
 
     /// <summary>When the volume's issues were last listed from ComicVine; null until they are.</summary>
     public DateTime? IssuesListedUtc { get; set; }
+
+    /// <summary>
+    /// How the volume was chosen (see <see cref="ComicVineVolumeDecision"/>): weighed and clear, through
+    /// a tagger's id, by the user, or left for the user to review. Null for links made before
+    /// volumes were weighed.
+    /// </summary>
+    public string? Decision { get; set; }
+
+    /// <summary>
+    /// The volumes that were weighed, best first, with their evidence, as JSON (see
+    /// <see cref="Utilities.VolumeEvidence"/>): what the user chooses from. Null when none was weighed.
+    /// </summary>
+    public string? CandidatesJson { get; set; }
+
+    /// <summary>Why the volume needs the user's review; null otherwise.</summary>
+    public string? ReviewReason { get; set; }
+}
+
+/// <summary>The values of <see cref="ComicVineVolumeLinkEntity.Decision"/>.</summary>
+public static class ComicVineVolumeDecision
+{
+    /// <summary>The evidence pointed clearly to one volume.</summary>
+    public const string Weighed = "weighed";
+
+    /// <summary>A tagger's id in an issue's tags named the volume.</summary>
+    public const string Tagged = "tagged";
+
+    /// <summary>The user chose it (or chose none); it is never searched for again.</summary>
+    public const string Manual = "manual";
+
+    /// <summary>Several volumes fit about equally well: none is used until the user chooses.</summary>
+    public const string Review = "review";
 }
 
 /// <summary>

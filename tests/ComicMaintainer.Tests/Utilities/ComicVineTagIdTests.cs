@@ -12,6 +12,10 @@ public class ComicVineTagIdTests
     [InlineData("Tagged with ComicTagger 1.6.0 using info from Comic Vine on 2024-01-01. [CVDB12345]", null, 12345)]
     [InlineData("Tagged with ComicTagger 1.3.0 using info from Comic Vine on 2019-01-01. [Issue ID 4242]", null, 4242)]
     [InlineData("[cvdb 77]", null, 77)]
+    // ComicTagger writes "[Issue ID n]" for every source: only Comic Vine's counts.
+    [InlineData("Tagged with ComicTagger 1.6.0 using info from Metron on 2024-01-01. [Issue ID 4242]", null, null)]
+    [InlineData("Tagged with ComicTagger 1.6.0 using info from Comic Vine on 2024-01-01. [Issue ID 4242]", null, 4242)]
+    [InlineData("Tagged with ComicTagger 1.6.0 using info from Grand Comics Database. [Issue ID 4242] [CVDB5]", null, 5)]
     // The issue's page, in Web or in the notes.
     [InlineData(null, "https://comicvine.gamespot.com/batman-1-i-am-gotham-part-one/4000-543101/", 543101)]
     [InlineData(null, "http://www.comicvine.com/batman-1/4000-99/", 99)]
@@ -49,10 +53,25 @@ public class ComicVineTagIdTests
     // An id already there is kept, unless the file was filled from another issue.
     [InlineData("Tagged. [CVDB999]", false, "Tagged. [CVDB999]")]
     [InlineData("Tagged. [CVDB999]", true, "Tagged. [CVDB12345]")]
-    [InlineData("Tagged. [Issue ID 999] then [CVDB998]", true, "Tagged. [CVDB12345] then [CVDB998]")]
+    [InlineData("Tagged. [Issue ID 999] then [CVDB998]", true, "Tagged. [Issue ID 999] then [CVDB12345]")]
+    // Another source's id is left alone, and Comic Vine's added beside it.
+    [InlineData("Tagged using info from Metron. [Issue ID 999]", true, "Tagged using info from Metron. [Issue ID 999] [CVDB12345]")]
     public void WithIssueId_RecordsTheIdAndKeepsTheNotes(string? notes, bool replace, string expected)
     {
         Assert.Equal(expected, ComicVineTagId.WithIssueId(notes, 12345, replace));
+    }
+
+    [Theory]
+    [InlineData(null, false, "https://comicvine.gamespot.com/b-1/4000-12345/")]
+    [InlineData("https://comicvine.gamespot.com/batman/4050-796/", false, "https://comicvine.gamespot.com/b-1/4000-12345/")]
+    [InlineData("https://example.com/mine", true, "https://example.com/mine")]
+    [InlineData("https://comicvine.gamespot.com/b-9/4000-999/", false, "https://comicvine.gamespot.com/b-9/4000-999/")]
+    [InlineData("https://comicvine.gamespot.com/b-9/4000-999/", true, "https://comicvine.gamespot.com/b-1/4000-12345/")]
+    // Only the other issue's link is changed; links beside it are kept.
+    [InlineData("https://example.com/mine https://comicvine.gamespot.com/b-9/4000-999/", true, "https://example.com/mine https://comicvine.gamespot.com/b-1/4000-12345/")]
+    public void WithIssuePage_SetsTheIssuesPage_KeepingOtherLinks(string? web, bool replace, string expected)
+    {
+        Assert.Equal(expected, ComicVineTagId.WithIssuePage(web, "https://comicvine.gamespot.com/b-1/4000-12345/", 12345, replace));
     }
 
     [Fact]
@@ -107,18 +126,14 @@ public class ComicVineTagIdTests
     }
 
     [Fact]
-    public void For_RecordsTheIssue_AndReplacesATagNamingAnother()
+    public void For_RecordsTheIssue_AndReplacesATagOnlyWhenToldItIsWrong()
     {
         var issue = new ComicMaintainer.Core.Data.ComicVineIssueEntity { Id = 12345, VolumeId = 1, IssueNumber = "1", SiteUrl = "https://comicvine.gamespot.com/batman-1/4000-12345/" };
+        var tagged = new ComicMetadata { Series = "Batman", Issue = "1", Title = "A Story", ComicVineIssueId = 999 };
 
         var plain = ComicVineIssueFill.For(new ComicMetadata { Series = "Batman", Issue = "1", Title = "A Story" }, issue, null).Fill;
-        Assert.Equal(12345, plain.ComicVineIssueId);
-        Assert.False(plain.ReplacesComicVineIssueId);
-
-        var sameTag = ComicVineIssueFill.For(new ComicMetadata { Series = "Batman", Issue = "1", Title = "A Story", ComicVineIssueId = 12345 }, issue, null).Fill;
-        Assert.False(sameTag.ReplacesComicVineIssueId);
-
-        var otherTag = ComicVineIssueFill.For(new ComicMetadata { Series = "Batman", Issue = "1", Title = "A Story", ComicVineIssueId = 999 }, issue, null).Fill;
-        Assert.True(otherTag.ReplacesComicVineIssueId);
+        Assert.Equal((12345, false), (plain.ComicVineIssueId!.Value, plain.ReplacesComicVineIssueId));
+        Assert.False(ComicVineIssueFill.For(tagged, issue, null).Fill.ReplacesComicVineIssueId);
+        Assert.True(ComicVineIssueFill.For(tagged, issue, null, replacesTaggedIssue: true).Fill.ReplacesComicVineIssueId);
     }
 }

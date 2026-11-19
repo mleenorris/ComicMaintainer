@@ -585,14 +585,38 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
 
             ComicVineIssueEntity? issue = null;
             string? synopsis;
-            ComicVineFileStateEntity? state;
+            var state = _states.GetValueOrDefault(file.FilePath);
+            var replacesTag = false;
+            var fromTag = false;
             await _gate.WaitAsync(cancellationToken);
             try
             {
-                // Tags that name the issue need no matching, and fill Annuals and Specials too.
+                // Tags that name the issue need no matching, and fill Annuals and Specials too. A tag
+                // this application wrote (the file was filled from that issue) is only its own earlier
+                // match: the issue is matched again, so a volume number or start year the user set since
+                // takes effect, and the tag follows the new match.
                 if (metadata.ComicVineIssueId is { } taggedId)
                 {
-                    issue = await TaggedIssueAsync(file, taggedId, regular, cancellationToken);
+                    if (IsOwnTag(state, taggedId))
+                    {
+                        replacesTag = true;
+                    }
+                    else
+                    {
+                        var (check, tagged) = await TaggedIssueAsync(file, taggedId, regular, cancellationToken);
+                        switch (check)
+                        {
+                            case TagCheck.Trusted:
+                                issue = tagged;
+                                fromTag = true;
+                                break;
+                            case TagCheck.Unavailable:
+                                return (Outcome.NoVolume, "No ComicVine requests were left to read the issue its tags name; the next run continues");
+                            case TagCheck.Wrong:
+                                replacesTag = true;
+                                break;
+                        }
+                    }
                 }
 
                 if (issue is null)
@@ -625,7 +649,6 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 }
 
                 synopsis = string.IsNullOrWhiteSpace(metadata.Series) ? null : await SeriesSynopsisAsync(metadata.Series, cancellationToken);
-                state = _states.GetValueOrDefault(file.FilePath);
             }
             catch (ExternalMetadataUnavailableException ex)
             {
@@ -653,7 +676,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             var previous = state is not null && state.IssueId != issue.Id
                 ? await StoredIssueAsync(state.IssueId, cancellationToken)
                 : null;
-            var plan = ComicVineIssueFill.For(metadata, issue, synopsis, previous);
+            var plan = ComicVineIssueFill.For(metadata, issue, synopsis, previous, replacesTag && metadata.ComicVineIssueId != issue.Id);
             var outcome = Outcome.Unchanged;
             if (!plan.IsEmpty)
             {
@@ -666,14 +689,16 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 outcome = write.Outcome == MetadataWriteOutcome.Unchanged ? Outcome.Unchanged : Outcome.Filled;
             }
 
-            await RecordAppliedAsync(file.FilePath, issue.Id, cancellationToken);
+            await RecordAppliedAsync(file.FilePath, issue.Id, fromTag, cancellationToken);
             return (outcome, null);
         }
 
         public async Task<CoverCandidates> CoverCandidatesAsync(ComicFile file, CancellationToken cancellationToken)
         {
             var metadata = file.Metadata;
-            if (metadata?.ComicVineIssueId is { } taggedId && await TaggedCoverCandidatesAsync(file, taggedId, cancellationToken) is { } tagged)
+            if (metadata?.ComicVineIssueId is { } taggedId
+                && !IsOwnTag(_states.GetValueOrDefault(file.FilePath), taggedId)
+                && await TaggedCoverCandidatesAsync(file, taggedId, cancellationToken) is { } tagged)
             {
                 return tagged;
             }
@@ -718,7 +743,8 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
 
         /// <summary>
         /// The covers of the volume of the issue the file's tags name, with that issue chosen; null
-        /// when the tags cannot be trusted (see <see cref="TaggedIssueAsync"/>), so the issue is matched instead.
+        /// when the tags cannot be trusted (see <see cref="TaggedIssueAsync"/>), so the issue is matched
+        /// instead. A tag this application wrote is matched again, as when filling.
         /// </summary>
         private async Task<CoverCandidates?> TaggedCoverCandidatesAsync(ComicFile file, int taggedId, CancellationToken cancellationToken)
         {
@@ -727,7 +753,13 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             await _gate.WaitAsync(cancellationToken);
             try
             {
-                if (await TaggedIssueAsync(file, taggedId, regular, cancellationToken) is not { } issue)
+                var (check, issue) = await TaggedIssueAsync(file, taggedId, regular, cancellationToken);
+                if (check == TagCheck.Unavailable)
+                {
+                    return NoCovers("No ComicVine requests were left to read the issue its tags name; try again later");
+                }
+
+                if (check != TagCheck.Trusted || issue is null)
                 {
                     return null;
                 }
@@ -771,30 +803,54 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
         }
 
         /// <summary>
-        /// The ComicVine issue the file's tags name (see <see cref="ComicVineTagId"/>), read from
-        /// ComicVine when it is not stored with its details yet. Null when ComicVine has no such
-        /// issue, no requests are left to read it, or it has another number than the file's
-        /// <c>&lt;Number&gt;</c>: tags copied from another file are not trusted, and the issue is
-        /// matched instead. A regular issue's volume is linked to the file's series volume when that
-        /// has no ComicVine volume yet, so the series' other issues are found in it.
+        /// True when the file's tag names the issue this application matched it to by name and wrote
+        /// there itself, rather than a tagger's id it was filled from.
         /// </summary>
-        private async Task<ComicVineIssueEntity?> TaggedIssueAsync(ComicFile file, int issueId, bool regular, CancellationToken cancellationToken)
+        private static bool IsOwnTag(ComicVineFileStateEntity? state, int taggedId)
+            => state is not null && state.IssueId == taggedId && !state.FromTag;
+
+        /// <summary>What a tag naming a ComicVine issue turned out to be (see <see cref="TaggedIssueAsync"/>).</summary>
+        private enum TagCheck
+        {
+            /// <summary>The issue, with the file's number: the file is filled from it.</summary>
+            Trusted,
+
+            /// <summary>
+            /// ComicVine did not give the issue: matched by name instead, but the tag is kept, as nothing
+            /// shows it is wrong.
+            /// </summary>
+            Unknown,
+
+            /// <summary>The issue has another number than the file (tags copied from another file): matched by name, and replaced.</summary>
+            Wrong,
+
+            /// <summary>The issue could not be read now (no requests left, or ComicVine not configured): the file waits for the next run.</summary>
+            Unavailable,
+        }
+
+        /// <summary>
+        /// The ComicVine issue the file's tags name (see <see cref="ComicVineTagId"/>), read from
+        /// ComicVine when it is not stored with its details yet, and what to make of the tag (see
+        /// <see cref="TagCheck"/>). A trusted regular issue's volume is linked to the file's series
+        /// volume when that has no ComicVine volume yet, so the series' other issues are found in it.
+        /// </summary>
+        private async Task<(TagCheck Check, ComicVineIssueEntity? Issue)> TaggedIssueAsync(ComicFile file, int issueId, bool regular, CancellationToken cancellationToken)
         {
             var metadata = file.Metadata!;
             var issue = await StoredIssueAsync(issueId, cancellationToken);
             if (issue?.DetailsUtc is null)
             {
-                if (RequestsLeft <= 0)
+                if (RequestsLeft <= 0 || !owner._client.IsConfigured)
                 {
-                    _stoppedEarly = true;
-                    return null;
+                    _stoppedEarly |= RequestsLeft <= 0;
+                    return (TagCheck.Unavailable, null);
                 }
 
                 var fetched = await owner._client.GetIssueAsync(issueId, cancellationToken);
                 _requests++;
                 if (fetched is null)
                 {
-                    return null;
+                    return (TagCheck.Unknown, null);
                 }
 
                 issue = await StoreIssueAsync(fetched, issue, cancellationToken);
@@ -802,7 +858,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
 
             if (!string.IsNullOrWhiteSpace(metadata.Issue) && !SameNumber(issue.IssueNumber, metadata.Issue))
             {
-                return null;
+                return (TagCheck.Wrong, issue);
             }
 
             if (regular && !string.IsNullOrWhiteSpace(metadata.Series))
@@ -810,7 +866,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 await LinkTaggedVolumeAsync(metadata, issue, cancellationToken);
             }
 
-            return issue;
+            return (TagCheck.Trusted, issue);
         }
 
         /// <summary>Stores an issue read by its id, with its details, over <paramref name="stored"/> when it was listed before.</summary>
@@ -971,7 +1027,8 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 // one with fewer issues than that cannot be it (see VolumeOrdinal.Numbered), even
                 // when it was stored before this check existed.
                 var highestHeld = startYear == 0 ? await HighestIssueHeldAsync(key, cancellationToken) : 0;
-                var tooShort = link?.VolumeId is { } linkedVolume && highestHeld > 0
+                // Only a volume listed in full: one linked through a tag holds just that issue so far.
+                var tooShort = link?.VolumeId is { } linkedVolume && highestHeld > 0 && link.IssuesListedUtc is not null
                                && await HighestListedIssueAsync(linkedVolume, cancellationToken) is { } listed
                                && listed < highestHeld;
                 if (link is not null
@@ -1004,13 +1061,16 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
 
                 // The ranked search can leave a much-used name's volume out: list every volume of
                 // that exact name, oldest first, and look again.
-                if (volume is null && RequestsLeft > 0)
+                // A request is left for listing the volume's issues. A volume found by its number is
+                // counted among the name's volumes, so only a complete list may add to them: the oldest
+                // 500 of thousands would count the wrong ones.
+                if (volume is null && RequestsLeft > 1)
                 {
-                    var named = await owner._volumeSearch.ListVolumesNamedAsync(title, Math.Min(RequestsLeft, NamedListRequests), cancellationToken);
+                    var named = await owner._volumeSearch.ListVolumesNamedAsync(title, Math.Min(RequestsLeft - 1, NamedListRequests), cancellationToken);
                     _requests += named.Requests;
                     var known = volumes.Select(candidate => candidate.SourceId).ToHashSet(StringComparer.Ordinal);
-                    var added = named.Value.Where(candidate => !known.Contains(candidate.SourceId)).ToList();
-                    if (added.Count > 0)
+                    var added = named.Volumes.Where(candidate => !known.Contains(candidate.SourceId)).ToList();
+                    if (added.Count > 0 && (startYear > 0 || named.Complete))
                     {
                         var all = volumes.Concat(added).ToList();
                         volume = startYear > 0
@@ -1214,7 +1274,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             return synopsis;
         }
 
-        private async Task RecordAppliedAsync(string filePath, int issueId, CancellationToken cancellationToken)
+        private async Task RecordAppliedAsync(string filePath, int issueId, bool fromTag, CancellationToken cancellationToken)
         {
             await _gate.WaitAsync(cancellationToken);
             try
@@ -1224,6 +1284,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 state ??= new ComicVineFileStateEntity { FilePath = filePath };
                 state.IssueId = issueId;
                 state.AppliedUtc = DateTime.UtcNow;
+                state.FromTag = fromTag;
                 if (known)
                 {
                     db.ComicVineFileStates.Update(state);

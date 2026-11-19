@@ -38,9 +38,16 @@ public static partial class ComicVineIssueFill
     /// <remarks>
     /// <paramref name="previous"/> is the ComicVine issue the file was filled from before, when
     /// that was a different one (it was matched to the wrong volume): what it wrote counts as not
-    /// filled, so the right issue's details replace it.
+    /// filled, so the right issue's details replace it. <paramref name="replacesTaggedIssue"/> is
+    /// true when the issue the tags name is shown to be wrong (another number, or this
+    /// application's own earlier match): its id and page are replaced by this issue's.
     /// </remarks>
-    public static Plan For(ComicMetadata current, ComicVineIssueEntity issue, string? seriesSynopsis, ComicVineIssueEntity? previous = null)
+    public static Plan For(
+        ComicMetadata current,
+        ComicVineIssueEntity issue,
+        string? seriesSynopsis,
+        ComicVineIssueEntity? previous = null,
+        bool replacesTaggedIssue = false)
     {
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(issue);
@@ -96,7 +103,7 @@ public static partial class ComicVineIssueFill
             StoryArc: arcs.Count == 0 ? null : string.Join(", ", arcs.Select(arc => arc.Name)),
             Month: month,
             ComicVineIssueId: issue.Id,
-            ReplacesComicVineIssueId: current.ComicVineIssueId is { } tagged && tagged != issue.Id);
+            ReplacesComicVineIssueId: replacesTaggedIssue);
         return new Plan(update, fields, fill);
     }
 

@@ -21,10 +21,10 @@ public interface IComicVineVolumeSearch
     /// oldest first, from ComicVine's volume list filtered by name rather than its ranked search,
     /// so a volume the search ranks too low is still found. The filter matches names that contain
     /// the title, so a much-used name takes several pages: at most <paramref name="maxRequests"/>
-    /// are read. <c>Requests</c> is how many were made. Throws
+    /// are read, and the list says whether it is complete. Throws
     /// <see cref="ExternalMetadataUnavailableException"/> when ComicVine cannot answer.
     /// </summary>
-    Task<ComicVineResult<IReadOnlyList<ExternalSeriesMetadata>>> ListVolumesNamedAsync(
+    Task<ComicVineVolumeList> ListVolumesNamedAsync(
         string title,
         int maxRequests,
         CancellationToken cancellationToken = default);

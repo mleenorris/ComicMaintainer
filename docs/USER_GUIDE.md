@@ -98,9 +98,16 @@ A field you changed yourself is never touched.
 An issue whose tags already name its ComicVine issue, because ComicTagger, Mylar or this app tagged it, needs no
 matching: `[CVDB12345]` or `[Issue ID 12345]` in `<Notes>`, or the issue's ComicVine page in `<Web>`. It is filled from
 that issue, Annuals and Specials too, and its volume becomes the ComicVine volume of its series' volume when that has none
-yet, so the rest of the volume is found there. A tag is not trusted when ComicVine's issue has another number than the
-file (the tags were copied from another file), when `<Notes>` and `<Web>` name different issues, or when ComicVine has no
-such issue: the issue is then matched as below, and the wrong id is replaced by the right one.
+yet, so the rest of the volume is found there. `[Issue ID 12345]` counts only when the notes say the tags came from
+Comic Vine: ComicTagger writes it for Metron and the Grand Comics Database too, and their ids are left alone.
+
+A tag is not trusted when `<Notes>` and `<Web>` name different issues, or ComicVine has no such issue: the issue is then
+matched as below, and the tags are kept as they are. When ComicVine's issue has another number than the file, the tags
+were copied from another file: the issue is matched, and the wrong id and page are replaced. A tag that cannot be read
+yet, because no ComicVine requests are left, waits for the next run rather than being matched by name.
+
+The id this app records after matching an issue by name is its own record of that match, not a tagger's: if you later set
+the issue's volume number or start year, the issue is matched again and the recorded id follows the new match.
 
 Any other issue is matched to a ComicVine volume through its series:
 

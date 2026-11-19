@@ -29,7 +29,11 @@ public static partial class ComicVineTagId
         return fromNotes ?? fromWeb;
     }
 
-    /// <summary>The issue id in <paramref name="notes"/>: <c>[CVDB12345]</c>, <c>[Issue ID 12345]</c> or an issue page.</summary>
+    /// <summary>
+    /// The issue id in <paramref name="notes"/>: <c>[CVDB12345]</c>, <c>[Issue ID 12345]</c> or an
+    /// issue page. ComicTagger writes <c>[Issue ID 12345]</c> for every source it tags from, so that
+    /// one counts only when the notes say the information came from Comic Vine, or name no source.
+    /// </summary>
     public static int? FromNotes(string? notes)
     {
         if (string.IsNullOrWhiteSpace(notes))
@@ -37,8 +41,7 @@ public static partial class ComicVineTagId
             return null;
         }
 
-        var token = NotesTokenPattern().Match(notes);
-        return token.Success ? Id(token.Groups["id"].Value) : IssuePageId(notes);
+        return ComicVineToken(notes) is { } token ? Id(token.Groups["id"].Value) : IssuePageId(notes);
     }
 
     /// <summary>The issue id of a ComicVine issue page in <paramref name="text"/> (<c>…/4000-12345/</c>); null otherwise.</summary>
@@ -71,20 +74,70 @@ public static partial class ComicVineTagId
             return token;
         }
 
-        if (NotesTokenPattern().IsMatch(notes))
+        // Another source's id (Metron's "[Issue ID 12345]") is left alone.
+        if (ComicVineToken(notes) is { } existing)
         {
-            return replace ? NotesTokenPattern().Replace(notes, token, 1) : notes;
+            return replace ? string.Concat(notes.AsSpan(0, existing.Index), token, notes.AsSpan(existing.Index + existing.Length)) : notes;
         }
 
         return $"{notes.TrimEnd()} {token}";
     }
 
+    /// <summary>
+    /// <paramref name="web"/> naming issue <paramref name="issueId"/> at <paramref name="page"/>:
+    /// the page when <paramref name="web"/> is empty or only the series' ComicVine page; with
+    /// <paramref name="replace"/>, another ComicVine issue's page in it is changed to this one, and
+    /// any other link beside it is kept. Otherwise <paramref name="web"/> as it is.
+    /// </summary>
+    public static string? WithIssuePage(string? web, string page, int issueId, bool replace)
+    {
+        if (string.IsNullOrWhiteSpace(web) || IsVolumePage(web))
+        {
+            return page;
+        }
+
+        if (replace && IssuePageId(web) is { } other && other != issueId)
+        {
+            return IssuePageUrlPattern().Replace(web, page, 1);
+        }
+
+        return web;
+    }
+
+    private static Match? ComicVineToken(string notes)
+    {
+        var cvdb = CvdbTokenPattern().Match(notes);
+        if (cvdb.Success)
+        {
+            return cvdb;
+        }
+
+        var issueId = IssueIdTokenPattern().Match(notes);
+        return issueId.Success && (ComicVineSourcePattern().IsMatch(notes) || !InfoFromPattern().IsMatch(notes)) ? issueId : null;
+    }
+
     private static int? Id(string digits)
         => int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var id) && id > 0 ? id : null;
 
-    // "[CVDB12345]" or "[Issue ID 12345]", as ComicTagger writes them.
-    [GeneratedRegex(@"\[\s*(?:CVDB\s*|Issue\s*ID\s*[:#]?\s*)(?<id>\d{1,9})\s*\]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
-    private static partial Regex NotesTokenPattern();
+    // "[CVDB12345]", ComicVine's own.
+    [GeneratedRegex(@"\[\s*CVDB\s*(?<id>\d{1,9})\s*\]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex CvdbTokenPattern();
+
+    // "[Issue ID 12345]", as ComicTagger writes it for any source.
+    [GeneratedRegex(@"\[\s*Issue\s*ID\s*[:#]?\s*(?<id>\d{1,9})\s*\]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex IssueIdTokenPattern();
+
+    // ComicTagger's "using info from Comic Vine".
+    [GeneratedRegex(@"comic\s*vine", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex ComicVineSourcePattern();
+
+    // ComicTagger's "using info from <source>", naming where the tags came from.
+    [GeneratedRegex(@"using\s+info\s+from", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex InfoFromPattern();
+
+    // A whole ComicVine issue page link, to replace in Web.
+    [GeneratedRegex(@"(?:https?://)?(?:www\.)?comicvine(?:\.gamespot)?\.com/\S*?(?<![\d-])4000-\d{1,9}/?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex IssuePageUrlPattern();
 
     // A ComicVine issue page: "https://comicvine.gamespot.com/batman-1/4000-12345/", "comicvine.com/issue/4000-12345".
     [GeneratedRegex(@"comicvine(?:\.gamespot)?\.com/\S*?(?<![\d-])4000-(?<id>\d{1,9})(?!\d)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]

@@ -162,7 +162,7 @@ public partial class ComicVineSeriesMetadataService : ExternalSeriesMetadataProv
     /// the title between them is asked for, and the exact name is checked here. A background job
     /// asks, so the wait for a permit is not limited.
     /// </remarks>
-    public async Task<ComicVineResult<IReadOnlyList<ExternalSeriesMetadata>>> ListVolumesNamedAsync(
+    public async Task<ComicVineVolumeList> ListVolumesNamedAsync(
         string title,
         int maxRequests,
         CancellationToken cancellationToken = default)
@@ -176,7 +176,7 @@ public partial class ComicVineSeriesMetadataService : ExternalSeriesMetadataProv
         var requests = 0;
         if (key.Length == 0 || filter is null || !CanQuery(config))
         {
-            return new ComicVineResult<IReadOnlyList<ExternalSeriesMetadata>>(volumes, requests);
+            return new ComicVineVolumeList(volumes, requests, Complete: false);
         }
 
         var apiKey = Uri.EscapeDataString(config.ComicVineApiKey ?? string.Empty);
@@ -198,11 +198,11 @@ public partial class ComicVineSeriesMetadataService : ExternalSeriesMetadataProv
             volumes.AddRange(page.Where(volume => NameKey(volume.CanonicalTitle) == key));
             if (page.Count < VolumeListPageSize)
             {
-                break;
+                return new ComicVineVolumeList(volumes, requests, Complete: true);
             }
         }
 
-        return new ComicVineResult<IReadOnlyList<ExternalSeriesMetadata>>(volumes, requests);
+        return new ComicVineVolumeList(volumes, requests, Complete: false);
     }
 
     private static string NameKey(string? text)

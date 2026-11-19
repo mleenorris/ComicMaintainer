@@ -133,11 +133,10 @@ public static class ComicInfoXml
         {
             var ns = root.Name.Namespace;
             var web = root.Element(ns + "Web")?.Value;
-            if (values.Web is not null
-                && (ComicVineTagId.IsVolumePage(web)
-                    || (values.ReplacesComicVineIssueId && ComicVineTagId.IssuePageId(web) is { } other && other != issueId)))
+            var issueWeb = values.Web is null ? web : ComicVineTagId.WithIssuePage(web, values.Web, issueId, values.ReplacesComicVineIssueId);
+            if (!string.Equals(web, issueWeb, StringComparison.Ordinal))
             {
-                SetElement(root, "Web", values.Web);
+                SetElement(root, "Web", issueWeb);
             }
 
             var notes = root.Element(ns + "Notes")?.Value;

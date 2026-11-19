@@ -216,6 +216,9 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<DateTime>("AppliedUtc")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("FromTag")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("IssueId")
                         .HasColumnType("INTEGER");
 

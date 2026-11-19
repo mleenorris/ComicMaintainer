@@ -386,19 +386,19 @@ public class ComicVineSeriesMetadataServiceTests
         var all = await service.ListVolumesNamedAsync("Batman: The Dark Knight", 5);
 
         // The longest part between the filter's separators is asked for; only the exact name is kept.
-        Assert.Equal(2, all.Requests);
+        Assert.Equal((2, true), (all.Requests, all.Complete));
         Assert.All(requests, uri =>
         {
             Assert.Contains("/volumes/?", uri);
             Assert.Contains("filter=name:The%20Dark%20Knight", uri);
             Assert.Contains("sort=start_year:asc", uri);
         });
-        Assert.Equal(50, all.Value.Count);
-        Assert.All(all.Value, volume => Assert.Equal("Batman: The Dark Knight", volume.CanonicalTitle));
+        Assert.Equal(50, all.Volumes.Count);
+        Assert.All(all.Volumes, volume => Assert.Equal("Batman: The Dark Knight", volume.CanonicalTitle));
 
         requests.Clear();
         var limited = await service.ListVolumesNamedAsync("Batman: The Dark Knight", 1);
-        Assert.Equal((1, 1), (limited.Requests, requests.Count));
+        Assert.Equal((1, 1, false), (limited.Requests, requests.Count, limited.Complete));
     }
 
     [Theory]
@@ -411,7 +411,7 @@ public class ComicVineSeriesMetadataServiceTests
 
         var result = await service.ListVolumesNamedAsync(title, 5);
 
-        Assert.Equal((0, 0), (result.Requests, result.Value.Count));
+        Assert.Equal((0, 0, false), (result.Requests, result.Volumes.Count, result.Complete));
     }
 
     [Fact]

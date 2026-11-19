@@ -863,7 +863,7 @@ Preferences are `{"defaultReaderMode","readingDirection","tapZonesEnabled","auto
 | `PUT` | `/api/metadata/series/{seriesTitle}/preferred-language` | Library write | `{"language":"en"}`; `null` clears |
 | `PUT` | `/api/metadata/series/{seriesTitle}/name` | Library write | Pin the shown name: `{"name":"..."}`; `null` reverts to automatic |
 
-**`GET /api/metadata/providers`** returns `{"providers":[{"name","enabled","configured","reachable","status_message","last_error","last_success_utc","last_failure_utc","success_count","failure_count","rate_limited","rate_limited_until_utc"}]}`. The series providers come first, then `Metron`, which checks ComicVine's volumes rather than providing series: it is reachable when a probe (at most one every 10 minutes) succeeds, and `last_error` says why it is left out.
+**`GET /api/metadata/providers`** returns `{"providers":[{"name","enabled","configured","reachable","status_message","last_error","last_success_utc","last_failure_utc","success_count","failure_count","rate_limited","rate_limited_until_utc"}]}`. The series providers come first, then `Metron`, which checks ComicVine's volumes rather than providing series: `reachable` follows its latest request (lookups, and a probe at most every 10 minutes), `last_error` says why it is left out, and `rate_limited` is true while it is paused after a failure (until `rate_limited_until_utc`) or out of requests.
 
 **Refresh jobs.** The three queueing routes and `refresh/folder` return `{"jobId","totalSeries"}`. `match-unmatched` returns a null `jobId` when nothing is unmatched. `refresh-selected` takes `{"series":[...]}`. `refresh/folder` takes `{"seriesId":"...","titles":[...]}` (either is enough) and also returns `titles`.
 

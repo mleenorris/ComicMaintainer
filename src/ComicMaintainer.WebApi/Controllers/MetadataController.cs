@@ -242,6 +242,8 @@ public class MetadataController : ControllerBase
     [FailureMessage("Error retrieving provider health")]
     public async Task<ActionResult<object>> GetProviders(CancellationToken cancellationToken)
     {
+        // Metron is checked alongside the series providers, so a slow Metron does not add to their time.
+        var metron = _metron.CheckHealthAsync(cancellationToken);
         var providers = new List<ProviderHealth>();
         if (_externalMetadata is CompositeExternalSeriesMetadataService composite)
         {
@@ -254,7 +256,7 @@ public class MetadataController : ControllerBase
 
         // Metron is not a series provider: it checks ComicVine's volumes, and has its own entry.
         var merged = MergeAniListProviders(providers);
-        merged.Add(await _metron.CheckHealthAsync(cancellationToken));
+        merged.Add(await metron);
         return Ok(new { providers = merged });
     }
 

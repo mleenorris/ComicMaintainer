@@ -16,13 +16,14 @@ namespace ComicMaintainer.Core.Services;
 /// <summary>
 /// Default <see cref="IMetronClient"/>. Metron signs a request in with an API token (a Knox token,
 /// sent as <c>Authorization: Bearer</c>), which is preferred, or with the account's username and
-/// password (HTTP Basic), always over https. It allows 20 requests a minute and 5,000 a day per
-/// account: this client stays under 18 a minute (a background run waits for the next one; an
-/// interactive one does not) and 4,900 a day, remembers each answer for a week (a series' volume
-/// number does not change, and the answers are dropped when the credentials or address change), and
-/// after a refusal or failure asks nothing for 10 minutes. A rejected sign-in stops it until the
-/// credentials or address change, or for 6 hours, and is shown in the settings (<see cref="Problem"/>)
-/// and on the provider status screen (<see cref="CheckHealthAsync"/>).
+/// password (HTTP Basic), always over https; a refused token falls back to the username and password
+/// when they are set. Metron allows 20 requests a minute and 5,000 a day per account: this client
+/// stays under 18 a minute (a background run waits for the next one; an interactive one does not)
+/// and 4,900 a day, remembers each answer for a week (a series' volume number does not change, and
+/// the answers are dropped when the credentials or address change), and after a refusal or failure
+/// asks nothing for 10 minutes. A rejected sign-in stops it until the credentials or address change,
+/// or for 6 hours, and is shown in the settings (<see cref="Problem"/>) and on the provider status
+/// screen (<see cref="CheckHealthAsync"/>).
 /// </summary>
 public sealed class MetronClient : IMetronClient
 {
@@ -41,7 +42,7 @@ public sealed class MetronClient : IMetronClient
     private static readonly TimeSpan AnswerLifetime = TimeSpan.FromDays(7);
     private static readonly TimeSpan PauseAfterFailure = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan RetryRejectedSignIn = TimeSpan.FromHours(6);
-    private static readonly TimeSpan ProbeLifetime = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan ProbeInterval = TimeSpan.FromMinutes(10);
 
     private readonly IHttpClientFactory _httpClients;
     private readonly IOptionsMonitor<AppSettings> _settings;
@@ -50,18 +51,22 @@ public sealed class MetronClient : IMetronClient
     private readonly ConcurrentDictionary<int, (MetronSeries? Series, DateTimeOffset At)> _answers = new();
     private readonly Queue<DateTimeOffset> _recent = new();
     private readonly object _lock = new();
+    private readonly SemaphoreSlim _probeGate = new(1, 1);
     private DateTimeOffset _pausedUntil = DateTimeOffset.MinValue;
     private DateOnly _day;
     private int _today;
     private string? _account;
     private string? _rejectedAccount;
     private DateTimeOffset _rejectedAt;
+    private string? _rejectedProblem;
+    private string? _tokenRejectedAccount;
     private string? _problem;
+    private bool? _reachable;
+    private DateTimeOffset _probedAt = DateTimeOffset.MinValue;
     private long _successes;
     private long _failures;
     private DateTime? _lastSuccessUtc;
     private DateTime? _lastFailureUtc;
-    private (string Account, DateTimeOffset At, bool Reachable)? _probe;
 
     public MetronClient(IHttpClientFactory httpClients, IOptionsMonitor<AppSettings> settings, ILogger<MetronClient> logger, TimeProvider time)
     {
@@ -79,9 +84,10 @@ public sealed class MetronClient : IMetronClient
     {
         get
         {
+            var config = _settings.CurrentValue;
             lock (_lock)
             {
-                return IsConfigured && _account == Account(_settings.CurrentValue) ? _problem : null;
+                return Configured(config) && _account == Account(config) ? _problem : null;
             }
         }
     }
@@ -127,50 +133,72 @@ public sealed class MetronClient : IMetronClient
     public async Task<ProviderHealth> CheckHealthAsync(CancellationToken cancellationToken = default)
     {
         var config = _settings.CurrentValue;
-        var health = Snapshot();
-        health.Enabled = config.EnableExternalSeriesMetadata;
-        health.Configured = Configured(config);
-        if (!health.Enabled)
+        var enabled = config.EnableExternalSeriesMetadata;
+        var configured = Configured(config);
+        if (!enabled || !configured)
         {
-            health.StatusMessage = "Disabled in settings";
+            var health = Snapshot(config);
+            health.Enabled = enabled;
+            health.Configured = configured;
+            health.Reachable = null;
+            health.LastError = null;
+            health.StatusMessage = enabled ? "Missing API token (or username and password)" : "Disabled in settings";
             return health;
         }
 
-        if (!health.Configured)
+        // A probe at most every 10 minutes, one at a time, so opening the screen costs next to nothing.
+        // Every lookup in between tells as much: reachable follows the latest request of any kind.
+        var notProbed = false;
+        await _probeGate.WaitAsync(cancellationToken);
+        try
         {
-            health.StatusMessage = "Missing API token (or username and password)";
-            return health;
-        }
-
-        // A probe at most every 10 minutes, so opening the screen costs next to nothing.
-        var account = Account(config);
-        bool fresh;
-        bool reachable;
-        lock (_lock)
-        {
-            (fresh, reachable) = _probe is { } probe && probe.Account == account && _time.GetUtcNow() - probe.At < ProbeLifetime
-                ? (true, probe.Reachable)
-                : (false, false);
-        }
-
-        if (!fresh)
-        {
-            reachable = Prepare(config, ProbeVolumeId, out var url)
-                        && await TakePermitAsync(wait: false, cancellationToken)
-                        && await GetAsync(config, url, cancellationToken) is { } document
-                        && Dispose(document);
+            bool due;
             lock (_lock)
             {
-                _probe = (account, _time.GetUtcNow(), reachable);
+                due = _account != Account(config) || _time.GetUtcNow() - _probedAt >= ProbeInterval;
+            }
+
+            if (due && Prepare(config, ProbeVolumeId, out var url))
+            {
+                if (await TakePermitAsync(wait: false, cancellationToken))
+                {
+                    lock (_lock)
+                    {
+                        _probedAt = _time.GetUtcNow();
+                    }
+
+                    (await GetAsync(config, url, cancellationToken))?.Dispose();
+                }
+                else
+                {
+                    // Out of requests: not checked now, and nothing is concluded from that.
+                    notProbed = true;
+                }
             }
         }
+        finally
+        {
+            _probeGate.Release();
+        }
 
-        health = Snapshot();
-        health.Enabled = true;
-        health.Configured = true;
-        health.Reachable = reachable;
-        health.StatusMessage = reachable ? "Reachable" : Problem ?? "Not reachable now";
-        return health;
+        var result = Snapshot(config);
+        result.Enabled = true;
+        result.Configured = true;
+        lock (_lock)
+        {
+            var paused = _time.GetUtcNow() < _pausedUntil;
+            result.RateLimited = notProbed || paused || _today >= RequestsPerDay;
+            result.RateLimitedUntilUtc = paused ? _pausedUntil.UtcDateTime : null;
+        }
+
+        result.StatusMessage = result.Reachable switch
+        {
+            true => "Reachable",
+            _ when result.LastError is { } problem => problem,
+            _ when notProbed => "Request limit reached: not checked now",
+            _ => "Not checked yet",
+        };
+        return result;
     }
 
     /// <summary>The first series of a Metron list answer; null when it lists none.</summary>
@@ -195,62 +223,119 @@ public sealed class MetronClient : IMetronClient
         return null;
     }
 
+    /// <summary>
+    /// The token as Metron expects it after <c>Bearer</c>: a <c>Bearer</c> or <c>Token</c> pasted
+    /// in front of it, and surrounding spaces, taken off; null when there is none.
+    /// </summary>
+    internal static string? CleanToken(string? token)
+    {
+        var text = token?.Trim();
+        foreach (var prefix in new[] { "Bearer ", "Token " })
+        {
+            if (text is not null && text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                text = text[prefix.Length..].Trim();
+            }
+        }
+
+        return string.IsNullOrEmpty(text) ? null : text;
+    }
+
+    private static bool HasPassword(AppSettings config)
+        => !string.IsNullOrWhiteSpace(config.MetronUsername) && !string.IsNullOrWhiteSpace(config.MetronPassword);
+
     private static bool Configured(AppSettings config)
-        => config.EnableExternalSeriesMetadata
-           && (!string.IsNullOrWhiteSpace(config.MetronApiToken)
-               || (!string.IsNullOrWhiteSpace(config.MetronUsername) && !string.IsNullOrWhiteSpace(config.MetronPassword)));
+        => config.EnableExternalSeriesMetadata && (CleanToken(config.MetronApiToken) is not null || HasPassword(config));
 
     // The series lookup's address, after the account is checked: false when the address is not
     // https, or the account's sign-in was refused lately. A changed account starts afresh.
     private bool Prepare(AppSettings config, int comicVineVolumeId, out Uri url)
     {
-        if (!Uri.TryCreate($"{config.MetronBaseUrl.TrimEnd('/')}/series/?cv_id={comicVineVolumeId.ToString(CultureInfo.InvariantCulture)}", UriKind.Absolute, out url!)
-            || url.Scheme != Uri.UriSchemeHttps)
-        {
-            Note(config, "The Metron address must be an https address, such as https://metron.cloud/api");
-            return false;
-        }
-
         var account = Account(config);
         lock (_lock)
         {
-            // Answers belong to an account and address: another one asks again.
+            // Answers and what is known of Metron belong to an account and address: another one starts afresh.
             if (_account != account)
             {
                 _account = account;
                 _answers.Clear();
                 _problem = null;
+                _reachable = null;
+                _probedAt = DateTimeOffset.MinValue;
                 _pausedUntil = DateTimeOffset.MinValue;
-                _probe = null;
+            }
+        }
+
+        if (!Uri.TryCreate($"{config.MetronBaseUrl.TrimEnd('/')}/series/?cv_id={comicVineVolumeId.ToString(CultureInfo.InvariantCulture)}", UriKind.Absolute, out url!)
+            || url.Scheme != Uri.UriSchemeHttps)
+        {
+            lock (_lock)
+            {
+                _reachable = false;
             }
 
+            Note(config, "The Metron address must be an https address, such as https://metron.cloud/api");
+            return false;
+        }
+
+        lock (_lock)
+        {
             // A refused sign-in is tried again after a while: the account may have been fixed on Metron.
-            return !(_rejectedAccount == account && _time.GetUtcNow() - _rejectedAt < RetryRejectedSignIn);
+            if (_rejectedAccount == account && _time.GetUtcNow() - _rejectedAt < RetryRejectedSignIn)
+            {
+                // Still why it is left out, after switching to another account and back.
+                _problem ??= _rejectedProblem;
+                _reachable = false;
+                return false;
+            }
+
+            return true;
         }
     }
 
-    // One signed-in request; the parsed answer, or null after recording why there is none.
+    // One signed-in request; the parsed answer, or null after recording why there is none. A refused
+    // token is tried again once with the username and password, which are used from then on.
     private async Task<JsonDocument?> GetAsync(AppSettings config, Uri url, CancellationToken cancellationToken)
     {
+        var account = Account(config);
+        string? token;
+        lock (_lock)
+        {
+            token = _tokenRejectedAccount == account ? null : CleanToken(config.MetronApiToken);
+        }
+
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Authorization = string.IsNullOrWhiteSpace(config.MetronApiToken)
+            request.Headers.Authorization = token is null
                 ? new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{config.MetronUsername}:{config.MetronPassword}")))
-                : new AuthenticationHeaderValue("Bearer", config.MetronApiToken.Trim());
+                : new AuthenticationHeaderValue("Bearer", token);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             using var response = await _httpClients.CreateClient(HttpClientName).SendAsync(request, cancellationToken);
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                lock (_lock)
+                if (token is not null && HasPassword(config))
                 {
-                    _rejectedAccount = Account(config);
-                    _rejectedAt = _time.GetUtcNow();
+                    lock (_lock)
+                    {
+                        _tokenRejectedAccount = account;
+                    }
+
+                    _logger.LogWarning("Metron refused the API token; signing in with the username and password instead");
+                    return await GetAsync(config, url, cancellationToken);
                 }
 
-                Fail(config, string.IsNullOrWhiteSpace(config.MetronApiToken)
+                var refused = token is null
                     ? "Metron refused the username and password: check them under Settings"
-                    : "Metron refused the API token: check it under Settings");
+                    : "Metron refused the API token: check it under Settings";
+                lock (_lock)
+                {
+                    _rejectedAccount = account;
+                    _rejectedAt = _time.GetUtcNow();
+                    _rejectedProblem = refused;
+                }
+
+                Fail(config, refused);
                 return null;
             }
 
@@ -268,6 +353,7 @@ public sealed class MetronClient : IMetronClient
             lock (_lock)
             {
                 _problem = null;
+                _reachable = true;
                 _successes++;
                 _lastSuccessUtc = _time.GetUtcNow().UtcDateTime;
             }
@@ -349,6 +435,7 @@ public sealed class MetronClient : IMetronClient
     {
         lock (_lock)
         {
+            _reachable = false;
             _failures++;
             _lastFailureUtc = _time.GetUtcNow().UtcDateTime;
         }
@@ -373,14 +460,18 @@ public sealed class MetronClient : IMetronClient
         }
     }
 
-    private ProviderHealth Snapshot()
+    // The status entry, with what is known of the account set now only.
+    private ProviderHealth Snapshot(AppSettings config)
     {
+        var current = Account(config);
         lock (_lock)
         {
+            var ours = _account == current;
             return new ProviderHealth
             {
                 Name = ProviderName,
-                LastError = _problem,
+                Reachable = ours ? _reachable : null,
+                LastError = ours ? _problem : null,
                 LastSuccessUtc = _lastSuccessUtc,
                 LastFailureUtc = _lastFailureUtc,
                 SuccessCount = _successes,
@@ -389,15 +480,9 @@ public sealed class MetronClient : IMetronClient
         }
     }
 
-    private static bool Dispose(JsonDocument document)
-    {
-        document.Dispose();
-        return true;
-    }
-
     // Who is asked, and where: answers and a refused sign-in belong to it. The secrets are not kept.
     private static string Account(AppSettings config)
-        => $"{config.MetronBaseUrl.TrimEnd('/')}|{config.MetronUsername}|{config.MetronPassword?.GetHashCode(StringComparison.Ordinal)}|{config.MetronApiToken?.Trim().GetHashCode(StringComparison.Ordinal)}";
+        => $"{config.MetronBaseUrl.TrimEnd('/')}|{config.MetronUsername}|{config.MetronPassword?.GetHashCode(StringComparison.Ordinal)}|{CleanToken(config.MetronApiToken)?.GetHashCode(StringComparison.Ordinal)}";
 
     private static int? Int(JsonElement item, string name)
         => item.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) ? number : null;

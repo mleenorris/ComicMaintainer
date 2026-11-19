@@ -7,11 +7,15 @@ EXPOSE 5000
 # health check. Archives (ZIP and RAR) are read in-process by SharpCompress, so no unrar or 7-Zip tools are installed;
 # recommended packages are left out to keep the image, and the CVEs scanned in it, small. The upgrade applies OS
 # security fixes published since the base image was built, which the image scan in CI would otherwise fail on.
+# The Ubuntu base also ships Canonical's pebble service manager, a Go binary the app never runs (the entrypoint
+# starts it with gosu). It is removed: a Go security fix reaches pebble only when Canonical rebuilds it, and until
+# then the image scan fails on it (CVE-2026-97054, fixed in Go 1.27.4; pebble was built with Go 1.27.3).
 RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends \
         gosu \
         curl \
+    && rm -f /usr/bin/pebble \
     && rm -rf /var/lib/apt/lists/*
 
 # Pin the build stage to the machine doing the building rather than the image being produced.

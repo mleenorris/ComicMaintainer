@@ -391,8 +391,9 @@ public static class VolumeEvidence
         do
         {
             before = key;
-            // Evaluated lazily, so each suffix is tested against the key as already shortened.
-            foreach (var suffix in PublisherSuffixes.Where(suffix => key.EndsWith(suffix, StringComparison.Ordinal) && key.Length > suffix.Length))
+            var suffix = PublisherSuffixes.FirstOrDefault(
+                candidate => key.EndsWith(candidate, StringComparison.Ordinal) && key.Length > candidate.Length);
+            if (suffix is not null)
             {
                 key = key[..^suffix.Length];
             }

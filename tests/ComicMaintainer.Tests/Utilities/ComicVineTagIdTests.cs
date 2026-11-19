@@ -79,17 +79,37 @@ public class ComicVineTagIdTests
         var recorded = ComicVineTagId.WithIssueId(notes, 12345, replace, matchedByName);
 
         Assert.Equal(expected, recorded);
-        Assert.Equal(expected.Contains(ComicVineTagId.NameMatchMarker, StringComparison.Ordinal), ComicVineTagId.IsNameMatch(recorded));
+        Assert.Equal(
+            expected.Contains(ComicVineTagId.NameMatchMarker, StringComparison.Ordinal) ? ComicVineIdSource.NameMatch : ComicVineIdSource.Tagger,
+            ComicVineTagId.Read(recorded, null).Source);
     }
 
     [Fact]
-    public void IsNameMatch_NeedsTheMarkerAndAComicVineId()
+    public void Read_TellsATaggersIdFromTheAppsOwnMatch_AndFromAWebLinkAlone()
     {
-        Assert.False(ComicVineTagId.IsNameMatch("(matched by name in ComicMaintainer)"));
-        Assert.False(ComicVineTagId.IsNameMatch("[CVDB5]"));
-        Assert.False(ComicVineTagId.IsNameMatch(null));
-        Assert.True(ComicVineTagId.IsNameMatch("[CVDB5] (Matched by name in ComicMaintainer)"));
-        Assert.True(ComicInfoXml.Read(XDocument.Parse("<ComicInfo><Notes>[CVDB5] (matched by name in ComicMaintainer)</Notes></ComicInfo>"))!.ComicVineIssueMatchedByName);
+        Assert.Equal((null, ComicVineIdSource.None), ComicVineTagId.Read("(matched by name in ComicMaintainer)", null));
+        Assert.Equal((null, ComicVineIdSource.None), ComicVineTagId.Read(null, null));
+        Assert.Equal((5, ComicVineIdSource.Tagger), ComicVineTagId.Read("[CVDB5]", null));
+        Assert.Equal((5, ComicVineIdSource.NameMatch), ComicVineTagId.Read("[CVDB5] (Matched by name in ComicMaintainer)", null));
+        Assert.Equal((5, ComicVineIdSource.NameMatch), ComicVineTagId.Read("[CVDB5] (matched by name in ComicMaintainer)", "https://comicvine.gamespot.com/x/4000-5/"));
+        Assert.Equal((9, ComicVineIdSource.WebOnly), ComicVineTagId.Read(null, "https://comicvine.gamespot.com/x/4000-9/"));
+        // The marker belongs to the token right before it.
+        Assert.Equal((7, ComicVineIdSource.Tagger), ComicVineTagId.Read("[CVDB7] Later notes (matched by name in ComicMaintainer)", null));
+        // A tagger's id beats the app's own match: re-tagged with ComicTagger after a name match.
+        Assert.Equal((8, ComicVineIdSource.Tagger), ComicVineTagId.Read("[CVDB5] (matched by name in ComicMaintainer) [CVDB8]", null));
+        Assert.Equal((8, ComicVineIdSource.Tagger),
+            ComicVineTagId.Read("[CVDB5] (matched by name in ComicMaintainer) Tagged with ComicTagger using info from Comic Vine on 2025-01-01. [Issue ID 8]", null));
+        Assert.Equal(ComicVineIdSource.NameMatch,
+            ComicInfoXml.Read(XDocument.Parse("<ComicInfo><Notes>[CVDB5] (matched by name in ComicMaintainer)</Notes></ComicInfo>"))!.ComicVineIssueIdSource);
+    }
+
+    [Theory]
+    // The app's own earlier records give way to what is recorded now.
+    [InlineData("[CVDB5] (matched by name in ComicMaintainer) [CVDB8]", false, false, "[CVDB8]")]
+    [InlineData("Notes. [CVDB5] (matched by name in ComicMaintainer)", false, true, "Notes. [CVDB12345] (matched by name in ComicMaintainer)")]
+    public void WithIssueId_TakesOutTheAppsOwnEarlierRecords(string notes, bool replace, bool matchedByName, string expected)
+    {
+        Assert.Equal(expected, ComicVineTagId.WithIssueId(notes, 12345, replace, matchedByName));
     }
 
     [Theory]

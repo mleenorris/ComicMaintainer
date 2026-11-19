@@ -1483,7 +1483,7 @@ namespace ComicMaintainer.Core.Migrations
                             b1.Property<int?>("ComicVineIssueId")
                                 .HasColumnType("INTEGER");
 
-                            b1.Property<bool>("ComicVineIssueMatchedByName")
+                            b1.Property<int>("ComicVineIssueIdSource")
                                 .HasColumnType("INTEGER");
 
                             b1.Property<string>("Format")

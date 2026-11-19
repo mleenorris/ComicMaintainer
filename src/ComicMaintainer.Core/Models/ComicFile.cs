@@ -98,11 +98,11 @@ public class ComicMetadata
     public int? ComicVineIssueId { get; set; }
 
     /// <summary>
-    /// True when <see cref="ComicVineIssueId"/> is this application's own record of a name match
-    /// (see <see cref="Utilities.ComicVineTagId.NameMatchMarker"/>) rather than a tagger's id. Read
-    /// from the archive on every scan.
+    /// Where <see cref="ComicVineIssueId"/> comes from: a tagger, this application's own name match
+    /// (see <see cref="Utilities.ComicVineTagId.NameMatchMarker"/>), or a web link alone. Read from
+    /// the archive on every scan.
     /// </summary>
-    public bool ComicVineIssueMatchedByName { get; set; }
+    public ComicVineIdSource ComicVineIssueIdSource { get; set; }
     public List<string> Authors { get; set; } = new();
     public List<string> Tags { get; set; } = new();
     public bool IsUserEdited { get; set; }
@@ -125,7 +125,7 @@ public class ComicMetadata
             Format = this.Format,
             VolumeYear = this.VolumeYear,
             ComicVineIssueId = this.ComicVineIssueId,
-            ComicVineIssueMatchedByName = this.ComicVineIssueMatchedByName,
+            ComicVineIssueIdSource = this.ComicVineIssueIdSource,
             Authors = new List<string>(this.Authors),
             Tags = new List<string>(this.Tags),
             IsUserEdited = this.IsUserEdited,

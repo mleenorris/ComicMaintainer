@@ -1,48 +1,65 @@
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
+using ComicMaintainer.Core.Models;
 
 namespace ComicMaintainer.Core.Utilities;
 
 /// <summary>
-/// The ComicVine issue id taggers record in ComicInfo, which names the issue exactly, with no
-/// matching. ComicTagger writes it into <c>&lt;Notes&gt;</c> as <c>[CVDB12345]</c> (older versions
+/// The ComicVine issue id recorded in ComicInfo, which names the issue exactly, with no matching.
+/// ComicTagger writes it into <c>&lt;Notes&gt;</c> as <c>[CVDB12345]</c> (older versions
 /// <c>[Issue ID 12345]</c>), and ComicTagger and Mylar write the issue's ComicVine page into
 /// <c>&lt;Web&gt;</c> (<c>https://comicvine.gamespot.com/batman-1/4000-12345/</c>). The application
-/// writes both once it has filled an issue from ComicVine (see <see cref="WithIssueId"/>), so the
-/// match survives a rename, a move or a lost database.
+/// records the issue it filled a file from too (see <see cref="WithIssueId"/>), so the match
+/// survives a rename, a move or a lost database; when it matched the issue by the series' names, it
+/// says so (<see cref="NameMatchMarker"/>), as that is its own guess, not a tagger's.
 /// </summary>
 public static partial class ComicVineTagId
 {
     /// <summary>
-    /// The ComicVine issue id <paramref name="notes"/> and <paramref name="web"/> name; null when
-    /// neither names one, or they name different issues (one of them is wrong, so neither is trusted).
+    /// What follows the id this application records after matching an issue by its series' names,
+    /// right after the id's token.
     /// </summary>
-    public static int? FromTags(string? notes, string? web)
-    {
-        var fromNotes = FromNotes(notes);
-        var fromWeb = IssuePageId(web);
-        if (fromNotes is { } a && fromWeb is { } b && a != b)
-        {
-            return null;
-        }
-
-        return fromNotes ?? fromWeb;
-    }
+    public const string NameMatchMarker = "(matched by name in ComicMaintainer)";
 
     /// <summary>
-    /// The issue id in <paramref name="notes"/>: <c>[CVDB12345]</c>, <c>[Issue ID 12345]</c> or an
-    /// issue page. ComicTagger writes <c>[Issue ID 12345]</c> for every source it tags from, so that
-    /// one counts only when the notes say the information came from Comic Vine, or name no source.
+    /// The ComicVine issue <paramref name="notes"/> and <paramref name="web"/> name, and where the id
+    /// comes from (see <see cref="ComicVineIdSource"/>). A tagger's id in the notes is preferred to
+    /// this application's own name match. Null with <see cref="ComicVineIdSource.None"/> when neither
+    /// names one, or the notes and the web link name different issues (one of them is wrong, so
+    /// neither is trusted).
     /// </summary>
-    public static int? FromNotes(string? notes)
+    public static (int? Id, ComicVineIdSource Source) Read(string? notes, string? web)
     {
-        if (string.IsNullOrWhiteSpace(notes))
+        var fromWeb = IssuePageId(web);
+        int? fromNotes = null;
+        var source = ComicVineIdSource.None;
+        if (!string.IsNullOrWhiteSpace(notes))
         {
-            return null;
+            if (TaggerToken(notes) is { } tagger)
+            {
+                (fromNotes, source) = (Id(tagger.Groups["id"].Value), ComicVineIdSource.Tagger);
+            }
+            else if (OwnTokenPattern().Match(notes) is { Success: true } own)
+            {
+                (fromNotes, source) = (Id(own.Groups["id"].Value), ComicVineIdSource.NameMatch);
+            }
+            else if (IssuePageId(notes) is { } page)
+            {
+                (fromNotes, source) = (page, ComicVineIdSource.Tagger);
+            }
         }
 
-        return ComicVineToken(notes) is { } token ? Id(token.Groups["id"].Value) : IssuePageId(notes);
+        if (fromNotes is { } a)
+        {
+            return fromWeb is { } b && a != b ? (null, ComicVineIdSource.None) : (a, source);
+        }
+
+        return fromWeb is { } webId ? (webId, ComicVineIdSource.WebOnly) : (null, ComicVineIdSource.None);
     }
+
+    /// <summary>The issue id <see cref="Read"/> finds, without its source.</summary>
+    public static int? FromTags(string? notes, string? web) => Read(notes, web).Id;
 
     /// <summary>The issue id of a ComicVine issue page in <paramref name="text"/> (<c>…/4000-12345/</c>); null otherwise.</summary>
     public static int? IssuePageId(string? text)
@@ -61,55 +78,36 @@ public static partial class ComicVineTagId
         => !string.IsNullOrWhiteSpace(web) && VolumePagePattern().IsMatch(web.Trim());
 
     /// <summary>
-    /// What follows the id this application records after matching an issue by its series' names:
-    /// its own guess, unlike a tagger's id. Kept in the archive, so it is known after a rename, a move
-    /// or a lost database.
-    /// </summary>
-    public const string NameMatchMarker = "(matched by name in ComicMaintainer)";
-
-    /// <summary>
-    /// True when the ComicVine id in <paramref name="notes"/> is this application's own record of a
-    /// name match (see <see cref="NameMatchMarker"/>), not a tagger's.
-    /// </summary>
-    public static bool IsNameMatch(string? notes)
-        => !string.IsNullOrWhiteSpace(notes) && ComicVineToken(notes) is not null
-           && notes.Contains(NameMatchMarker, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// <paramref name="notes"/> recording issue <paramref name="issueId"/>: a ComicVine id already in
-    /// it is kept, unless <paramref name="replace"/> is true, when it is changed to this issue (the file
-    /// was filled from another issue before); otherwise <c>[CVDB12345]</c> is appended, after a space,
-    /// so the notes a user or tagger wrote stay as they are. With <paramref name="matchedByName"/>,
-    /// the id written is followed by <see cref="NameMatchMarker"/>; a tagger's id that is kept gets
-    /// no marker.
+    /// <paramref name="notes"/> recording issue <paramref name="issueId"/>. This application's own
+    /// earlier records are taken out first: they are superseded by whatever is recorded now. Then a
+    /// tagger's ComicVine id is kept, unless <paramref name="replace"/> is true, when it is changed to
+    /// this issue (it was shown wrong); otherwise <c>[CVDB12345]</c> is appended, after a space, so the
+    /// notes a user or tagger wrote stay as they are. With <paramref name="matchedByName"/>, the id
+    /// written is followed by <see cref="NameMatchMarker"/>. Another source's id (Metron's
+    /// <c>[Issue ID 12345]</c>) is never touched.
     /// </summary>
     public static string WithIssueId(string? notes, int issueId, bool replace, bool matchedByName)
     {
         var token = $"[CVDB{issueId.ToString(CultureInfo.InvariantCulture)}]";
         var written = matchedByName ? $"{token} {NameMatchMarker}" : token;
-        if (string.IsNullOrWhiteSpace(notes))
+        var rest = string.IsNullOrWhiteSpace(notes) ? string.Empty : OwnTokenWithSpacePattern().Replace(notes, string.Empty).Trim();
+        if (rest.Length == 0)
         {
             return written;
         }
 
-        // Another source's id (Metron's "[Issue ID 12345]") is left alone.
-        if (ComicVineToken(notes) is { } existing)
+        if (TaggerToken(rest) is { } tagger)
         {
             if (!replace)
             {
-                return notes;
+                // A tagger's id names the issue: nothing of this application's is added beside it.
+                return string.Equals(rest, notes?.Trim(), StringComparison.Ordinal) ? notes! : rest;
             }
 
-            var replaced = string.Concat(notes.AsSpan(0, existing.Index), token, notes.AsSpan(existing.Index + existing.Length));
-            var hasMarker = replaced.Contains(NameMatchMarker, StringComparison.OrdinalIgnoreCase);
-            return matchedByName && !hasMarker
-                ? replaced.Insert(existing.Index + token.Length, $" {NameMatchMarker}")
-                : !matchedByName && hasMarker
-                    ? MarkerPattern().Replace(replaced, string.Empty, 1)
-                    : replaced;
+            return new StringBuilder(rest).Remove(tagger.Index, tagger.Length).Insert(tagger.Index, written).ToString();
         }
 
-        return $"{notes.TrimEnd()} {written}";
+        return $"{rest} {written}";
     }
 
     /// <summary>
@@ -133,12 +131,16 @@ public static partial class ComicVineTagId
         return web;
     }
 
-    private static Match? ComicVineToken(string notes)
+    // A tagger's ComicVine id in the notes: "[CVDB12345]" not followed by the name match marker, or
+    // "[Issue ID 12345]" when ComicTagger's "using info from" clause names Comic Vine, or none.
+    private static Match? TaggerToken(string notes)
     {
-        var cvdb = CvdbTokenPattern().Match(notes);
-        if (cvdb.Success)
+        foreach (Match cvdb in CvdbTokenPattern().Matches(notes))
         {
-            return cvdb;
+            if (!notes.AsSpan(cvdb.Index + cvdb.Length).TrimStart().StartsWith(NameMatchMarker, StringComparison.OrdinalIgnoreCase))
+            {
+                return cvdb;
+            }
         }
 
         var issueId = IssueIdTokenPattern().Match(notes);
@@ -159,6 +161,14 @@ public static partial class ComicVineTagId
     [GeneratedRegex(@"\[\s*CVDB\s*(?<id>\d{1,9})\s*\]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
     private static partial Regex CvdbTokenPattern();
 
+    // This application's record of a name match: "[CVDB12345] (matched by name in ComicMaintainer)".
+    [GeneratedRegex(@"\[\s*CVDB\s*(?<id>\d{1,9})\s*\]\s*\(matched by name in ComicMaintainer\)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex OwnTokenPattern();
+
+    // The same, with the space before it, to take out.
+    [GeneratedRegex(@"\s?\[\s*CVDB\s*\d{1,9}\s*\]\s*\(matched by name in ComicMaintainer\)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex OwnTokenWithSpacePattern();
+
     // "[Issue ID 12345]", as ComicTagger writes it for any source.
     [GeneratedRegex(@"\[\s*Issue\s*ID\s*[:#]?\s*(?<id>\d{1,9})\s*\]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
     private static partial Regex IssueIdTokenPattern();
@@ -170,10 +180,6 @@ public static partial class ComicVineTagId
     // ComicTagger's "using info from <source> on <date>", naming where the tags came from.
     [GeneratedRegex(@"using\s+info\s+from\s+(?<source>[^.\[\]\r\n]*?)(?:\s+on\s|[.\[\]\r\n]|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
     private static partial Regex InfoFromPattern();
-
-    // The name match marker with the space before it, to take out.
-    [GeneratedRegex(@"\s?\(matched by name in ComicMaintainer\)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
-    private static partial Regex MarkerPattern();
 
     // A whole ComicVine issue page link, to replace in Web.
     [GeneratedRegex(@"(?:https?://)?(?:www\.)?comicvine(?:\.gamespot)?\.com/\S*?(?<![\d-])4000-\d{1,9}/?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]

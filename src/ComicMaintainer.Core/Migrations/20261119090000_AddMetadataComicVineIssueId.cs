@@ -16,8 +16,8 @@ namespace ComicMaintainer.Core.Migrations
                 type: "INTEGER",
                 nullable: true);
 
-            migrationBuilder.AddColumn<bool>(
-                name: "Metadata_ComicVineIssueMatchedByName",
+            migrationBuilder.AddColumn<int>(
+                name: "Metadata_ComicVineIssueIdSource",
                 table: "ComicFiles",
                 type: "INTEGER",
                 nullable: true);
@@ -41,7 +41,7 @@ namespace ComicMaintainer.Core.Migrations
                 table: "ComicVineFileStates");
 
             migrationBuilder.DropColumn(
-                name: "Metadata_ComicVineIssueMatchedByName",
+                name: "Metadata_ComicVineIssueIdSource",
                 table: "ComicFiles");
 
             migrationBuilder.DropColumn(

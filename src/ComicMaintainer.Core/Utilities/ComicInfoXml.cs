@@ -66,8 +66,8 @@ public static class ComicInfoXml
             Year = int.TryParse(root.Element(ns + "Year")?.Value, out var year) ? year : null,
             Summary = root.Element(ns + "Summary")?.Value,
             Format = root.Element(ns + "Format")?.Value,
-            ComicVineIssueId = ComicVineTagId.FromTags(root.Element(ns + "Notes")?.Value, root.Element(ns + "Web")?.Value),
-            ComicVineIssueMatchedByName = ComicVineTagId.IsNameMatch(root.Element(ns + "Notes")?.Value),
+            ComicVineIssueId = ComicVineTagId.Read(root.Element(ns + "Notes")?.Value, root.Element(ns + "Web")?.Value).Id,
+            ComicVineIssueIdSource = ComicVineTagId.Read(root.Element(ns + "Notes")?.Value, root.Element(ns + "Web")?.Value).Source,
             Authors = SplitList(root.Elements(ns + "Writer").Select(e => e.Value)),
             Tags = SplitList(root.Elements(ns + "Tags").Concat(root.Elements(ns + LegacyTagElement)).Select(e => e.Value))
         };

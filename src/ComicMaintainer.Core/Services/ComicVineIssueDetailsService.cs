@@ -597,12 +597,12 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 state = _states.GetValueOrDefault(file.FilePath);
 
                 // Tags that name the issue need no matching, and fill Annuals and Specials too. A tag
-                // this application wrote (the file was filled from that issue) is only its own earlier
-                // match: the issue is matched again, so a volume number or start year the user set since
-                // takes effect, and the tag follows the new match.
+                // this application wrote after a name match is only its own earlier guess: the issue is
+                // matched again, so a volume number or start year the user set since takes effect, and
+                // the tag follows the new match.
                 if (metadata.ComicVineIssueId is { } taggedId)
                 {
-                    if (metadata.ComicVineIssueMatchedByName)
+                    if (IsOwnMatch(metadata, state))
                     {
                         replacesTag = true;
                     }
@@ -627,6 +627,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                                 break;
                             case TagCheck.Unknown:
                                 rejectedTag = taggedId;
+                                await RememberRejectedTagAsync(state, taggedId, cancellationToken);
                                 break;
                         }
                     }
@@ -710,7 +711,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
         {
             var metadata = file.Metadata;
             if (metadata?.ComicVineIssueId is { } taggedId
-                && !metadata.ComicVineIssueMatchedByName
+                && !IsOwnMatch(metadata, _states.GetValueOrDefault(file.FilePath))
                 && await TaggedCoverCandidatesAsync(file, taggedId, cancellationToken) is { } tagged)
             {
                 return tagged;
@@ -813,6 +814,32 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 ? $"ComicVine's {volumeTitle} has no issue #{number}; pick its cover from the others"
                 : matched.CoverUrl is null ? "ComicVine has no cover for this issue" : null;
             return new CoverCandidates(volumeId, volumeName, matched?.Id, reason, covers);
+        }
+
+        /// <summary>
+        /// True when the file's ComicVine id is this application's own earlier name match, not a
+        /// tagger's: marked as one, or only a web link naming the very issue the file was filled from
+        /// (as versions before the marker wrote it).
+        /// </summary>
+        private static bool IsOwnMatch(ComicMetadata metadata, ComicVineFileStateEntity? state)
+            => metadata.ComicVineIssueIdSource == ComicVineIdSource.NameMatch
+               || (metadata.ComicVineIssueIdSource == ComicVineIdSource.WebOnly && state is not null && state.IssueId == metadata.ComicVineIssueId);
+
+        /// <summary>
+        /// Records, on a file filled before, that ComicVine does not give the issue its tags name, so
+        /// it is not asked for again when the file is not filled this time.
+        /// </summary>
+        private async Task RememberRejectedTagAsync(ComicVineFileStateEntity? state, int taggedId, CancellationToken cancellationToken)
+        {
+            if (state is null || state.RejectedTagId == taggedId)
+            {
+                return;
+            }
+
+            state.RejectedTagId = taggedId;
+            await using var db = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
+            db.ComicVineFileStates.Update(state);
+            await db.SaveChangesAsync(cancellationToken);
         }
 
         /// <summary>What a tag naming a ComicVine issue turned out to be (see <see cref="TaggedIssueAsync"/>).</summary>

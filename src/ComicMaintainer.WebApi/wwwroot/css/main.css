@@ -1603,7 +1603,45 @@
             font-size: 12px;
         }
 
-        .series-volume-links ul {
+        .series-volume-review,
+.series-volume-conflict {
+    color: var(--warning-color, #b45309);
+}
+
+.choose-volume-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.choose-volume-option {
+    border: 1px solid var(--border-color, #d1d5db);
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+
+.choose-volume-option--selected {
+    border-color: var(--primary-color, #2563eb);
+    box-shadow: 0 0 0 1px var(--primary-color, #2563eb);
+}
+
+.choose-volume-pick {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+    text-align: left;
+}
+
+.choose-volume-reasons {
+    margin: 4px 0 0 18px;
+    font-size: 0.85em;
+}
+
+.series-volume-links ul {
             margin: 2px 0 0;
             padding-left: 18px;
         }

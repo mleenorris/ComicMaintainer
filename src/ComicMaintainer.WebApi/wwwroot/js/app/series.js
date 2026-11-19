@@ -1410,16 +1410,37 @@
                 return '';
             }
             const volumes = entry.volumes || [];
-            if (!volumes.some(volume => volume.site_url)) return '';
-            const items = volumes.map(volume => {
+            if (!volumes.some(volumeWorthShowing)) return '';
+            const items = volumes.map((volume, index) => {
                 const label = [volume.volume_number ? `Vol. ${Number(volume.volume_number)}` : '', volume.start_year ? `(${Number(volume.start_year)})` : '']
                     .filter(Boolean).join(' ') || 'No volume';
                 const count = Number(volume.issues) || 0;
                 const head = `${escapeHtml(label)} · ${count} issue${count === 1 ? '' : 's'}`;
                 const link = seriesSiteLink(volume.site_url);
-                return link
-                    ? `<li>${head} · <a class="series-detail-link" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(volume.name || 'ComicVine')} on ComicVine</a>${volume.publisher ? ` (${escapeHtml(volume.publisher)})` : ''}</li>`
-                    : `<li>${head} · not linked to ComicVine yet</li>`;
+                let state;
+                if (volume.decision === 'review') {
+                    state = `<strong class="series-volume-review">needs review</strong>${volume.review_reason ? `: ${escapeHtml(volume.review_reason)}` : ''}`
+                        + ` <button type="button" class="btn btn-sm" data-requires-write onclick="openChooseVolumeModal(${index})">Choose Volume…</button>`;
+                } else {
+                    state = link
+                        ? `<a class="series-detail-link" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(volume.name || 'ComicVine')} on ComicVine</a>${volume.publisher ? ` (${escapeHtml(volume.publisher)})` : ''}`
+                        : volume.decision === 'manual' ? 'no ComicVine volume, as you chose'
+                            : volume.searched ? 'not found on ComicVine' : 'not linked to ComicVine yet';
+                    if (volume.decision === 'manual') state += ' · your choice';
+                    if (link || volume.searched || volume.decision || listOf(volume.candidates).length) {
+                        const label = link || volume.decision === 'manual' ? 'Change…' : 'Choose Volume…';
+                        state += ` <button type="button" class="btn btn-sm" data-requires-write onclick="openChooseVolumeModal(${index})">${label}</button>`;
+                    }
+                }
+                const conflicts = listOf(volume.conflicts);
+                const conflictNote = conflicts.length
+                    ? ` · <span class="series-volume-conflict" title="${escapeHtml(conflicts.map(conflict => `#${conflict.issue}: yours ${Number(conflict.year)}, ComicVine's ${Number(conflict.comicvine_year)}`).join('\n'))}">${conflicts.length} issue${conflicts.length === 1 ? '' : 's'} dated years from ComicVine's</span>`
+                    : '';
+                const mixed = listOf(volume.mixed_years);
+                const mixedNote = mixed.length
+                    ? ` · <span class="series-volume-conflict">issue numbers repeat across ${escapeHtml(mixed.map(Number).join(', '))}: these may be several volumes; set their volume years</span>`
+                    : '';
+                return `<li>${head} · ${state}${conflictNote}${mixedNote}</li>`;
             }).join('');
             return `<div class="series-volume-links"><span class="series-detail-meta">Volumes:</span><ul>${items}</ul></div>`;
         }
@@ -1487,6 +1508,124 @@
             if (links.size && currentSeriesDetailId === seriesId) renderSeriesDetail(seriesId);
         }
 
+        function listOf(value) {
+            return Array.isArray(value) ? value : [];
+        }
+
+        // A volume shown under the synopsis: linked, looked for on ComicVine, left for review, or with
+        // issues dated or filed wrongly. A series never looked for (no ComicVine) shows none.
+        function volumeWorthShowing(volume) {
+            return !!(volume.site_url || volume.searched || volume.decision || listOf(volume.candidates).length
+                || listOf(volume.conflicts).length || listOf(volume.mixed_years).length);
+        }
+
+        // "Choose Volume…": the ComicVine volumes weighed for a series volume, best first with
+        // the evidence for each, or another one by its link or id
+        // (POST /api/metadata/volumes/series/{id}/choose). The choice is final.
+        let chooseVolumeCurrent = null;
+
+        function openChooseVolumeModal(index) {
+            const seriesId = currentSeriesDetailId;
+            const entry = seriesId ? seriesVolumeLinksCache.get(seriesId) : null;
+            const volume = entry && entry.volumes ? entry.volumes[index] : null;
+            if (!volume) return;
+            chooseVolumeCurrent = { seriesId, volume, selected: volume.comicvine_volume_id || null };
+            const label = [volume.volume_number ? `Vol. ${Number(volume.volume_number)}` : '', volume.start_year ? `(${Number(volume.start_year)})` : '']
+                .filter(Boolean).join(' ') || 'the issues that name no volume';
+            document.getElementById('chooseVolumeNote').textContent = volume.review_reason
+                ? `${volume.review_reason}. Which is ${label}?`
+                : `Which ComicVine volume is ${label}?`;
+            document.getElementById('chooseVolumeLink').value = '';
+            const candidates = listOf(volume.candidates);
+            const list = document.getElementById('chooseVolumeList');
+            if (!candidates.length) {
+                list.textContent = 'No volumes were weighed for it: paste the link of its ComicVine volume.';
+            } else {
+                renderHtml(list, rawHtml(`<div class="choose-volume-list">${candidates.map(chooseVolumeOption).join('')}</div>`));
+            }
+            markChooseVolume();
+            document.getElementById('chooseVolumeModal').classList.add('active');
+        }
+
+        function chooseVolumeOption(candidate) {
+            const id = Number(candidate.volume_id) || 0;
+            const facts = [candidate.start_year ? `started ${Number(candidate.start_year)}` : '', candidate.publisher || '',
+                candidate.issues ? `${Number(candidate.issues)} issues` : ''].filter(Boolean).map(escapeHtml).join(' · ');
+            const link = seriesSiteLink(candidate.site_url);
+            const reasons = listOf(candidate.reasons).map(reason => `<li>${escapeHtml(reason)}</li>`).join('');
+            return `<div class="choose-volume-option" data-volume-id="${id}">
+                <button type="button" class="choose-volume-pick" aria-pressed="false" onclick="selectChooseVolume(${id})">
+                    <strong>${escapeHtml(candidate.name || 'ComicVine volume')}</strong> <span class="series-detail-meta">${facts}</span>
+                </button>
+                ${link ? `<a class="series-detail-link" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">on ComicVine</a>` : ''}
+                ${reasons ? `<ul class="choose-volume-reasons">${reasons}</ul>` : ''}
+            </div>`;
+        }
+
+        function selectChooseVolume(id) {
+            if (!chooseVolumeCurrent) return;
+            chooseVolumeCurrent.selected = id || null;
+            document.getElementById('chooseVolumeLink').value = '';
+            markChooseVolume();
+        }
+
+        function chooseVolumeLinkTyped() {
+            if (!chooseVolumeCurrent) return;
+            chooseVolumeCurrent.selected = null;
+            markChooseVolume();
+        }
+
+        function markChooseVolume() {
+            const current = chooseVolumeCurrent;
+            document.querySelectorAll('#chooseVolumeList .choose-volume-option').forEach(option => {
+                const picked = !!current && Number(option.dataset.volumeId) === current.selected;
+                option.classList.toggle('choose-volume-option--selected', picked);
+                const button = option.querySelector('.choose-volume-pick');
+                if (button) button.setAttribute('aria-pressed', picked ? 'true' : 'false');
+            });
+            document.getElementById('chooseVolumeApplyBtn').disabled = !current || !(current.selected || typedVolumeId());
+        }
+
+        // A ComicVine volume's id from its link (".../4050-796/") or the id itself.
+        function typedVolumeId() {
+            const text = document.getElementById('chooseVolumeLink').value.trim();
+            const match = /(?:^|4050-)(\d{1,9})\/?$/.exec(text);
+            const id = match ? Number(match[1]) : 0;
+            return id > 0 ? id : null;
+        }
+
+        function closeChooseVolumeModal() {
+            document.getElementById('chooseVolumeModal').classList.remove('active');
+            chooseVolumeCurrent = null;
+        }
+
+        async function applyChooseVolume(none) {
+            const current = chooseVolumeCurrent;
+            if (!current) return;
+            const volumeId = none ? null : (typedVolumeId() || current.selected);
+            if (!none && !volumeId) return;
+            try {
+                await apiFetch(`/api/metadata/volumes/series/${encodeURIComponent(current.seriesId)}/choose`, {
+                    method: 'POST',
+                    body: {
+                        series_key: current.volume.series_key || null,
+                        start_year: current.volume.start_year || 0,
+                        volume_number: current.volume.volume_number || 0,
+                        volume_id: volumeId
+                    },
+                    errorMessage: 'Failed to choose the volume'
+                });
+            } catch (error) {
+                if (error.authHandled) return;
+                showMessage('Failed to choose the volume: ' + error.message, 'error');
+                return;
+            }
+            closeChooseVolumeModal();
+            showMessage(none ? 'The volume is kept off ComicVine' : 'Volume chosen: run Fetch Issue Details to fill its issues', 'success');
+            seriesVolumeLinksCache.delete(current.seriesId);
+            if (currentSeriesDetailId === current.seriesId) renderSeriesDetail(current.seriesId);
+        }
+
         async function loadSeriesVolumeLinks(seriesId) {
             const entry = { loading: true };
             seriesVolumeLinksCache.set(seriesId, entry);
@@ -1501,7 +1640,7 @@
             // Dropped when the issues reloaded meanwhile: that load asks again.
             if (seriesVolumeLinksCache.get(seriesId) !== entry) return;
             seriesVolumeLinksCache.set(seriesId, { volumes });
-            if (volumes.some(volume => volume.site_url) && currentSeriesDetailId === seriesId) renderSeriesDetail(seriesId);
+            if (volumes.some(volumeWorthShowing) && currentSeriesDetailId === seriesId) renderSeriesDetail(seriesId);
         }
 
         function renderSeriesStoryArcs(seriesId) {

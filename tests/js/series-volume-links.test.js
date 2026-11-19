@@ -35,8 +35,8 @@ test('the series lists each volume with its ComicVine link', async t => {
     await page.settle();
 
     assert.deepEqual(items(page), [
-        'Vol. 1 (2013) · 41 issues · All-New X-Men on ComicVine (Marvel)',
-        'Vol. 2 · 1 issue · ComicVine on ComicVine',
+        'Vol. 1 (2013) · 41 issues · All-New X-Men on ComicVine (Marvel) Change…',
+        'Vol. 2 · 1 issue · ComicVine on ComicVine Change…',
         '(2015) · 5 issues · not linked to ComicVine yet',
         'No volume · 2 issues · not linked to ComicVine yet'
     ]);

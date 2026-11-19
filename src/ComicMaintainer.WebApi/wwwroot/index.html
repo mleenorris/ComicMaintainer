@@ -2357,6 +2357,31 @@
          </div>
      </div>
 
+     <div class="modal" id="chooseVolumeModal" role="dialog" aria-modal="true" aria-labelledby="chooseVolumeModalTitle" aria-hidden="true">
+         <div class="modal-content" style="max-width: 760px;">
+             <div class="modal-header">
+                 <h2 id="chooseVolumeModalTitle">Choose the ComicVine Volume</h2>
+                 <button class="close-btn" onclick="closeChooseVolumeModal()">&times;</button>
+             </div>
+             <div class="modal-body">
+                 <p class="combine-folders-meta" id="chooseVolumeNote"></p>
+                 <div id="chooseVolumeList"></div>
+                 <div class="form-group">
+                     <label for="chooseVolumeLink">Or another ComicVine volume: its link or id</label>
+                     <input type="text" id="chooseVolumeLink" autocomplete="off" placeholder="https://comicvine.gamespot.com/batman/4050-796/" oninput="chooseVolumeLinkTyped()">
+                 </div>
+                 <p class="combine-folders-meta">
+                     Your choice is kept: the volume is never searched for again. Run <strong>Fetch Issue Details</strong> to fill its issues from it.
+                 </p>
+             </div>
+             <div class="modal-footer">
+                 <button class="btn btn-primary" id="chooseVolumeApplyBtn" onclick="applyChooseVolume(false)" data-requires-write disabled>Use This Volume</button>
+                 <button class="btn" onclick="applyChooseVolume(true)" data-requires-write>None of These</button>
+                 <button class="btn" onclick="closeChooseVolumeModal()">Cancel</button>
+             </div>
+         </div>
+     </div>
+
      <!-- Story Arc Modal -->
      <div class="modal" id="storyArcModal" role="dialog" aria-modal="true" aria-labelledby="storyArcModalTitle" aria-hidden="true">
          <div class="modal-content" style="max-width: 720px;">

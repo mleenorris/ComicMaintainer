@@ -74,7 +74,51 @@ public sealed record SeriesVolumeLink(
     int? ComicVineVolumeId,
     string? Name,
     string? Publisher,
-    string? SiteUrl);
+    string? SiteUrl)
+{
+    /// <summary>How the volume was chosen (see <see cref="Data.ComicVineVolumeDecision"/>); null for older links or none.</summary>
+    public string? Decision { get; init; }
+
+    /// <summary>The series key the volume's issues have; a series page that merges aliases can hold several.</summary>
+    public string SeriesKey { get; init; } = string.Empty;
+
+    /// <summary>True when the volume was looked for on ComicVine, found or not.</summary>
+    public bool Searched { get; init; }
+
+    /// <summary>Why the volume needs the user's review; null otherwise.</summary>
+    public string? ReviewReason { get; init; }
+
+    /// <summary>The ComicVine volumes weighed for it, best first, for the user to choose from.</summary>
+    public IReadOnlyList<VolumeChoice> Candidates { get; init; } = [];
+
+    /// <summary>Its issues whose cover year disagrees with ComicVine's issue of that number by more than a year.</summary>
+    public IReadOnlyList<YearConflict> Conflicts { get; init; } = [];
+
+    /// <summary>
+    /// For the issues that name no volume: cover years across which their issue numbers repeat
+    /// (#1 of 2011 and #1 of 2016), a sign they are several volumes; empty otherwise.
+    /// </summary>
+    public IReadOnlyList<int> MixedYears { get; init; } = [];
+}
+
+/// <summary>A ComicVine volume weighed for a series volume, with the evidence for it.</summary>
+public sealed record VolumeChoice(int? VolumeId, string Name, int? StartYear, string? Publisher, int? Issues, double Score, IReadOnlyList<string> Reasons, string? SiteUrl);
+
+/// <summary>What became of choosing a series volume's ComicVine volume (see <see cref="Interfaces.IComicVineIssueDetailsService.ChooseVolumeAsync"/>).</summary>
+public enum ChooseVolumeOutcome
+{
+    /// <summary>The volume is set.</summary>
+    Chosen,
+
+    /// <summary>The series has no such volume, or several (from merged aliases) and none was named.</summary>
+    NoSuchSeriesVolume,
+
+    /// <summary>ComicVine has no volume of that id.</summary>
+    NoSuchComicVineVolume,
+}
+
+/// <summary>An issue whose cover year disagrees with ComicVine's issue of that number in its linked volume.</summary>
+public sealed record YearConflict(string FilePath, string Issue, int Year, int ComicVineYear);
 
 /// <summary>
 /// The ComicVine page of the file at <see cref="FilePath"/>: its issue's page when the issue is

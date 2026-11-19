@@ -219,6 +219,9 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<int>("IssueId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("RejectedTagId")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("FilePath");
 
                     b.HasIndex("IssueId");
@@ -1473,6 +1476,12 @@ namespace ComicMaintainer.Core.Migrations
                             b1.Property<string>("Authors")
                                 .IsRequired()
                                 .HasColumnType("TEXT");
+
+                            b1.Property<int?>("ComicVineIssueId")
+                                .HasColumnType("INTEGER");
+
+                            b1.Property<int>("ComicVineIssueIdSource")
+                                .HasColumnType("INTEGER");
 
                             b1.Property<string>("Format")
                                 .HasMaxLength(64)

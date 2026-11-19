@@ -89,7 +89,31 @@ ComicVine knows each issue's title, cover date, summary, writers and story arcs.
 - a missing summary, or one that is only the series' synopsis;
 - missing writers, and an empty Story Arc and Web link.
 
-A field you changed yourself is never touched. Each issue is matched to a ComicVine volume through its series:
+It also records which ComicVine issue the file was filled from: `[CVDB12345]` is added to `<Notes>`, the way ComicTagger
+writes it, and the issue's ComicVine page goes into `<Web>` when that is empty or still holds the series' ComicVine page.
+What else the notes hold, and a web link you set yourself, is kept. The file then names its issue wherever it goes.
+
+A field you changed yourself is never touched.
+
+An issue whose tags already name its ComicVine issue, because ComicTagger, Mylar or this app tagged it, needs no
+matching: `[CVDB12345]` or `[Issue ID 12345]` in `<Notes>`, or the issue's ComicVine page in `<Web>`. It is filled from
+that issue, Annuals and Specials too, and its volume becomes the ComicVine volume of its series' volume when that has none
+yet, so the rest of the volume is found there. `[Issue ID 12345]` counts only when the notes say the tags came from
+Comic Vine: ComicTagger writes it for Metron and the Grand Comics Database too, and their ids are left alone.
+
+A tag is not trusted when `<Notes>` and `<Web>` name different issues, or ComicVine has no such issue: the issue is then
+matched as below, and the tags are kept as they are. When ComicVine's issue has another number than the file, the tags
+were copied from another file: the issue is matched, and the wrong id and page are replaced. A tag that cannot be read
+yet, because no ComicVine requests are left, waits for the next run rather than being matched by name.
+
+The id this app records after matching an issue by name is its own record of that match, not a tagger's, and says so:
+`[CVDB12345] (matched by name in ComicMaintainer)`. If you later set the issue's volume number or start year, the issue is
+matched again and the recorded id follows the new match, even after the file was renamed or moved. The issue page earlier
+versions wrote into `<Web>` after a match is treated the same way while the file stays where it was filled. A tagger's id
+added later wins over the app's own record. When the tags name an
+issue ComicVine does not have, they are left as they are, and that id is not asked for again.
+
+Any other issue is matched to a ComicVine volume through its series:
 
 - by the year its volume started, as for volume numbers;
 - else by its volume number: Vol. 2 is the publisher's second volume of that name, one-shots not counted. A volume
@@ -99,7 +123,11 @@ A field you changed yourself is never touched. Each issue is matched to a ComicV
 - else, when it knows neither, by the series' own ComicVine match. Matching the series to ComicVine takes effect the next
   time.
 
-Annuals, Specials and duplicates are left out. An issue that cannot be matched counts as failed in the job, with the
+The volume is looked for in ComicVine's search first. For a much-used name such as Batman, the search can leave the right
+volume out, so when it finds none that fits, every ComicVine volume with exactly that name is listed, oldest first, and
+looked through too. That takes up to 5 more requests.
+
+Without a tag naming their issue, Annuals and Specials are left out, and duplicates always are. An issue that cannot be matched counts as failed in the job, with the
 reason, such as `ComicVine has no Batman Vol. 7`. Set its volume number or start year with **Update**, or match the series
 to ComicVine, and run it again. A volume ComicVine did not have is searched for again each time you run **Fetch Issue
 Details**; the scheduled job waits 30 days before searching again.

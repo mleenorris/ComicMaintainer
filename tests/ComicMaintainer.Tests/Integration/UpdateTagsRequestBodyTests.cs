@@ -85,7 +85,7 @@ public sealed class UpdateTagsRequestBodyTests : IDisposable
         using var tags = await GetTagsAsync(client, path);
 
         Assert.Equal(
-            new[] { "authors", "format", "isUserEdited", "issue", "publisher", "series", "summary", "tags", "title", "userLockedFieldsMask", "volume", "volumeYear", "year" },
+            new[] { "authors", "comicVineIssueId", "comicVineIssueIdSource", "format", "isUserEdited", "issue", "publisher", "series", "summary", "tags", "title", "userLockedFieldsMask", "volume", "volumeYear", "year" },
             tags.RootElement.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
         Assert.Equal("The Dark Knight", tags.RootElement.GetProperty("title").GetString());
         Assert.Equal("1", tags.RootElement.GetProperty("issue").GetString());

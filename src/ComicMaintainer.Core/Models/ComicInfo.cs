@@ -143,6 +143,8 @@ public class ComicInfo
             Year = Year,
             Summary = Summary,
             Format = Format,
+            ComicVineIssueId = Utilities.ComicVineTagId.Read(Notes, Web).Id,
+            ComicVineIssueIdSource = Utilities.ComicVineTagId.Read(Notes, Web).Source,
             Authors = new[] { Writer, Penciller, Inker, Colorist, Letterer, Editor }
                 .Where(a => !string.IsNullOrWhiteSpace(a))
                 .Select(a => a!)

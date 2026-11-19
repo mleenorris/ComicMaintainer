@@ -10,8 +10,10 @@ namespace ComicMaintainer.Core.Utilities;
 /// What a ComicVine issue adds to a file's tags. It only ever fills in: a title that is a
 /// placeholder (<c>Chapter 8</c>, <c>#8</c>, an old file name), a missing cover year (or the
 /// 1970 some downloaders write when they do not know it), a missing summary or one that is only
-/// the series' synopsis, missing writers, and empty Story Arc, Month and Web elements. A field
-/// the user has locked by editing it is never changed.
+/// the series' synopsis, missing writers, and empty Story Arc, Month and Web elements. It also
+/// records the issue's id (<c>[CVDB12345]</c> in Notes, its page in Web), so the file names its
+/// ComicVine issue from then on (see <see cref="ComicVineTagId"/>). A field the user has locked
+/// by editing it is never changed.
 /// </summary>
 public static partial class ComicVineIssueFill
 {
@@ -36,9 +38,20 @@ public static partial class ComicVineIssueFill
     /// <remarks>
     /// <paramref name="previous"/> is the ComicVine issue the file was filled from before, when
     /// that was a different one (it was matched to the wrong volume): what it wrote counts as not
-    /// filled, so the right issue's details replace it.
+    /// filled, so the right issue's details replace it. <paramref name="replacesTaggedIssue"/> is
+    /// true when the issue the tags name is shown to be wrong (another number, or this
+    /// application's own earlier match): its id and page are replaced by this issue's. When the tags
+    /// name another issue that is kept, neither its id nor a page is written, so they do not end
+    /// up naming two issues. <paramref name="matchedByName"/> marks the id written as this
+    /// application's own match (see <see cref="ComicVineTagId.NameMatchMarker"/>).
     /// </remarks>
-    public static Plan For(ComicMetadata current, ComicVineIssueEntity issue, string? seriesSynopsis, ComicVineIssueEntity? previous = null)
+    public static Plan For(
+        ComicMetadata current,
+        ComicVineIssueEntity issue,
+        string? seriesSynopsis,
+        ComicVineIssueEntity? previous = null,
+        bool replacesTaggedIssue = false,
+        bool matchedByName = false)
     {
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(issue);
@@ -89,10 +102,14 @@ public static partial class ComicVineIssueFill
         }
 
         var arcs = StoryArcs(issue.StoryArcsJson);
+        var keepsAnotherTag = current.ComicVineIssueId is { } tagged && tagged != issue.Id && !replacesTaggedIssue;
         var fill = new ProviderComicInfoFields(
-            Web: ProviderMetadataText.HttpUrl(issue.SiteUrl),
+            Web: keepsAnotherTag ? null : ProviderMetadataText.HttpUrl(issue.SiteUrl),
             StoryArc: arcs.Count == 0 ? null : string.Join(", ", arcs.Select(arc => arc.Name)),
-            Month: month);
+            Month: month,
+            ComicVineIssueId: keepsAnotherTag ? null : issue.Id,
+            ReplacesComicVineIssueId: replacesTaggedIssue,
+            ComicVineIssueMatchedByName: matchedByName && !keepsAnotherTag);
         return new Plan(update, fields, fill);
     }
 

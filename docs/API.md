@@ -389,7 +389,7 @@ Filter values for the listing routes:
 
 **`GET /api/files/scan-unmarked`** returns `{"total_count","unmarked_count","marked_count"}`.
 
-**Metadata.** The metadata object is `{"series","title","issue","volume","volumeYear","format","publisher","year","summary","authors":[],"tags":[],"isUserEdited","userLockedFieldsMask"}`. `format` is ComicInfo `<Format>`; `Annual`, `Special` and `Giant-Size` mark issues numbered on their own. `volume` is the volume number and `volumeYear` the year the volume started, which only the database keeps.
+**Metadata.** The metadata object is `{"series","title","issue","volume","volumeYear","format","publisher","year","summary","comicVineIssueId","comicVineIssueIdSource","authors":[],"tags":[],"isUserEdited","userLockedFieldsMask"}`. `comicVineIssueId` is the ComicVine issue the archive's tags name (`[CVDB12345]` in `<Notes>`, or the issue's page in `<Web>`), or `null`; `comicVineIssueIdSource` says where it comes from: `Tagger` (a tagger's id in `<Notes>`), `NameMatch` (this app's own record of a name match, followed by `(matched by name in ComicMaintainer)`), `WebOnly` (only a page in `<Web>`) or `None`. Both are read from the archive and cannot be set through this API. `format` is ComicInfo `<Format>`; `Annual`, `Special` and `Giant-Size` mark issues numbered on their own. `volume` is the volume number and `volumeYear` the year the volume started, which only the database keeps.
 
 - `GET` metadata routes answer `404` when the file has none.
 - `PUT /api/files/metadata?filePath=` and `PUT /api/files/{encodedFilePath}/tags` merge: a field left out or sent as `null` keeps its value. They answer an empty `200`.

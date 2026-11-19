@@ -86,6 +86,12 @@ public class ComicVineFileStateEntity
     public int IssueId { get; set; }
 
     public DateTime AppliedUtc { get; set; }
+
+    /// <summary>
+    /// The ComicVine id the file's tags named that ComicVine did not give, when it was matched by name
+    /// instead: the tag is kept, and not asked for again while it stays the same.
+    /// </summary>
+    public int? RejectedTagId { get; set; }
 }
 
 /// <summary>A ComicVine story arc and its issues in ComicVine's order, fetched when first viewed.</summary>

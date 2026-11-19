@@ -94,6 +94,19 @@ public sealed record IssueComicVineLink(
     string VolumeUrl,
     bool Filled);
 
+/// <summary>
+/// One ComicVine issue read by its id: its listing fields, the volume it belongs to and its
+/// details, as one request gives them.
+/// </summary>
+public sealed record ComicVineIssue(ComicVineIssueSummary Summary, int VolumeId, string? VolumeName, ComicVineIssueDetails Details);
+
+/// <summary>
+/// ComicVine's volumes of one exact name, as listed by name (see
+/// <see cref="Interfaces.IComicVineVolumeSearch.ListVolumesNamedAsync"/>): <see cref="Complete"/> is
+/// false when the request limit cut the list off, so later volumes may be missing.
+/// </summary>
+public sealed record ComicVineVolumeList(IReadOnlyList<ExternalSeriesMetadata> Volumes, int Requests, bool Complete);
+
 /// <summary>A story arc some issues of a series are part of.</summary>
 public sealed record SeriesStoryArc(int Id, string Name, IReadOnlyList<string> FilePaths);
 

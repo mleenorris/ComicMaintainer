@@ -24,6 +24,13 @@ public interface IComicVineCatalogClient
     /// <summary>An issue's writers and story arcs; null when ComicVine has no such issue.</summary>
     Task<ComicVineIssueDetails?> GetIssueDetailsAsync(int issueId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The issue <paramref name="issueId"/> with its volume and details, in one request: what a
+    /// file whose tags name the issue (see <see cref="Utilities.ComicVineTagId"/>) is filled from.
+    /// Null when ComicVine has no such issue.
+    /// </summary>
+    Task<ComicVineIssue?> GetIssueAsync(int issueId, CancellationToken cancellationToken = default);
+
     /// <summary>A story arc and its issues in ComicVine's order; null when there is no such arc.</summary>
     Task<ComicVineStoryArc?> GetStoryArcAsync(int storyArcId, CancellationToken cancellationToken = default);
 }

@@ -163,6 +163,13 @@ public class AppSettings
     /// <summary>The Metron account's password; a secret, never returned by the settings API.</summary>
     public string? MetronPassword { get; set; }
 
+    /// <summary>
+    /// A Metron API token (made on metron.cloud), preferred to the username and password: it is sent
+    /// as a Bearer token, and can be revoked without changing the password. A secret, never returned
+    /// by the settings API.
+    /// </summary>
+    public string? MetronApiToken { get; set; }
+
     public string MetronBaseUrl { get; set; } = "https://metron.cloud/api";
 
     // MangaDex metadata provider (manga and manhwa)

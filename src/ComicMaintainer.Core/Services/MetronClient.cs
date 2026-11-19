@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -13,24 +14,34 @@ using Microsoft.Extensions.Options;
 namespace ComicMaintainer.Core.Services;
 
 /// <summary>
-/// Default <see cref="IMetronClient"/>. Metron allows 20 requests a minute and 5,000 a day per
-/// account, with HTTP Basic sign-in over https. This client stays under 18 a minute (a background run
-/// waits for the next one; an interactive one does not) and 4,900 a day, remembers each answer for a
-/// week (a series' volume number does not change, and the answers are dropped when the account or
-/// address changes), and after a refusal or failure asks nothing for 10 minutes. A rejected sign-in
-/// stops it until the username, password or address change, and is shown in the settings
-/// (<see cref="Problem"/>).
+/// Default <see cref="IMetronClient"/>. Metron signs a request in with an API token (a Knox token,
+/// sent as <c>Authorization: Bearer</c>), which is preferred, or with the account's username and
+/// password (HTTP Basic), always over https. It allows 20 requests a minute and 5,000 a day per
+/// account: this client stays under 18 a minute (a background run waits for the next one; an
+/// interactive one does not) and 4,900 a day, remembers each answer for a week (a series' volume
+/// number does not change, and the answers are dropped when the credentials or address change), and
+/// after a refusal or failure asks nothing for 10 minutes. A rejected sign-in stops it until the
+/// credentials or address change, or for 6 hours, and is shown in the settings (<see cref="Problem"/>)
+/// and on the provider status screen (<see cref="CheckHealthAsync"/>).
 /// </summary>
 public sealed class MetronClient : IMetronClient
 {
     /// <summary>The name of the HTTP client registered for Metron.</summary>
     public const string HttpClientName = "Metron";
 
+    /// <summary>The provider's name on the status screen.</summary>
+    public const string ProviderName = "Metron";
+
     internal const int RequestsPerMinute = 18;
     internal const int RequestsPerDay = 4900;
+
+    /// <summary>The ComicVine volume the status probe asks about: Batman (1940), which Metron surely records.</summary>
+    internal const int ProbeVolumeId = 796;
+
     private static readonly TimeSpan AnswerLifetime = TimeSpan.FromDays(7);
     private static readonly TimeSpan PauseAfterFailure = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan RetryRejectedSignIn = TimeSpan.FromHours(6);
+    private static readonly TimeSpan ProbeLifetime = TimeSpan.FromMinutes(10);
 
     private readonly IHttpClientFactory _httpClients;
     private readonly IOptionsMonitor<AppSettings> _settings;
@@ -46,6 +57,11 @@ public sealed class MetronClient : IMetronClient
     private string? _rejectedAccount;
     private DateTimeOffset _rejectedAt;
     private string? _problem;
+    private long _successes;
+    private long _failures;
+    private DateTime? _lastSuccessUtc;
+    private DateTime? _lastFailureUtc;
+    private (string Account, DateTimeOffset At, bool Reachable)? _probe;
 
     public MetronClient(IHttpClientFactory httpClients, IOptionsMonitor<AppSettings> settings, ILogger<MetronClient> logger, TimeProvider time)
     {
@@ -56,16 +72,7 @@ public sealed class MetronClient : IMetronClient
     }
 
     /// <inheritdoc />
-    public bool IsConfigured
-    {
-        get
-        {
-            var config = _settings.CurrentValue;
-            return config.EnableExternalSeriesMetadata
-                   && !string.IsNullOrWhiteSpace(config.MetronUsername)
-                   && !string.IsNullOrWhiteSpace(config.MetronPassword);
-        }
-    }
+    public bool IsConfigured => Configured(_settings.CurrentValue);
 
     /// <inheritdoc />
     public string? Problem
@@ -88,30 +95,9 @@ public sealed class MetronClient : IMetronClient
         }
 
         var config = _settings.CurrentValue;
-        if (!Uri.TryCreate($"{config.MetronBaseUrl.TrimEnd('/')}/series/?cv_id={comicVineVolumeId.ToString(CultureInfo.InvariantCulture)}", UriKind.Absolute, out var url)
-            || url.Scheme != Uri.UriSchemeHttps)
+        if (!Prepare(config, comicVineVolumeId, out var url))
         {
-            Note(config, "The Metron address must be an https address, such as https://metron.cloud/api");
             return MetronAnswer.Unavailable;
-        }
-
-        var account = Account(config);
-        lock (_lock)
-        {
-            // Answers belong to an account and address: another one asks again.
-            if (_account != account)
-            {
-                _account = account;
-                _answers.Clear();
-                _problem = null;
-                _pausedUntil = DateTimeOffset.MinValue;
-            }
-
-            // A refused sign-in is tried again after a while: the account may have been fixed on Metron.
-            if (_rejectedAccount == account && _time.GetUtcNow() - _rejectedAt < RetryRejectedSignIn)
-            {
-                return MetronAnswer.Unavailable;
-            }
         }
 
         if (_answers.TryGetValue(comicVineVolumeId, out var known) && _time.GetUtcNow() - known.At < AnswerLifetime)
@@ -124,54 +110,67 @@ public sealed class MetronClient : IMetronClient
             return MetronAnswer.Unavailable;
         }
 
-        try
+        if (await GetAsync(config, url, cancellationToken) is not { } document)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Authorization = new AuthenticationHeaderValue(
-                "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{config.MetronUsername}:{config.MetronPassword}")));
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            using var response = await _httpClients.CreateClient(HttpClientName).SendAsync(request, cancellationToken);
-            if (response.StatusCode == HttpStatusCode.Unauthorized)
-            {
-                lock (_lock)
-                {
-                    _rejectedAccount = account;
-                    _rejectedAt = _time.GetUtcNow();
-                }
-
-                Note(config, "Metron refused the username and password: check them under Settings");
-                return MetronAnswer.Unavailable;
-            }
-
-            if (!response.IsSuccessStatusCode)
-            {
-                // A 404 is not "no such series" (that is an empty list): the address is likely wrong.
-                Pause(config, response.StatusCode == HttpStatusCode.NotFound
-                    ? "Metron answered 404: check the Metron address"
-                    : $"Metron answered {(int)response.StatusCode}");
-                return MetronAnswer.Unavailable;
-            }
-
-            await using var body = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var document = await JsonDocument.ParseAsync(body, cancellationToken: cancellationToken);
-            var series = ParseSeries(document.RootElement);
-            _answers[comicVineVolumeId] = (series, _time.GetUtcNow());
-            lock (_lock)
-            {
-                _problem = null;
-            }
-
-            return new MetronAnswer(true, series);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            Pause(config, ex.Message);
             return MetronAnswer.Unavailable;
         }
+
+        using (document)
+        {
+            var series = ParseSeries(document.RootElement);
+            _answers[comicVineVolumeId] = (series, _time.GetUtcNow());
+            return new MetronAnswer(true, series);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<ProviderHealth> CheckHealthAsync(CancellationToken cancellationToken = default)
+    {
+        var config = _settings.CurrentValue;
+        var health = Snapshot();
+        health.Enabled = config.EnableExternalSeriesMetadata;
+        health.Configured = Configured(config);
+        if (!health.Enabled)
+        {
+            health.StatusMessage = "Disabled in settings";
+            return health;
+        }
+
+        if (!health.Configured)
+        {
+            health.StatusMessage = "Missing API token (or username and password)";
+            return health;
+        }
+
+        // A probe at most every 10 minutes, so opening the screen costs next to nothing.
+        var account = Account(config);
+        bool fresh;
+        bool reachable;
+        lock (_lock)
+        {
+            (fresh, reachable) = _probe is { } probe && probe.Account == account && _time.GetUtcNow() - probe.At < ProbeLifetime
+                ? (true, probe.Reachable)
+                : (false, false);
+        }
+
+        if (!fresh)
+        {
+            reachable = Prepare(config, ProbeVolumeId, out var url)
+                        && await TakePermitAsync(wait: false, cancellationToken)
+                        && await GetAsync(config, url, cancellationToken) is { } document
+                        && Dispose(document);
+            lock (_lock)
+            {
+                _probe = (account, _time.GetUtcNow(), reachable);
+            }
+        }
+
+        health = Snapshot();
+        health.Enabled = true;
+        health.Configured = true;
+        health.Reachable = reachable;
+        health.StatusMessage = reachable ? "Reachable" : Problem ?? "Not reachable now";
+        return health;
     }
 
     /// <summary>The first series of a Metron list answer; null when it lists none.</summary>
@@ -194,6 +193,96 @@ public sealed class MetronClient : IMetronClient
         }
 
         return null;
+    }
+
+    private static bool Configured(AppSettings config)
+        => config.EnableExternalSeriesMetadata
+           && (!string.IsNullOrWhiteSpace(config.MetronApiToken)
+               || (!string.IsNullOrWhiteSpace(config.MetronUsername) && !string.IsNullOrWhiteSpace(config.MetronPassword)));
+
+    // The series lookup's address, after the account is checked: false when the address is not
+    // https, or the account's sign-in was refused lately. A changed account starts afresh.
+    private bool Prepare(AppSettings config, int comicVineVolumeId, out Uri url)
+    {
+        if (!Uri.TryCreate($"{config.MetronBaseUrl.TrimEnd('/')}/series/?cv_id={comicVineVolumeId.ToString(CultureInfo.InvariantCulture)}", UriKind.Absolute, out url!)
+            || url.Scheme != Uri.UriSchemeHttps)
+        {
+            Note(config, "The Metron address must be an https address, such as https://metron.cloud/api");
+            return false;
+        }
+
+        var account = Account(config);
+        lock (_lock)
+        {
+            // Answers belong to an account and address: another one asks again.
+            if (_account != account)
+            {
+                _account = account;
+                _answers.Clear();
+                _problem = null;
+                _pausedUntil = DateTimeOffset.MinValue;
+                _probe = null;
+            }
+
+            // A refused sign-in is tried again after a while: the account may have been fixed on Metron.
+            return !(_rejectedAccount == account && _time.GetUtcNow() - _rejectedAt < RetryRejectedSignIn);
+        }
+    }
+
+    // One signed-in request; the parsed answer, or null after recording why there is none.
+    private async Task<JsonDocument?> GetAsync(AppSettings config, Uri url, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = string.IsNullOrWhiteSpace(config.MetronApiToken)
+                ? new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{config.MetronUsername}:{config.MetronPassword}")))
+                : new AuthenticationHeaderValue("Bearer", config.MetronApiToken.Trim());
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            using var response = await _httpClients.CreateClient(HttpClientName).SendAsync(request, cancellationToken);
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                lock (_lock)
+                {
+                    _rejectedAccount = Account(config);
+                    _rejectedAt = _time.GetUtcNow();
+                }
+
+                Fail(config, string.IsNullOrWhiteSpace(config.MetronApiToken)
+                    ? "Metron refused the username and password: check them under Settings"
+                    : "Metron refused the API token: check it under Settings");
+                return null;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                // A 404 is not "no such series" (that is an empty list): the address is likely wrong.
+                Pause(config, response.StatusCode == HttpStatusCode.NotFound
+                    ? "Metron answered 404: check the Metron address"
+                    : $"Metron answered {(int)response.StatusCode}");
+                return null;
+            }
+
+            await using var body = await response.Content.ReadAsStreamAsync(cancellationToken);
+            var document = await JsonDocument.ParseAsync(body, cancellationToken: cancellationToken);
+            lock (_lock)
+            {
+                _problem = null;
+                _successes++;
+                _lastSuccessUtc = _time.GetUtcNow().UtcDateTime;
+            }
+
+            return document;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Pause(config, ex.Message);
+            return null;
+        }
     }
 
     // Under RequestsPerMinute in any minute and RequestsPerDay in a day, and not while paused. A
@@ -253,6 +342,17 @@ public sealed class MetronClient : IMetronClient
             _pausedUntil = _time.GetUtcNow() + PauseAfterFailure;
         }
 
+        Fail(config, reason);
+    }
+
+    private void Fail(AppSettings config, string reason)
+    {
+        lock (_lock)
+        {
+            _failures++;
+            _lastFailureUtc = _time.GetUtcNow().UtcDateTime;
+        }
+
         Note(config, reason);
     }
 
@@ -273,9 +373,31 @@ public sealed class MetronClient : IMetronClient
         }
     }
 
-    // Who is asked, and where: answers and a refused sign-in belong to it. The password is not kept.
+    private ProviderHealth Snapshot()
+    {
+        lock (_lock)
+        {
+            return new ProviderHealth
+            {
+                Name = ProviderName,
+                LastError = _problem,
+                LastSuccessUtc = _lastSuccessUtc,
+                LastFailureUtc = _lastFailureUtc,
+                SuccessCount = _successes,
+                FailureCount = _failures,
+            };
+        }
+    }
+
+    private static bool Dispose(JsonDocument document)
+    {
+        document.Dispose();
+        return true;
+    }
+
+    // Who is asked, and where: answers and a refused sign-in belong to it. The secrets are not kept.
     private static string Account(AppSettings config)
-        => $"{config.MetronBaseUrl.TrimEnd('/')}|{config.MetronUsername}|{config.MetronPassword?.GetHashCode(StringComparison.Ordinal)}";
+        => $"{config.MetronBaseUrl.TrimEnd('/')}|{config.MetronUsername}|{config.MetronPassword?.GetHashCode(StringComparison.Ordinal)}|{config.MetronApiToken?.Trim().GetHashCode(StringComparison.Ordinal)}";
 
     private static int? Int(JsonElement item, string name)
         => item.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) ? number : null;

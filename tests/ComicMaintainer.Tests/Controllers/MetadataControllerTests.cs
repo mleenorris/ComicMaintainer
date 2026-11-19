@@ -28,7 +28,8 @@ public class MetadataControllerTests
             Mock.Of<IFileStoreService>(),
             Mock.Of<ISeriesLanguagePreferenceRetagService>(),
             Mock.Of<IComicVineVolumeSearch>(),
-            Mock.Of<IComicVineIssueDetailsService>());
+            Mock.Of<IComicVineIssueDetailsService>(),
+            Mock.Of<IMetronClient>());
     }
 
     [Fact]
@@ -192,7 +193,8 @@ public class MetadataControllerTests
             Mock.Of<IFileStoreService>(),
             retag.Object,
             Mock.Of<IComicVineVolumeSearch>(),
-            Mock.Of<IComicVineIssueDetailsService>());
+            Mock.Of<IComicVineIssueDetailsService>(),
+            Mock.Of<IMetronClient>());
 
         var result = await controller.SetPreferredLanguage(
             "Batman",
@@ -289,10 +291,11 @@ public class MetadataControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var providersProp = ok.Value!.GetType().GetProperty("providers")!.GetValue(ok.Value);
-        var providers = Assert.IsAssignableFrom<IEnumerable<ProviderHealth>>(providersProp!);
-        var single = Assert.Single(providers);
-        Assert.Equal("ComicVine", single.Name);
-        Assert.True(single.Reachable);
+        var providers = Assert.IsAssignableFrom<IEnumerable<ProviderHealth>>(providersProp!).ToList();
+        // The series provider, then Metron's own entry (its mock gives none here).
+        Assert.Equal(2, providers.Count);
+        Assert.Equal("ComicVine", providers[0].Name);
+        Assert.True(providers[0].Reachable);
     }
 
     [Fact]
@@ -381,7 +384,8 @@ public class MetadataControllerTests
             fileStore.Object,
             Mock.Of<ISeriesLanguagePreferenceRetagService>(),
             Mock.Of<IComicVineVolumeSearch>(),
-            Mock.Of<IComicVineIssueDetailsService>());
+            Mock.Of<IComicVineIssueDetailsService>(),
+            Mock.Of<IMetronClient>());
 
         var result = await controller.ApplyMatch(
             "Batman",

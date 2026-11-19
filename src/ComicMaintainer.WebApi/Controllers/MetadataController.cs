@@ -24,6 +24,7 @@ public class MetadataController : ControllerBase
     private readonly IHostApplicationLifetime? _applicationLifetime;
     private readonly IComicVineVolumeSearch _volumeSearch;
     private readonly IComicVineIssueDetailsService _issueDetails;
+    private readonly IMetronClient _metron;
     private readonly ILogger<MetadataController> _logger;
 
     public MetadataController(
@@ -37,8 +38,10 @@ public class MetadataController : ControllerBase
         ISeriesLanguagePreferenceRetagService languageRetag,
         IComicVineVolumeSearch volumeSearch,
         IComicVineIssueDetailsService issueDetails,
+        IMetronClient metron,
         IHostApplicationLifetime? applicationLifetime = null)
     {
+        _metron = metron;
         _library = library;
         _cache = cache;
         _refreshJobs = refreshJobs;
@@ -248,7 +251,11 @@ public class MetadataController : ControllerBase
         {
             providers.Add(await _externalMetadata.CheckHealthAsync(cancellationToken));
         }
-        return Ok(new { providers = MergeAniListProviders(providers) });
+
+        // Metron is not a series provider: it checks ComicVine's volumes, and has its own entry.
+        var merged = MergeAniListProviders(providers);
+        merged.Add(await _metron.CheckHealthAsync(cancellationToken));
+        return Ok(new { providers = merged });
     }
 
     /// <summary>

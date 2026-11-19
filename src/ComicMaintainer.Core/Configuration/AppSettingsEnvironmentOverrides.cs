@@ -82,6 +82,7 @@ public static class AppSettingsEnvironmentOverrides
         Flag("ENABLE_EXTERNAL_SERIES_METADATA", o => o.EnableExternalSeriesMetadata, "enable_external_series_metadata"),
         Text("COMICVINE_API_KEY", o => o.ComicVineApiKey, "comicvine_api_key_set"),
         Text("COMICVINE_BASE_URL", o => o.ComicVineBaseUrl, "comicvine_base_url"),
+        Text("METRON_API_TOKEN", o => o.MetronApiToken, "metron_api_token_set"),
         Text("METRON_USERNAME", o => o.MetronUsername, "metron_username"),
         Text("METRON_PASSWORD", o => o.MetronPassword, "metron_password_set"),
         Text("METRON_BASE_URL", o => o.MetronBaseUrl, "metron_base_url"),

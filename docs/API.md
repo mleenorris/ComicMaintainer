@@ -863,7 +863,7 @@ Preferences are `{"defaultReaderMode","readingDirection","tapZonesEnabled","auto
 | `PUT` | `/api/metadata/series/{seriesTitle}/preferred-language` | Library write | `{"language":"en"}`; `null` clears |
 | `PUT` | `/api/metadata/series/{seriesTitle}/name` | Library write | Pin the shown name: `{"name":"..."}`; `null` reverts to automatic |
 
-**`GET /api/metadata/providers`** returns `{"providers":[{"name","enabled","configured","reachable","status_message","last_error","last_success_utc","last_failure_utc","success_count","failure_count","rate_limited","rate_limited_until_utc"}]}`.
+**`GET /api/metadata/providers`** returns `{"providers":[{"name","enabled","configured","reachable","status_message","last_error","last_success_utc","last_failure_utc","success_count","failure_count","rate_limited","rate_limited_until_utc"}]}`. The series providers come first, then `Metron`, which checks ComicVine's volumes rather than providing series: it is reachable when a probe (at most one every 10 minutes) succeeds, and `last_error` says why it is left out.
 
 **Refresh jobs.** The three queueing routes and `refresh/folder` return `{"jobId","totalSeries"}`. `match-unmatched` returns a null `jobId` when nothing is unmatched. `refresh-selected` takes `{"series":[...]}`. `refresh/folder` takes `{"seriesId":"...","titles":[...]}` (either is enough) and also returns `titles`.
 
@@ -1115,7 +1115,7 @@ A successful write returns `{"message":"..."}`, and the new value is in effect w
 
 - Files: `filename_format`, `folder_format`, `issue_number_padding`, `watcher_enable_rename`, `watcher_enable_normalize`, `convert_rar_to_cbz_on_write`, `log_max_bytes`.
 - Cleanup: `database_cleanup_interval_hours`, `stale_cleanup_max_removal_percent`, `stale_cleanup_missing_grace_hours`, `stale_cleanup_sentinel_file`, `processing_history_retention_days`, `processing_history_max_entries`.
-- Metadata: `enable_external_series_metadata`, `comicvine_api_key_set`, `comicvine_base_url`, `metron_username`, `metron_password_set`, `metron_base_url`, `metron_problem` (why Metron is left out now, such as a refused sign-in; `null` when it is fine), `enable_mangadex_metadata`, `mangadex_base_url`, `enable_anilist_metadata`, `anilist_base_url`, `fill_comicinfo_from_providers`.
+- Metadata: `enable_external_series_metadata`, `comicvine_api_key_set`, `comicvine_base_url`, `metron_api_token_set`, `metron_username`, `metron_password_set`, `metron_base_url`, `metron_problem` (why Metron is left out now, such as a refused sign-in; `null` when it is fine), `enable_mangadex_metadata`, `mangadex_base_url`, `enable_anilist_metadata`, `anilist_base_url`, `fill_comicinfo_from_providers`.
 - Suwayomi: `enable_suwayomi`, `suwayomi_base_url`, `suwayomi_username`, `suwayomi_password_set`, `suwayomi_downloads_directory`, `suwayomi_import_directory`.
 - Library: `default_preferred_language`, `write_cover_to_first_archive`, `write_cover_to_series_folder`, `download_external_series_images`, `series_image_max_bytes`, `series_image_max_download_bytes`, `series_image_max_dimension`.
 - Email: `smtp_host`, `smtp_port`, `smtp_username`, `smtp_password_set`, `smtp_use_ssl`, `smtp_allow_insecure`, `email_from_address`, `email_from_name`, `email_max_attachment_mb`, `email_max_sends_per_hour`, `email_max_sends_per_day`, `email_min_seconds_between_sends`.

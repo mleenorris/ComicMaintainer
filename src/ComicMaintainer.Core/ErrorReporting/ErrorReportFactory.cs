@@ -197,6 +197,7 @@ public sealed class ErrorReportFactory : IErrorReportFactory
         AddIfPresent(secrets, settings.SuwayomiPassword);
         AddIfPresent(secrets, settings.ComicVineApiKey);
         AddIfPresent(secrets, settings.MetronPassword);
+        AddIfPresent(secrets, settings.MetronApiToken);
         AddIfPresent(secrets, settings.ErrorReportingGitHubToken);
         AddIfPresent(secrets, settings.NotifyNtfyToken);
         AddIfPresent(secrets, settings.NotifyGotifyToken);

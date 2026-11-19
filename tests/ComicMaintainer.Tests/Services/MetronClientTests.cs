@@ -70,6 +70,89 @@ public sealed class MetronClientTests
     }
 
     [Fact]
+    public async Task SeriesOfComicVineVolumeAsync_AnApiToken_IsSentAsABearerToken_InsteadOfThePassword()
+    {
+        var client = CreateClient(new AppSettings
+        {
+            EnableExternalSeriesMetadata = true,
+            MetronApiToken = " knox-token ",
+            MetronUsername = "reader",
+            MetronPassword = "secret",
+            MetronBaseUrl = "https://metron.example/api",
+        });
+
+        Assert.True(client.IsConfigured);
+        Assert.True((await client.SeriesOfComicVineVolumeAsync(91273)).Available);
+
+        var request = Assert.Single(_requests);
+        Assert.Equal(("Bearer", "knox-token"), (request.Headers.Authorization!.Scheme, request.Headers.Authorization.Parameter));
+
+        // A token alone is enough.
+        Assert.True(CreateClient(new AppSettings { EnableExternalSeriesMetadata = true, MetronApiToken = "t" }).IsConfigured);
+    }
+
+    [Fact]
+    public async Task SeriesOfComicVineVolumeAsync_ARefusedToken_SaysSo()
+    {
+        _answer = _ => Json("{}", HttpStatusCode.Unauthorized);
+        var client = CreateClient(new AppSettings { EnableExternalSeriesMetadata = true, MetronApiToken = "old", MetronBaseUrl = "https://metron.example/api" });
+
+        await client.SeriesOfComicVineVolumeAsync(1);
+
+        Assert.Equal("Metron refused the API token: check it under Settings", client.Problem);
+    }
+
+    [Theory]
+    [InlineData(false, "secret", "Disabled in settings")]
+    [InlineData(true, null, "Missing API token (or username and password)")]
+    public async Task CheckHealthAsync_NotSetUp_SaysWhy_AndAsksNothing(bool enabled, string? password, string message)
+    {
+        var client = CreateClient(new AppSettings { EnableExternalSeriesMetadata = enabled, MetronUsername = "reader", MetronPassword = password });
+
+        var health = await client.CheckHealthAsync();
+
+        Assert.Equal(("Metron", enabled, false, (bool?)null, message), (health.Name, health.Enabled, health.Configured, health.Reachable, health.StatusMessage));
+        Assert.Empty(_requests);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ProbesAtMostEveryTenMinutes_AndCountsTheRequests()
+    {
+        var client = CreateClient();
+
+        var health = await client.CheckHealthAsync();
+
+        Assert.Equal((true, true, (bool?)true, "Reachable", 1L, 0L), (health.Enabled, health.Configured, health.Reachable, health.StatusMessage, health.SuccessCount, health.FailureCount));
+        Assert.Equal($"https://metron.example/api/series/?cv_id={MetronClient.ProbeVolumeId}", Assert.Single(_requests).RequestUri!.AbsoluteUri);
+        Assert.NotNull(health.LastSuccessUtc);
+
+        Assert.True((await client.CheckHealthAsync()).Reachable);
+        Assert.Single(_requests);
+
+        // Ten minutes on, Metron fails: the screen says how.
+        _time.Advance(TimeSpan.FromMinutes(11));
+        _answer = _ => Json("{}", HttpStatusCode.ServiceUnavailable);
+        health = await client.CheckHealthAsync();
+        Assert.Equal(((bool?)false, "Metron answered 503", "Metron answered 503", 1L, 1L),
+            (health.Reachable, health.StatusMessage, health.LastError, health.SuccessCount, health.FailureCount));
+        Assert.NotNull(health.LastFailureUtc);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ARefusedSignIn_ShowsAsNotReachable_WithoutAskingAgain()
+    {
+        _answer = _ => Json("{}", HttpStatusCode.Unauthorized);
+        var client = CreateClient();
+        await client.SeriesOfComicVineVolumeAsync(1);
+        _time.Advance(TimeSpan.FromMinutes(11));
+
+        var health = await client.CheckHealthAsync();
+
+        Assert.Equal(((bool?)false, "Metron refused the username and password: check them under Settings"), (health.Reachable, health.StatusMessage));
+        Assert.Single(_requests);
+    }
+
+    [Fact]
     public async Task SeriesOfComicVineVolumeAsync_NoSeries_IsAnAnswer_ButA404IsAWrongAddress()
     {
         _answer = _ => Json("{\"count\":0,\"results\":[]}");

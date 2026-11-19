@@ -26,7 +26,8 @@ public class MetadataControllerVolumeNumberTests
             Mock.Of<IFileStoreService>(),
             Mock.Of<ISeriesLanguagePreferenceRetagService>(),
             search,
-            Mock.Of<IComicVineIssueDetailsService>())
+            Mock.Of<IComicVineIssueDetailsService>(),
+            Mock.Of<IMetronClient>())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };

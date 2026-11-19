@@ -58,7 +58,8 @@ public sealed record ExternalSeriesMetadataUpdate(
     bool? FillComicInfoFromProviders = null,
     string? MetronUsername = null,
     string? MetronPassword = null,
-    string? MetronBaseUrl = null);
+    string? MetronBaseUrl = null,
+    string? MetronApiToken = null);
 
 /// <summary>The series cover image limits of a <see cref="SettingsUpdate"/>, in bytes and pixels.</summary>
 public sealed record SeriesImageLimitsUpdate(

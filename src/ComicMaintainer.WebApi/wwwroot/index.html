@@ -1338,10 +1338,22 @@
                         <h4 class="settings-subheading">Metron (second opinion on ComicVine volumes)</h4>
                         <p class="form-hint">
                             Optional. With a free metron.cloud account, the ComicVine volume an issue is matched to is checked against
-                            Metron's record of that volume: its volume number and start year.
+                            Metron's record of that volume: its volume number and start year. Give it an API token, made on
+                            metron.cloud, or the account's username and password.
                         </p>
                         <div class="form-group">
-                            <label for="metronUsername">Metron Username</label>
+                            <label for="metronApiToken">Metron API Token</label>
+                            <input type="password" id="metronApiToken" name="metronApiToken" placeholder="Metron API token" autocomplete="new-password">
+                            <small id="metronApiTokenHint" class="form-hint">
+                                Preferred to a username and password. The token is stored in user settings on this instance.
+                            </small>
+                            <label for="metronClearApiTokenCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="metronClearApiTokenCheckbox" name="metronClearApiToken">
+                                <span>Clear stored API token on save</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="metronUsername">Metron Username (instead of a token)</label>
                             <input type="text" id="metronUsername" name="metronUsername" placeholder="Metron username" autocomplete="off">
                         </div>
                         <div class="form-group">

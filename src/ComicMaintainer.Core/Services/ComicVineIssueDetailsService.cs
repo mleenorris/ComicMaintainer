@@ -39,6 +39,9 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
     /// <summary>Requests one search for a volume can take (<see cref="IComicVineVolumeSearch"/> reads up to three pages).</summary>
     private const int SearchRequests = 3;
 
+    private readonly IMetronClient _metron;
+    private readonly ICoverFingerprintService _fingerprints;
+
     /// <summary>How often a running job reads a link again, to pick up a volume the user chose meanwhile.</summary>
     internal TimeSpan LinkRecheck { get; init; } = TimeSpan.FromSeconds(30);
 
@@ -66,8 +69,12 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
         ISeriesMetadataCacheService seriesCache,
         IComicProcessorService processor,
         IBatchJobRegistry jobRegistry,
+        IMetronClient metron,
+        ICoverFingerprintService fingerprints,
         ILogger<ComicVineIssueDetailsService> logger)
     {
+        _metron = metron;
+        _fingerprints = fingerprints;
         _dbContextFactory = dbContextFactory;
         _fileStore = fileStore;
         _volumeSearch = volumeSearch;
@@ -1295,6 +1302,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
 
             ExternalSeriesMetadata? volume;
             string? decision = null;
+            string? metronReason = null;
             IReadOnlyList<VolumeCandidate> ranked = [];
             if (startYear == 0 && volumeNumber == 0)
             {
@@ -1369,11 +1377,34 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                     }
                 }
 
-                // Several fit about equally well: their issues tell them apart, if listing them is affordable.
+                // Several fit about equally well: their issues tell them apart, if listing them is
+                // affordable; then Metron's record of each, then their covers.
                 if (ambiguous)
                 {
                     ranked = await WeighIssuesAsync(ranked, holdings, cancellationToken);
                     (choice, ambiguous) = VolumeEvidence.Decide(ranked, holdings.Publishers.Count == 0);
+                }
+
+                if (ambiguous)
+                {
+                    ranked = await WeighWithMetronAsync(ranked, startYear, volumeNumber, cancellationToken);
+                    (choice, ambiguous) = VolumeEvidence.Decide(ranked, holdings.Publishers.Count == 0);
+                }
+
+                if (ambiguous)
+                {
+                    ranked = await WeighCoversAsync(ranked, holdings, cancellationToken);
+                    (choice, ambiguous) = VolumeEvidence.Decide(ranked, holdings.Publishers.Count == 0);
+                }
+
+                // A volume taken is checked against Metron's record of it: one Metron counts as another
+                // volume is left for the user instead.
+                if (choice is not null && await MetronContradictionAsync(choice, startYear, volumeNumber, cancellationToken) is { } contradiction)
+                {
+                    var started = choice.Volume.StartYear is { } year ? $" ({year.ToString(CultureInfo.InvariantCulture)})" : string.Empty;
+                    metronReason = $"ComicVine's {choice.Volume.CanonicalTitle}{started} fits best, but {contradiction}";
+                    choice = null;
+                    ambiguous = true;
                 }
 
                 volume = choice?.Volume;
@@ -1391,7 +1422,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 LinkedUtc = DateTime.UtcNow,
                 Decision = decision,
                 CandidatesJson = ranked.Count > 0 ? WriteCandidates(ranked) : null,
-                ReviewReason = decision == ComicVineVolumeDecision.Review ? VolumeEvidence.ReviewReason(ranked, title) : null,
+                ReviewReason = decision == ComicVineVolumeDecision.Review ? metronReason ?? VolumeEvidence.ReviewReason(ranked, title) : null,
             };
             return (await SaveLinkAsync(updated, cancellationToken), false);
         }
@@ -1486,7 +1517,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
 
                     var year = VolumeEvidence.KnownYear(metadata.Year);
                     var title = ComicVineIssueFill.IsPlaceholderTitle(metadata.Title, metadata.Series, metadata.Issue) ? null : metadata.Title;
-                    held.Issues.Add(new HeldIssue(metadata.Issue, year, title));
+                    held.Issues.Add(new HeldIssue(metadata.Issue, year, title, file.FilePath));
                     if (decimal.TryParse(metadata.Issue, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var number)
                         && number >= 1 && number <= 100000)
                     {
@@ -1507,6 +1538,130 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             }
 
             return _holdings.GetValueOrDefault(key) ?? VolumeHoldings.None;
+        }
+
+        /// <summary>
+        /// The best three of <paramref name="ranked"/> weighed again with Metron's record of each (see
+        /// <see cref="VolumeEvidence.WithMetron"/>), when Metron is set up and answers.
+        /// </summary>
+        private async Task<IReadOnlyList<VolumeCandidate>> WeighWithMetronAsync(
+            IReadOnlyList<VolumeCandidate> ranked,
+            int startYear,
+            int volumeNumber,
+            CancellationToken cancellationToken)
+        {
+            if (!owner._metron.IsConfigured)
+            {
+                return ranked;
+            }
+
+            var weighed = new List<VolumeCandidate>();
+            foreach (var candidate in ranked.Take(3))
+            {
+                var answer = int.TryParse(candidate.Volume.SourceId, NumberStyles.None, CultureInfo.InvariantCulture, out var volumeId)
+                    ? await owner._metron.SeriesOfComicVineVolumeAsync(volumeId, cancellationToken)
+                    : MetronAnswer.Unavailable;
+                weighed.Add(answer.Series is { } series
+                    ? VolumeEvidence.WithMetron(candidate, series.Volume, series.YearBegan, startYear, volumeNumber)
+                    : candidate);
+            }
+
+            return VolumeEvidence.Order(weighed.Concat(ranked.Skip(3)));
+        }
+
+        /// <summary>What Metron's record of <paramref name="choice"/> says against it; null when nothing, or Metron does not answer.</summary>
+        private async Task<string?> MetronContradictionAsync(VolumeCandidate choice, int startYear, int volumeNumber, CancellationToken cancellationToken)
+        {
+            if (!owner._metron.IsConfigured
+                || !int.TryParse(choice.Volume.SourceId, NumberStyles.None, CultureInfo.InvariantCulture, out var volumeId)
+                || (await owner._metron.SeriesOfComicVineVolumeAsync(volumeId, cancellationToken)).Series is not { } series)
+            {
+                return null;
+            }
+
+            return VolumeEvidence.MetronContradiction(series.Volume, series.YearBegan, startYear, volumeNumber);
+        }
+
+        /// <summary>
+        /// The best three of <paramref name="ranked"/> weighed again with their covers (see
+        /// <see cref="VolumeEvidence.WithCovers"/>): the covers of up to two issues held, against the
+        /// covers each volume lists under the same numbers, as far as its listing is known.
+        /// </summary>
+        private async Task<IReadOnlyList<VolumeCandidate>> WeighCoversAsync(
+            IReadOnlyList<VolumeCandidate> ranked,
+            VolumeHoldings holdings,
+            CancellationToken cancellationToken)
+        {
+            var held = holdings.Issues.Where(issue => issue.FilePath is not null).Take(2).ToList();
+            if (held.Count == 0)
+            {
+                return ranked;
+            }
+
+            var heldCovers = new List<(HeldIssue Issue, ulong Cover)>();
+            foreach (var issue in held)
+            {
+                if (await owner._fingerprints.OfFileAsync(issue.FilePath!, cancellationToken) is { } cover)
+                {
+                    heldCovers.Add((issue, cover));
+                }
+            }
+
+            if (heldCovers.Count == 0)
+            {
+                return ranked;
+            }
+
+            var weighed = new List<VolumeCandidate>();
+            foreach (var candidate in ranked.Take(3))
+            {
+                var listed = int.TryParse(candidate.Volume.SourceId, NumberStyles.None, CultureInfo.InvariantCulture, out var volumeId)
+                    ? await CoverUrlsAsync(volumeId, cancellationToken)
+                    : [];
+                var same = 0;
+                var other = 0;
+                foreach (var (issue, cover) in heldCovers)
+                {
+                    if (listed.FirstOrDefault(entry => IssueNumberParser.AreEquivalent(entry.Number, issue.Number)) is not { Url: { } url }
+                        || await owner._fingerprints.OfImageAsync(url, cancellationToken) is not { } theirs)
+                    {
+                        continue;
+                    }
+
+                    var distance = CoverFingerprint.Distance(cover, theirs);
+                    same += distance <= CoverFingerprint.SameCover ? 1 : 0;
+                    other += distance >= CoverFingerprint.OtherCover ? 1 : 0;
+                }
+
+                weighed.Add(VolumeEvidence.WithCovers(candidate, same, other));
+            }
+
+            return VolumeEvidence.Order(weighed.Concat(ranked.Skip(3)));
+        }
+
+        /// <summary>
+        /// The cover of each issue of a volume, as far as its listing is known: read while weighing,
+        /// else stored for a volume listed in full. A thumbnail where there is one.
+        /// </summary>
+        private async Task<IReadOnlyList<(string Number, string? Url)>> CoverUrlsAsync(int volumeId, CancellationToken cancellationToken)
+        {
+            if (_weighedListings.TryGetValue(volumeId, out var weighed))
+            {
+                return weighed.Listing.Value.Select(issue => (issue.IssueNumber, issue.CoverThumbUrl ?? issue.CoverUrl)).ToList();
+            }
+
+            if (!_links.Values.Any(link => link.VolumeId == volumeId && link.IssuesListedUtc is not null))
+            {
+                return [];
+            }
+
+            await using var db = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
+            return (await db.ComicVineIssues.AsNoTracking()
+                    .Where(issue => issue.VolumeId == volumeId)
+                    .Select(issue => new { issue.IssueNumber, issue.CoverThumbUrl, issue.CoverUrl })
+                    .ToListAsync(cancellationToken))
+                .Select(issue => (issue.IssueNumber, issue.CoverThumbUrl ?? issue.CoverUrl))
+                .ToList();
         }
 
         /// <summary>

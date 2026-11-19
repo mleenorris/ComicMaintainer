@@ -55,7 +55,10 @@ public sealed record ExternalSeriesMetadataUpdate(
     string? MangaDexBaseUrl = null,
     bool? EnableAniList = null,
     string? AniListBaseUrl = null,
-    bool? FillComicInfoFromProviders = null);
+    bool? FillComicInfoFromProviders = null,
+    string? MetronUsername = null,
+    string? MetronPassword = null,
+    string? MetronBaseUrl = null);
 
 /// <summary>The series cover image limits of a <see cref="SettingsUpdate"/>, in bytes and pixels.</summary>
 public sealed record SeriesImageLimitsUpdate(

@@ -154,6 +154,17 @@ public class AppSettings
     public string? ComicVineApiKey { get; set; }
     public string ComicVineBaseUrl { get; set; } = "https://comicvine.gamespot.com/api";
 
+    /// <summary>
+    /// A Metron (metron.cloud) account, optional: with it, the ComicVine volume an issue is matched
+    /// to is checked against Metron's own record of that volume (see <see cref="Interfaces.IMetronClient"/>).
+    /// </summary>
+    public string? MetronUsername { get; set; }
+
+    /// <summary>The Metron account's password; a secret, never returned by the settings API.</summary>
+    public string? MetronPassword { get; set; }
+
+    public string MetronBaseUrl { get; set; } = "https://metron.cloud/api";
+
     // MangaDex metadata provider (manga and manhwa)
     public bool EnableMangaDexMetadata { get; set; }
     public string MangaDexBaseUrl { get; set; } = "https://api.mangadex.org";

@@ -153,6 +153,30 @@ public sealed class SettingsServiceSaveAllTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateSettingsAsync_TheMetronAccount_IsSavedWithItsPasswordKeptAsASecret()
+    {
+        Directory.CreateDirectory(_configDir);
+        File.WriteAllText(_settingsPath, SeededSettings);
+
+        await _service.UpdateSettingsAsync(new SettingsUpdate
+        {
+            ExternalSeriesMetadata = new ExternalSeriesMetadataUpdate(MetronUsername: "reader", MetronPassword: "metron secret", MetronBaseUrl: "https://metron.example/api"),
+        });
+        var saved = SavedSection();
+        Assert.Equal(("reader", "metron secret", "https://metron.example/api"),
+            (saved.GetProperty("MetronUsername").GetString(), saved.GetProperty("MetronPassword").GetString(), saved.GetProperty("MetronBaseUrl").GetString()));
+
+        // Null keeps the stored password and base URL; blank clears the password and username.
+        await _service.UpdateSettingsAsync(new SettingsUpdate { ExternalSeriesMetadata = new ExternalSeriesMetadataUpdate(MetronUsername: "other") });
+        Assert.Equal("metron secret", SavedSection().GetProperty("MetronPassword").GetString());
+        await _service.UpdateSettingsAsync(new SettingsUpdate { ExternalSeriesMetadata = new ExternalSeriesMetadataUpdate(MetronUsername: "", MetronPassword: "", MetronBaseUrl: " ") });
+        saved = SavedSection();
+        Assert.Equal(JsonValueKind.Null, saved.GetProperty("MetronPassword").ValueKind);
+        Assert.Equal(JsonValueKind.Null, saved.GetProperty("MetronUsername").ValueKind);
+        Assert.Equal("https://metron.example/api", saved.GetProperty("MetronBaseUrl").GetString());
+    }
+
+    [Fact]
     public async Task UpdateSettingsAsync_EmptyTextClearsAndBlankUrlKeeps()
     {
         Directory.CreateDirectory(_configDir);

@@ -21,8 +21,8 @@ public sealed record VolumeHoldings(
     public static VolumeHoldings None { get; } = new([], null, 0, []);
 }
 
-/// <summary>One issue the library holds: its number, cover year and real story title.</summary>
-public sealed record HeldIssue(string Number, int? Year, string? Title);
+/// <summary>One issue the library holds: its number, cover year, real story title, and file (for its cover).</summary>
+public sealed record HeldIssue(string Number, int? Year, string? Title, string? FilePath = null);
 
 /// <summary>A ComicVine issue as listed, to compare with the issues held.</summary>
 public sealed record ListedIssue(string Number, string? CoverDate, string? Name);
@@ -295,6 +295,67 @@ public static class VolumeEvidence
 
         return candidate with { Score = score, Reasons = reasons };
     }
+
+    /// <summary>
+    /// <paramref name="candidate"/> weighed again with what Metron records of it (its volume number and
+    /// start year as Metron counts them), against the series volume of <paramref name="startYear"/> or
+    /// <paramref name="volumeNumber"/>: agreeing adds 4, contradicting takes 4 off.
+    /// </summary>
+    public static VolumeCandidate WithMetron(VolumeCandidate candidate, int? metronVolume, int? metronYear, int startYear, int volumeNumber)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        var label = Describe(metronVolume, metronYear);
+        if (MetronContradiction(metronVolume, metronYear, startYear, volumeNumber) is not null)
+        {
+            return candidate with { Score = candidate.Score - 4, Reasons = [.. candidate.Reasons, $"Metron lists it as {label}"] };
+        }
+
+        var agrees = (volumeNumber > 0 && metronVolume == volumeNumber) || (startYear > 0 && metronYear == startYear);
+        return agrees
+            ? candidate with { Score = candidate.Score + 4, Reasons = [.. candidate.Reasons, $"Metron lists it as {label}, as your issues say"] }
+            : candidate;
+    }
+
+    /// <summary>
+    /// What Metron's record of a volume (<paramref name="metronVolume"/>, <paramref name="metronYear"/>)
+    /// says against it being the series volume of <paramref name="startYear"/> or
+    /// <paramref name="volumeNumber"/>: another volume number, or a start year more than one off;
+    /// null when nothing.
+    /// </summary>
+    public static string? MetronContradiction(int? metronVolume, int? metronYear, int startYear, int volumeNumber)
+    {
+        if (volumeNumber > 0 && metronVolume is { } volume && volume != volumeNumber)
+        {
+            return $"Metron lists it as {Describe(metronVolume, metronYear)}, not Vol. {volumeNumber}";
+        }
+
+        return startYear > 0 && metronYear is { } year && Math.Abs(year - startYear) > 1
+            ? $"Metron lists it as {Describe(metronVolume, metronYear)}, not started in {startYear}"
+            : null;
+    }
+
+    /// <summary>
+    /// <paramref name="candidate"/> weighed again with how many of the covers compared matched
+    /// (<paramref name="same"/>) or plainly differed (<paramref name="other"/>): a matching cover adds
+    /// 5; when none matched and some plainly differed, 3 come off.
+    /// </summary>
+    public static VolumeCandidate WithCovers(VolumeCandidate candidate, int same, int other)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        if (same > 0)
+        {
+            return candidate with { Score = candidate.Score + 5, Reasons = [.. candidate.Reasons, same == 1 ? "a cover of yours matches its cover" : $"{same} covers of yours match its covers"] };
+        }
+
+        return other > 0
+            ? candidate with { Score = candidate.Score - 3, Reasons = [.. candidate.Reasons, "your covers do not match its covers"] }
+            : candidate;
+    }
+
+    private static string Describe(int? volume, int? year)
+        => string.Join(" ", new[] { volume is { } v ? $"Vol. {v}" : null, year is { } y ? $"({y})" : null }.Where(part => part is not null)) is { Length: > 0 } text
+            ? text
+            : "a volume";
 
     /// <summary>Best first; on a tie the earlier volume, then the one with more issues.</summary>
     public static IReadOnlyList<VolumeCandidate> Order(IEnumerable<VolumeCandidate> candidates)

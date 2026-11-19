@@ -90,6 +90,10 @@ public class SettingsController : ControllerBase
             // UI only needs to know whether one is stored.
             comicvine_api_key_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.ComicVineApiKey),
             comicvine_base_url = _appSettings.CurrentValue.ComicVineBaseUrl,
+            metron_username = _appSettings.CurrentValue.MetronUsername,
+            // The password is never returned; only whether one is stored.
+            metron_password_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.MetronPassword),
+            metron_base_url = _appSettings.CurrentValue.MetronBaseUrl,
             enable_mangadex_metadata = _appSettings.CurrentValue.EnableMangaDexMetadata,
             mangadex_base_url = _appSettings.CurrentValue.MangaDexBaseUrl,
             enable_anilist_metadata = _appSettings.CurrentValue.EnableAniListMetadata,

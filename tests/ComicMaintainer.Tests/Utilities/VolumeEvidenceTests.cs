@@ -120,6 +120,51 @@ public class VolumeEvidenceTests
             VolumeEvidence.ReviewReason([Scored("a", 0)], "Batman"));
     }
 
+    [Theory]
+    // By number: the same number agrees, another contradicts; by year: the same year agrees, more than one off contradicts.
+    [InlineData(3, 2016, 0, 3, 9d, "Metron lists it as Vol. 3 (2016), as your issues say")]
+    [InlineData(2, 2016, 0, 3, 1d, "Metron lists it as Vol. 2 (2016)")]
+    [InlineData(3, 2016, 2016, 0, 9d, "Metron lists it as Vol. 3 (2016), as your issues say")]
+    [InlineData(null, 2017, 2016, 0, 5d, null)]
+    [InlineData(null, 2019, 2016, 0, 1d, "Metron lists it as (2019)")]
+    [InlineData(null, null, 2016, 0, 5d, null)]
+    public void WithMetron_AgreeingAddsAndContradictingTakesOff(int? metronVolume, int? metronYear, int startYear, int volumeNumber, double expected, string? reason)
+    {
+        var candidate = new VolumeCandidate(Volume("a", 2016), 5, ["started in 2016"], 4);
+
+        var weighed = VolumeEvidence.WithMetron(candidate, metronVolume, metronYear, startYear, volumeNumber);
+
+        Assert.Equal(expected, weighed.Score);
+        Assert.Equal(reason is null ? 1 : 2, weighed.Reasons.Count);
+        if (reason is not null)
+        {
+            Assert.Equal(reason, weighed.Reasons[^1]);
+        }
+    }
+
+    [Fact]
+    public void MetronContradiction_SaysWhatDisagrees()
+    {
+        Assert.Equal("Metron lists it as Vol. 2 (2016), not Vol. 3", VolumeEvidence.MetronContradiction(2, 2016, 0, 3));
+        Assert.Equal("Metron lists it as (2010), not started in 2016", VolumeEvidence.MetronContradiction(null, 2010, 2016, 0));
+        Assert.Null(VolumeEvidence.MetronContradiction(null, null, 0, 3));
+        Assert.Null(VolumeEvidence.MetronContradiction(3, 2011, 0, 3));
+        Assert.Null(VolumeEvidence.MetronContradiction(null, 2015, 2016, 0));
+    }
+
+    [Theory]
+    [InlineData(1, 0, 10d, "a cover of yours matches its cover")]
+    [InlineData(2, 1, 10d, "2 covers of yours match its covers")]
+    [InlineData(0, 2, 2d, "your covers do not match its covers")]
+    [InlineData(0, 0, 5d, null)]
+    public void WithCovers_AMatchingCoverAdds_OnlyDifferentCoversTakeOff(int same, int other, double expected, string? reason)
+    {
+        var weighed = VolumeEvidence.WithCovers(new VolumeCandidate(Volume("a", 2016), 5, [], 4), same, other);
+
+        Assert.Equal(expected, weighed.Score);
+        Assert.Equal(reason, weighed.Reasons.LastOrDefault());
+    }
+
     [Fact]
     public void CloseCalls_CountsTheVolumesAboutAsGoodAsTheBestFittingOne()
     {

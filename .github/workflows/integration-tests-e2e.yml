@@ -71,6 +71,8 @@ jobs:
     - name: Scan image for vulnerabilities (report)
       uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
       with:
+        # The newest stable Trivy release, resolved every run; the action's own default lags behind it.
+        version: latest
         image-ref: comicmaintainer:ci
         scanners: vuln
         format: sarif
@@ -94,6 +96,8 @@ jobs:
     - name: Fail on fixable critical or high vulnerabilities
       uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
       with:
+        # The newest stable Trivy release, resolved every run; the action's own default lags behind it.
+        version: latest
         image-ref: comicmaintainer:ci
         scanners: vuln
         format: table

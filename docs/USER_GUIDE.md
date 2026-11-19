@@ -127,9 +127,9 @@ ComicVine volume with exactly the series' name is weighed against what you have 
 - having started no later than your earliest issue's cover year.
 
 A volume needs evidence that names it (its start year, its place among the publisher's volumes, or the series' match) to
-fit at all, and the best is taken only when it is clearly ahead of every other volume of the name, fitting or not: a
-volume named only by its start year, which another outscores on everything else (a foreign edition of that year beside
-the publisher's own a year off), is left for you. A one-shot or giveaway of the same name counts against itself. When several fit about equally well, their
+fit at all, and the best is taken only when it is clearly ahead of every other volume that fits, and ahead of any that
+does not: a volume named only by its start year, which another outscores on everything else (a foreign edition of that
+year beside the publisher's own a year off), is left for you. A one-shot or giveaway of the same name counts against itself. When several fit about equally well, their
 issue lists are read too: the volume whose cover years match your issues' (within a year), and whose story titles match
 your real titles, wins. If that still does not settle it, nothing is guessed: the volume is left for you to review, and
 its issues are not filled until you choose.

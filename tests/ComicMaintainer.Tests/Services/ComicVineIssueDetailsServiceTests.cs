@@ -68,7 +68,7 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
 
     public Task DisposeAsync() => _connection.DisposeAsync().AsTask();
 
-    private ComicVineIssueDetailsService CreateService() => new(
+    private ComicVineIssueDetailsService CreateService(TimeSpan? linkRecheck = null) => new(
         new Factory(_options),
         _fileStore.Object,
         _search.Object,
@@ -76,7 +76,10 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         _seriesCache.Object,
         _processor.Object,
         _jobs.Object,
-        NullLogger<ComicVineIssueDetailsService>.Instance);
+        NullLogger<ComicVineIssueDetailsService>.Instance)
+    {
+        LinkRecheck = linkRecheck ?? TimeSpan.FromSeconds(30),
+    };
 
     private ComicFile AddFile(string path, string issue, int? volumeYear = 2016, string series = "Batman", string? format = null, bool duplicate = false, string? volume = null)
     {
@@ -1057,6 +1060,34 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         await using var db = new ComicMaintainerDbContext(_options);
         var link = Assert.Single(db.ComicVineVolumeLinks);
         Assert.Equal((42721, ComicVineVolumeDecision.Manual), (link.VolumeId!.Value, link.Decision));
+    }
+
+    [Fact]
+    public async Task RunAsync_AChoiceMadeWhileAJobRunsOnTheOldVolume_IsUsedForTheRestOfIt()
+    {
+        AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");
+        AddFile("/c/Batman/Batman (2016) - Chapter 0002.cbz", "2");
+        var paths = _files.Select(f => f.FilePath).ToList();
+        await using (var db = new ComicMaintainerDbContext(_options))
+        {
+            db.ComicVineVolumeLinks.Add(new ComicVineVolumeLinkEntity { SeriesKey = "batman", StartYear = 2016, VolumeId = BatmanVolume, VolumeName = "Batman", LinkedUtc = DateTime.UtcNow, Decision = ComicVineVolumeDecision.Weighed });
+            await db.SaveChangesAsync();
+        }
+
+        // While #1 is filled from the old volume, the user chooses 42721.
+        _search.Setup(s => s.GetVolumeAsync(42721, It.IsAny<CancellationToken>())).ReturnsAsync(new ExternalSeriesMetadata { CanonicalTitle = "Batman", SourceId = "42721" });
+        _seriesCache.Setup(c => c.GetByTitleAsync("Batman", It.IsAny<CancellationToken>()))
+            .Callback(() => CreateService().ChooseVolumeAsync(paths, null, 2016, 0, 42721).GetAwaiter().GetResult())
+            .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        _client.Setup(c => c.ListVolumeIssuesAsync(42721, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicVineResult<IReadOnlyList<ComicVineIssueSummary>>([new ComicVineIssueSummary(4202, "2", "The Chosen Two", "2016-09-01", null, null)], 1));
+        _client.Setup(c => c.GetIssueDetailsAsync(4202, It.IsAny<CancellationToken>())).ReturnsAsync(new ComicVineIssueDetails(4202, [], []));
+
+        await CreateService(linkRecheck: TimeSpan.Zero).RunAsync(null, 20);
+
+        Assert.Equal("The Chosen Two", _writes.Single(w => w.Path.EndsWith("0002.cbz")).Metadata.Title);
+        await using var check = new ComicMaintainerDbContext(_options);
+        Assert.Equal((42721, ComicVineVolumeDecision.Manual), (check.ComicVineVolumeLinks.Single().VolumeId!.Value, check.ComicVineVolumeLinks.Single().Decision));
     }
 
     [Fact]

@@ -192,10 +192,10 @@ public static class VolumeEvidence
     /// <summary>
     /// The volume to take from <paramref name="ranked"/>: the best of those that fit (with an
     /// <see cref="VolumeCandidate.Identity"/> of at least <see cref="MinimumScore"/>), when its score
-    /// is positive and at least <see cref="Margin"/> above every other volume's, fitting or not: a
-    /// volume the evidence names only by its start year, which another outscores on everything
-    /// else, is not taken. <c>Ambiguous</c> is true when some volume fits but none is clearly best,
-    /// for the user to choose; both null and false when none fits.
+    /// is positive, at least <see cref="Margin"/> above every other fitting volume's, and above every
+    /// volume's that does not fit: a volume the evidence names only by its start year, which another
+    /// outscores on everything else, is not taken. <c>Ambiguous</c> is true when some volume fits but
+    /// none is clearly best, for the user to choose; both null and false when none fits.
     /// </summary>
     public static (VolumeCandidate? Choice, bool Ambiguous) Decide(IReadOnlyList<VolumeCandidate> ranked)
     {
@@ -206,8 +206,13 @@ public static class VolumeEvidence
             return (null, false);
         }
 
-        var rival = ranked.Where(candidate => !ReferenceEquals(candidate, best)).Select(candidate => (double?)candidate.Score).Max();
-        return best.Score > 0 && (rival is null || best.Score - rival >= Margin) ? (best, false) : (null, true);
+        var others = ranked.Where(candidate => !ReferenceEquals(candidate, best)).ToList();
+        var fittingRival = others.Where(candidate => candidate.Identity >= MinimumScore).Select(candidate => (double?)candidate.Score).Max();
+        var otherRival = others.Where(candidate => candidate.Identity < MinimumScore).Select(candidate => (double?)candidate.Score).Max();
+        var clear = best.Score > 0
+                    && (fittingRival is null || best.Score - fittingRival >= Margin)
+                    && (otherRival is null || best.Score > otherRival);
+        return clear ? (best, false) : (null, true);
     }
 
     /// <summary>
@@ -219,6 +224,15 @@ public static class VolumeEvidence
         ArgumentNullException.ThrowIfNull(ranked);
         var best = ranked.Where(candidate => candidate.Identity >= MinimumScore).MaxBy(candidate => candidate.Score);
         return best is null ? 0 : ranked.Count(candidate => best.Score - candidate.Score < Margin);
+    }
+
+    /// <summary>Why a volume is left for review: what <see cref="Decide"/> could not settle, in words.</summary>
+    public static string ReviewReason(IReadOnlyList<VolumeCandidate> ranked, string title)
+    {
+        var close = CloseCalls(ranked);
+        return close > 1
+            ? $"{close} ComicVine volumes named {title} fit about equally well"
+            : $"The evidence against the only ComicVine volume named {title} that fits outweighs what names it";
     }
 
     /// <summary>

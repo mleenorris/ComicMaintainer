@@ -39,6 +39,9 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
     /// <summary>Requests one search for a volume can take (<see cref="IComicVineVolumeSearch"/> reads up to three pages).</summary>
     private const int SearchRequests = 3;
 
+    /// <summary>How often a running job reads a link again, to pick up a volume the user chose meanwhile.</summary>
+    internal TimeSpan LinkRecheck { get; init; } = TimeSpan.FromSeconds(30);
+
     /// <summary>
     /// Pages of ComicVine's volume list read by name (see
     /// <see cref="IComicVineVolumeSearch.ListVolumesNamedAsync"/>) when the ranked search finds no
@@ -724,6 +727,9 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
         // Names of the volumes of issues read by their id this run.
         private readonly Dictionary<int, string> _volumeNames = new();
 
+        // When each link was last read again from the database (see LinkAsync).
+        private readonly Dictionary<(string Key, int Year, int Number), DateTime> _linksCheckedUtc = new();
+
         // Issue listings read while weighing volumes, by volume, and whether each is complete.
         private readonly Dictionary<int, (ComicVineResult<IReadOnlyList<ComicVineIssueSummary>> Listing, bool Complete)> _weighedListings = new();
         private readonly Dictionary<int, List<ComicVineIssueEntity>> _issuesByVolume = new();
@@ -1265,6 +1271,22 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             _links.TryGetValue(key, out var link);
             var title = SeriesTitle(series);
 
+            // A job runs for a while: a volume the user chose meanwhile is picked up, the stored link
+            // being read again at most every 30 seconds.
+            if (link is not null && link.Decision != ComicVineVolumeDecision.Manual
+                && (!_linksCheckedUtc.TryGetValue(key, out var checkedUtc) || DateTime.UtcNow - checkedUtc >= owner.LinkRecheck))
+            {
+                _linksCheckedUtc[key] = DateTime.UtcNow;
+                await using var read = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
+                if (await read.ComicVineVolumeLinks.AsNoTracking().FirstOrDefaultAsync(
+                        entry => entry.SeriesKey == key.Item1 && entry.StartYear == startYear && entry.VolumeNumber == volumeNumber,
+                        cancellationToken) is { Decision: ComicVineVolumeDecision.Manual } chosen)
+                {
+                    link = chosen;
+                    _links[key] = chosen;
+                }
+            }
+
             // The user's choice is final: never searched for again.
             if (link?.Decision == ComicVineVolumeDecision.Manual)
             {
@@ -1369,9 +1391,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 LinkedUtc = DateTime.UtcNow,
                 Decision = decision,
                 CandidatesJson = ranked.Count > 0 ? WriteCandidates(ranked) : null,
-                ReviewReason = decision == ComicVineVolumeDecision.Review
-                    ? $"{VolumeEvidence.CloseCalls(ranked)} ComicVine volumes named {title} fit about equally well"
-                    : null,
+                ReviewReason = decision == ComicVineVolumeDecision.Review ? VolumeEvidence.ReviewReason(ranked, title) : null,
             };
             return (await SaveLinkAsync(updated, cancellationToken), false);
         }
@@ -1415,10 +1435,11 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             }
             catch (DbUpdateException)
             {
+                // Another run stored the link first; any other failure is rethrown as it was.
                 await using var again = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
-                stored = await again.ComicVineVolumeLinks.AsNoTracking().FirstAsync(
+                stored = await again.ComicVineVolumeLinks.AsNoTracking().FirstOrDefaultAsync(
                     entry => entry.SeriesKey == link.SeriesKey && entry.StartYear == link.StartYear && entry.VolumeNumber == link.VolumeNumber,
-                    cancellationToken);
+                    cancellationToken) ?? throw new InvalidOperationException("The ComicVine volume link could not be stored");
             }
 
             _links[key] = stored;

@@ -72,11 +72,45 @@ public class VolumeEvidenceTests
         Assert.Equal("a", VolumeEvidence.Decide([Scored("a", 8), Scored("b", 5)]).Choice!.Volume.SourceId);
         Assert.Equal("a", VolumeEvidence.Decide([Scored("a", 8), Scored("b", 5, identity: 2)]).Choice!.Volume.SourceId);
         Assert.Equal((null, true), VolumeEvidence.Decide([Scored("a", 8), Scored("b", 6)]));
-        // The only volume that fits is not taken when one that does not fit outscores it, or comes close,
-        // or when the evidence against it outweighs what names it.
+        // A volume that does not fit only stands in the way when it scores at least as high; one that
+        // fits must be outscored by the margin.
         Assert.Equal((null, true), VolumeEvidence.Decide([Scored("a", 9, identity: 2), Scored("b", 5)]));
-        Assert.Equal((null, true), VolumeEvidence.Decide([Scored("a", 5), Scored("b", 3, identity: 2)]));
+        Assert.Equal((null, true), VolumeEvidence.Decide([Scored("a", 5), Scored("b", 5, identity: 2)]));
+        Assert.Equal("a", VolumeEvidence.Decide([Scored("a", 5), Scored("b", 4, identity: 2)]).Choice!.Volume.SourceId);
+        // The evidence against the only fitting volume outweighs what names it.
         Assert.Equal((null, true), VolumeEvidence.Decide([Scored("a", 0)]));
+    }
+
+    [Fact]
+    public void Decide_RealCases_ThatMustNotGoToReview()
+    {
+        // The series page is matched to Batman (1940); the files say Vol. 3, DC's 2016 volume.
+        var numbered = VolumeEvidence.Rank(
+            [Volume("1940", 1940, issues: 713), Volume("2011", 2011, issues: 52), Volume("2016", 2016, issues: 158)],
+            "Batman", 0, 3, "1940", Held(highest: 10, earliest: 2016, "DC Comics"));
+        Assert.Equal("2016", VolumeEvidence.Decide(numbered).Choice!.Volume.SourceId);
+
+        // Marvel relaunches a year apart: Wolverine (2014) next to Wolverine (2013).
+        var relaunch = VolumeEvidence.Rank(
+            [Volume("2013", 2013, "Marvel", 13, "Wolverine"), Volume("2014", 2014, "Marvel", 12, "Wolverine")],
+            "Wolverine", 2014, 0, null, Held(highest: 12, earliest: 2014, "Marvel"));
+        Assert.Equal("2014", VolumeEvidence.Decide(relaunch).Choice!.Volume.SourceId);
+
+        // A foreign edition of 2016 beside Marvel's own of 2015: the publisher outweighs the year.
+        var foreign = VolumeEvidence.Rank(
+            [Volume("panini", 2016, "Panini", 30, "Star Wars"), Volume("marvel", 2015, "Marvel", 75, "Star Wars")],
+            "Star Wars", 2016, 0, null, Held(highest: 20, earliest: 2015, "Marvel"));
+        Assert.Equal((null, true), VolumeEvidence.Decide(foreign));
+    }
+
+    [Fact]
+    public void ReviewReason_SaysWhatCouldNotBeSettled()
+    {
+        VolumeCandidate Scored(string id, double score, double identity = 4) => new(Volume(id, 2016), score, [], identity);
+
+        Assert.Equal("2 ComicVine volumes named Batman fit about equally well", VolumeEvidence.ReviewReason([Scored("a", 8), Scored("b", 6)], "Batman"));
+        Assert.Equal("The evidence against the only ComicVine volume named Batman that fits outweighs what names it",
+            VolumeEvidence.ReviewReason([Scored("a", 0)], "Batman"));
     }
 
     [Fact]

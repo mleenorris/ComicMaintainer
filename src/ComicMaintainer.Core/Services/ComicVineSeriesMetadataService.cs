@@ -206,8 +206,25 @@ public partial class ComicVineSeriesMetadataService : ExternalSeriesMetadataProv
     }
 
     /// <inheritdoc />
-    public Task<ExternalSeriesMetadata?> GetVolumeAsync(int volumeId, CancellationToken cancellationToken = default)
-        => LookupMatchAsync(ProviderName, volumeId.ToString(System.Globalization.CultureInfo.InvariantCulture), $"volume {volumeId}", cancellationToken);
+    /// <remarks>A user is waiting, so the wait for a permit is limited as for any interactive search.</remarks>
+    public async Task<ExternalSeriesMetadata?> GetVolumeAsync(int volumeId, CancellationToken cancellationToken = default)
+    {
+        var config = Settings.CurrentValue;
+        if (volumeId <= 0 || !CanQuery(config))
+        {
+            return null;
+        }
+
+        var id = volumeId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return await SendAsync(
+            config,
+            () => CreateGetByIdRequest(config, id),
+            $"volume {id}",
+            ParseGetByIdResult,
+            RateLimitedHttpInvoker.InteractivePermitWait,
+            cancellationToken,
+            notFoundIsEmpty: true);
+    }
 
     private static string NameKey(string? text)
         => new((text ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());

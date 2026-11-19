@@ -1598,14 +1598,16 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 return ranked;
             }
 
-            var heldCovers = new List<(HeldIssue Issue, ulong Cover)>();
+            var fingerprints = new List<(HeldIssue Issue, ulong? Cover)>();
             foreach (var issue in held)
             {
-                if (await owner._fingerprints.OfFileAsync(issue.FilePath!, cancellationToken) is { } cover)
-                {
-                    heldCovers.Add((issue, cover));
-                }
+                fingerprints.Add((issue, await owner._fingerprints.OfFileAsync(issue.FilePath!, cancellationToken)));
             }
+
+            var heldCovers = fingerprints
+                .Where(entry => entry.Cover.HasValue)
+                .Select(entry => (entry.Issue, Cover: entry.Cover!.Value))
+                .ToList();
 
             if (heldCovers.Count == 0)
             {

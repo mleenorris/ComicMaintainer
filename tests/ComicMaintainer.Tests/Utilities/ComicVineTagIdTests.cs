@@ -101,6 +101,24 @@ public class ComicVineTagIdTests
             ComicVineTagId.Read("[CVDB5] (matched by name in ComicMaintainer) Tagged with ComicTagger using info from Comic Vine on 2025-01-01. [Issue ID 8]", null));
         Assert.Equal(ComicVineIdSource.NameMatch,
             ComicInfoXml.Read(XDocument.Parse("<ComicInfo><Notes>[CVDB5] (matched by name in ComicMaintainer)</Notes></ComicInfo>"))!.ComicVineIssueIdSource);
+        // A tagger's id added beside the app's own wins over the page the app wrote for its match.
+        Assert.Equal((8, ComicVineIdSource.Tagger),
+            ComicVineTagId.Read("[CVDB5] (matched by name in ComicMaintainer) [CVDB8]", "https://comicvine.gamespot.com/x/4000-5/"));
+        // A web page naming a third issue still makes the tags untrusted.
+        Assert.Equal((null, ComicVineIdSource.None),
+            ComicVineTagId.Read("[CVDB5] (matched by name in ComicMaintainer) [CVDB8]", "https://comicvine.gamespot.com/x/4000-9/"));
+    }
+
+    [Fact]
+    public void FillEmptyFields_FromATaggersId_ReplacesThePageTheAppWroteForItsOwnMatch()
+    {
+        var document = XDocument.Parse(
+            "<ComicInfo><Notes>[CVDB5] (matched by name in ComicMaintainer) [CVDB8]</Notes><Web>https://comicvine.gamespot.com/x/4000-5/</Web></ComicInfo>");
+
+        var filled = ComicInfoXml.FillEmptyFields(document, new ProviderComicInfoFields(Web: "https://comicvine.gamespot.com/y/4000-8/", ComicVineIssueId: 8)).Root!;
+
+        Assert.Equal("[CVDB8]", filled.Element("Notes")?.Value);
+        Assert.Equal("https://comicvine.gamespot.com/y/4000-8/", filled.Element("Web")?.Value);
     }
 
     [Theory]

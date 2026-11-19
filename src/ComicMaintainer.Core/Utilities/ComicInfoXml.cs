@@ -134,7 +134,12 @@ public static class ComicInfoXml
         {
             var ns = root.Name.Namespace;
             var web = root.Element(ns + "Web")?.Value;
-            var issueWeb = values.Web is null ? web : ComicVineTagId.WithIssuePage(web, values.Web, issueId, values.ReplacesComicVineIssueId);
+            var notesBefore = root.Element(ns + "Notes")?.Value;
+
+            // The page this application wrote for its own earlier match goes with that match.
+            var replacesWeb = values.ReplacesComicVineIssueId
+                              || (ComicVineTagId.OwnRecordedId(notesBefore) is { } own && own != issueId && ComicVineTagId.IssuePageId(web) == own);
+            var issueWeb = values.Web is null ? web : ComicVineTagId.WithIssuePage(web, values.Web, issueId, replacesWeb);
             if (!string.Equals(web, issueWeb, StringComparison.Ordinal))
             {
                 SetElement(root, "Web", issueWeb);

@@ -39,6 +39,12 @@ public static partial class ComicVineTagId
             if (TaggerToken(notes) is { } tagger)
             {
                 (fromNotes, source) = (Id(tagger.Groups["id"].Value), ComicVineIdSource.Tagger);
+
+                // A tagger's id added after the app's own match wins over the page the app wrote for it.
+                if (fromWeb is { } page && page != fromNotes && OwnRecordedId(notes) == page)
+                {
+                    return (fromNotes, source);
+                }
             }
             else if (OwnTokenPattern().Match(notes) is { Success: true } own)
             {
@@ -57,6 +63,10 @@ public static partial class ComicVineTagId
 
         return fromWeb is { } webId ? (webId, ComicVineIdSource.WebOnly) : (null, ComicVineIdSource.None);
     }
+
+    /// <summary>The id of this application's own record of a name match in <paramref name="notes"/>; null when there is none.</summary>
+    public static int? OwnRecordedId(string? notes)
+        => !string.IsNullOrWhiteSpace(notes) && OwnTokenPattern().Match(notes) is { Success: true } own ? Id(own.Groups["id"].Value) : null;
 
     /// <summary>The issue id <see cref="Read"/> finds, without its source.</summary>
     public static int? FromTags(string? notes, string? web) => Read(notes, web).Id;

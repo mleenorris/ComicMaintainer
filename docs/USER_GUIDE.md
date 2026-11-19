@@ -108,8 +108,9 @@ yet, because no ComicVine requests are left, waits for the next run rather than 
 
 The id this app records after matching an issue by name is its own record of that match, not a tagger's, and says so:
 `[CVDB12345] (matched by name in ComicMaintainer)`. If you later set the issue's volume number or start year, the issue is
-matched again and the recorded id follows the new match, even after the file was renamed or moved. The same goes for the
-issue page earlier versions wrote into `<Web>` after a match. A tagger's id added later wins over the app's own record. When the tags name an
+matched again and the recorded id follows the new match, even after the file was renamed or moved. The issue page earlier
+versions wrote into `<Web>` after a match is treated the same way while the file stays where it was filled. A tagger's id
+added later wins over the app's own record. When the tags name an
 issue ComicVine does not have, they are left as they are, and that id is not asked for again.
 
 Any other issue is matched to a ComicVine volume through its series:

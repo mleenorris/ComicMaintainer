@@ -96,6 +96,13 @@ public class VolumeEvidenceTests
             "Wolverine", 2014, 0, null, Held(highest: 12, earliest: 2014, "Marvel"));
         Assert.Equal("2014", VolumeEvidence.Decide(relaunch).Choice!.Volume.SourceId);
 
+        // Without a publisher, the relaunch a year off is close enough to be weighed by its issues.
+        var unnamed = VolumeEvidence.Rank(
+            [Volume("2013", 2013, "Marvel", 13, "Wolverine"), Volume("2014", 2014, "Marvel", 12, "Wolverine")],
+            "Wolverine", 2014, 0, null, Held(highest: 12, earliest: 2014));
+        Assert.Equal("2014", VolumeEvidence.Decide(unnamed).Choice!.Volume.SourceId);
+        Assert.Equal((null, true), VolumeEvidence.Decide(unnamed, publisherUnknown: true));
+
         // A foreign edition of 2016 beside Marvel's own of 2015: the publisher outweighs the year.
         var foreign = VolumeEvidence.Rank(
             [Volume("panini", 2016, "Panini", 30, "Star Wars"), Volume("marvel", 2015, "Marvel", 75, "Star Wars")],

@@ -1349,7 +1349,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 var seriesMatch = (await SeriesMatchAsync(series, cancellationToken))?.SourceId;
                 var holdings = await HoldingsAsync(key, cancellationToken);
                 ranked = VolumeEvidence.Rank(volumes, title, startYear, volumeNumber, seriesMatch, holdings);
-                var (choice, ambiguous) = VolumeEvidence.Decide(ranked);
+                var (choice, ambiguous) = VolumeEvidence.Decide(ranked, holdings.Publishers.Count == 0);
 
                 // The ranked search can leave a much-used name's volume out: list every volume of
                 // that exact name, oldest first, and look again.
@@ -1365,7 +1365,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                     if (added.Count > 0 && (startYear > 0 || named.Complete))
                     {
                         ranked = VolumeEvidence.Rank(volumes.Concat(added), title, startYear, volumeNumber, seriesMatch, holdings);
-                        (choice, ambiguous) = VolumeEvidence.Decide(ranked);
+                        (choice, ambiguous) = VolumeEvidence.Decide(ranked, holdings.Publishers.Count == 0);
                     }
                 }
 
@@ -1373,7 +1373,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 if (ambiguous)
                 {
                     ranked = await WeighIssuesAsync(ranked, holdings, cancellationToken);
-                    (choice, ambiguous) = VolumeEvidence.Decide(ranked);
+                    (choice, ambiguous) = VolumeEvidence.Decide(ranked, holdings.Publishers.Count == 0);
                 }
 
                 volume = choice?.Volume;

@@ -194,10 +194,13 @@ public static class VolumeEvidence
     /// <see cref="VolumeCandidate.Identity"/> of at least <see cref="MinimumScore"/>), when its score
     /// is positive, at least <see cref="Margin"/> above every other fitting volume's, and above every
     /// volume's that does not fit: a volume the evidence names only by its start year, which another
-    /// outscores on everything else, is not taken. <c>Ambiguous</c> is true when some volume fits but
-    /// none is clearly best, for the user to choose; both null and false when none fits.
+    /// outscores on everything else, is not taken. Without a publisher to tell editions apart
+    /// (<paramref name="publisherUnknown"/>), a volume that does not fit must be outscored by the
+    /// margin too: a foreign edition that started in the year the files name is otherwise taken over
+    /// the publisher's own volume that started a year earlier. <c>Ambiguous</c> is true when some
+    /// volume fits but none is clearly best, for the user to choose; both null and false when none fits.
     /// </summary>
-    public static (VolumeCandidate? Choice, bool Ambiguous) Decide(IReadOnlyList<VolumeCandidate> ranked)
+    public static (VolumeCandidate? Choice, bool Ambiguous) Decide(IReadOnlyList<VolumeCandidate> ranked, bool publisherUnknown = false)
     {
         ArgumentNullException.ThrowIfNull(ranked);
         var best = ranked.Where(candidate => candidate.Identity >= MinimumScore).MaxBy(candidate => candidate.Score);
@@ -211,7 +214,7 @@ public static class VolumeEvidence
         var otherRival = others.Where(candidate => candidate.Identity < MinimumScore).Select(candidate => (double?)candidate.Score).Max();
         var clear = best.Score > 0
                     && (fittingRival is null || best.Score - fittingRival >= Margin)
-                    && (otherRival is null || best.Score > otherRival);
+                    && (otherRival is null || (publisherUnknown ? best.Score - otherRival >= Margin : best.Score > otherRival));
         return clear ? (best, false) : (null, true);
     }
 

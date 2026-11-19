@@ -76,6 +76,24 @@ public sealed record SeriesVolumeLink(
     string? Publisher,
     string? SiteUrl);
 
+/// <summary>
+/// The ComicVine page of the file at <see cref="FilePath"/>: its issue's page when the issue is
+/// known (<see cref="IssueUrl"/> is null when ComicVine gave none), and always its volume's page.
+/// <see cref="Filled"/> is true when Fetch Issue Details wrote the file from that issue, false when
+/// the issue was matched by number in the volume's stored listing, or not matched at all
+/// (<see cref="IssueId"/> null).
+/// </summary>
+public sealed record IssueComicVineLink(
+    string FilePath,
+    int? IssueId,
+    string? IssueNumber,
+    string? IssueName,
+    string? IssueUrl,
+    int VolumeId,
+    string? VolumeName,
+    string VolumeUrl,
+    bool Filled);
+
 /// <summary>A story arc some issues of a series are part of.</summary>
 public sealed record SeriesStoryArc(int Id, string Name, IReadOnlyList<string> FilePaths);
 

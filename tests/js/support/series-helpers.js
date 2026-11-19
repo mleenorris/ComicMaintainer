@@ -131,6 +131,7 @@ async function bootSeries({
             [`GET /api/metadata/story-arcs/series/${encodeURIComponent(series.id)}`]: { arcs: [] },
             // ...and its volumes' ComicVine links; none by default.
             [`GET /api/metadata/volumes/series/${encodeURIComponent(series.id)}`]: { volumes: [] },
+            [`GET /api/metadata/comicvine-links/series/${encodeURIComponent(series.id)}`]: { issues: [] },
             ...routes
         },
         ...options

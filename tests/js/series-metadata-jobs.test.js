@@ -575,7 +575,7 @@ test('metadata actions without a series or a job do nothing', async t => {
     const page = await bootSeries();
     // The series page reads its story arcs and volumes when it opens; nothing else may be asked.
     const metadataRequests = () => page.fetchCalls
-        .filter(call => /^\/api\/(metadata|status)\//.test(call.path) && !call.path.startsWith('/api/metadata/story-arcs/') && !call.path.startsWith('/api/metadata/volumes/'))
+        .filter(call => /^\/api\/(metadata|status)\//.test(call.path) && !call.path.startsWith('/api/metadata/story-arcs/') && !call.path.startsWith('/api/metadata/volumes/') && !call.path.startsWith('/api/metadata/comicvine-links/'))
         .length;
 
     await page.run(`Promise.all([

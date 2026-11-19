@@ -71,6 +71,20 @@ public class MetadataControllerIssueDetailsTests
     }
 
     [Fact]
+    public async Task SeriesComicVineLinks_ListsEachIssuesPage()
+    {
+        _details.Setup(d => d.GetIssueLinksAsync(It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new IssueComicVineLink("/c/a.cbz", 101, "1", "One", "https://comicvine.gamespot.com/x/4000-101/", 7, "Batman", "https://comicvine.gamespot.com/volume/4050-7/", true)]);
+
+        var body = Json(Assert.IsType<OkObjectResult>((await CreateController().SeriesComicVineLinks("batman", CancellationToken.None)).Result).Value);
+
+        Assert.Equal(
+            """[{"file_path":"/c/a.cbz","issue_id":101,"issue_number":"1","issue_name":"One","issue_url":"https://comicvine.gamespot.com/x/4000-101/","volume_id":7,"volume_name":"Batman","volume_url":"https://comicvine.gamespot.com/volume/4050-7/","filled":true}]""",
+            body["issues"]!.ToString(Newtonsoft.Json.Formatting.None));
+        Assert.IsType<NotFoundObjectResult>((await CreateController().SeriesComicVineLinks("nope", CancellationToken.None)).Result);
+    }
+
+    [Fact]
     public async Task SeriesVolumes_ListsEachVolumeWithItsLink()
     {
         _details.Setup(d => d.GetVolumeLinksAsync(It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))

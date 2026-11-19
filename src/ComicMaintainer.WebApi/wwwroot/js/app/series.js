@@ -302,6 +302,7 @@
                     if (previous) {
                         seriesStoryArcsCache.delete(seriesId);
                         seriesVolumeLinksCache.delete(seriesId);
+                        seriesComicVineLinksCache.delete(seriesId);
                     }
                     entry.total = typeof data.issue_count === 'number'
                         ? data.issue_count
@@ -1091,7 +1092,7 @@
                                     <div class="series-issue-body">
                                         <h3 class="series-issue-title" title="${escapeHtml(issue.title || issue.file_name)}">${escapeHtml(issue.title || issue.file_name)}</h3>
                                         <p class="series-issue-subtitle">${issue.year ? `${issue.year}` : ''}${issue.volume ? `${issue.year ? ' · ' : ''}Vol. ${escapeHtml(issue.volume)}` : ''}</p>
-                                        <div class="series-detail-meta">${formatFileSize(issue.size)}</div>
+                                        <div class="series-detail-meta">${formatFileSize(issue.size)}${renderIssueComicVineLink(issue)}</div>
                                     </div>
                                     <div class="series-issue-actions file-actions-dropdown" onclick="event.stopPropagation()">
                                         <button type="button" class="dropdown-toggle series-issue-actions-toggle" aria-label="Issue actions" onclick="fillSeriesIssueMenu('${escapeJs(issue.file_path)}'); toggleDropdown(event, '${escapeJs(issue.file_path)}')">
@@ -1123,6 +1124,7 @@
                                             <button class="dropdown-item" onclick="viewTags('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
                                                 ${uiIcon('eye')} View/Edit
                                             </button>
+                                            ${renderIssueComicVineMenuItem(issue)}
                                             <button class="dropdown-item" onclick="readComic('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
                                                 ${uiIcon('book-open')} Read Comic
                                             </button>
@@ -1420,6 +1422,69 @@
                     : `<li>${head} · not linked to ComicVine yet</li>`;
             }).join('');
             return `<div class="series-volume-links"><span class="series-detail-meta">Volumes:</span><ul>${items}</ul></div>`;
+        }
+
+        // The ComicVine page of each issue of the open series
+        // (GET /api/metadata/comicvine-links/series/{id}), by file path: the
+        // issue's own page, else its volume's. Read once per series, and again
+        // after its issues reload. Shown on the issue card and in its menu.
+        const seriesComicVineLinksCache = new Map();
+
+        // The link to show for an issue, or null: { url, label, title }.
+        function issueComicVineLink(filePath) {
+            const seriesId = currentSeriesDetailId;
+            if (!seriesId) return null;
+            const entry = seriesComicVineLinksCache.get(seriesId);
+            if (!entry) {
+                loadSeriesComicVineLinks(seriesId);
+                return null;
+            }
+            const link = entry.links ? entry.links.get(filePath) : null;
+            if (!link) return null;
+            const volume = link.volume_name || 'Its volume';
+            const issueUrl = seriesSiteLink(link.issue_url);
+            if (issueUrl) {
+                const name = [link.issue_number ? `#${link.issue_number}` : '', link.issue_name || ''].filter(Boolean).join(' ');
+                const how = link.filled ? '' : ', matched by its number';
+                return { url: issueUrl, label: 'ComicVine', title: `${name || 'This issue'} on ComicVine (${volume}${how})` };
+            }
+            const volumeUrl = seriesSiteLink(link.volume_url);
+            if (!volumeUrl) return null;
+            return { url: volumeUrl, label: 'Volume on ComicVine', title: `${volume} on ComicVine; this issue is not in its listing yet` };
+        }
+
+        function renderIssueComicVineLink(issue) {
+            const link = issueComicVineLink(issue.file_path);
+            if (!link) return '';
+            return ` · <a class="series-detail-link series-issue-comicvine" href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(link.title)}">${escapeHtml(link.label)}</a>`;
+        }
+
+        function renderIssueComicVineMenuItem(issue) {
+            const link = issueComicVineLink(issue.file_path);
+            if (!link) return '';
+            const label = link.label === 'ComicVine' ? 'Open on ComicVine' : 'Open Volume on ComicVine';
+            return `<a class="dropdown-item" href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(link.title)}" onclick="closeAllDropdowns();">
+                                                ${uiIcon('globe')} ${label}
+                                            </a>`;
+        }
+
+        async function loadSeriesComicVineLinks(seriesId) {
+            const entry = { loading: true };
+            seriesComicVineLinksCache.set(seriesId, entry);
+            const links = new Map();
+            try {
+                const data = await apiFetch(`/api/metadata/comicvine-links/series/${encodeURIComponent(seriesId)}`);
+                for (const link of Array.isArray(data.issues) ? data.issues : []) {
+                    if (link && typeof link.file_path === 'string') links.set(link.file_path, link);
+                }
+            } catch (error) {
+                // The links are extra: the issues still show without them.
+                if (!error.authHandled) console.warn('Could not load the ComicVine links of the series:', error);
+            }
+            // Dropped when the issues reloaded meanwhile: that load asks again.
+            if (seriesComicVineLinksCache.get(seriesId) !== entry) return;
+            seriesComicVineLinksCache.set(seriesId, { links });
+            if (links.size && currentSeriesDetailId === seriesId) renderSeriesDetail(seriesId);
         }
 
         async function loadSeriesVolumeLinks(seriesId) {

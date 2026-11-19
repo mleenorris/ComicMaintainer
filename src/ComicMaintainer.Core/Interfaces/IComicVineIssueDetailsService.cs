@@ -50,4 +50,15 @@ public interface IComicVineIssueDetailsService
     Task<IReadOnlyList<SeriesVolumeLink>> GetVolumeLinksAsync(
         IReadOnlyCollection<string> filePaths,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The ComicVine pages of the files at <paramref name="filePaths"/>, from what was stored;
+    /// ComicVine is not asked. A file filled by Fetch Issue Details links to the issue it was
+    /// filled from. Any other regular issue links to the issue of its number in its volume's
+    /// stored listing, else to its volume alone (see <see cref="GetVolumeLinksAsync"/>). A file
+    /// with no linked volume is left out.
+    /// </summary>
+    Task<IReadOnlyList<IssueComicVineLink>> GetIssueLinksAsync(
+        IReadOnlyCollection<string> filePaths,
+        CancellationToken cancellationToken = default);
 }

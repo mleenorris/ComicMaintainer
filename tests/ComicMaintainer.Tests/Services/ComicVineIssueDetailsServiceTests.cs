@@ -511,6 +511,57 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetIssueLinksAsync_LinksEachIssueToItsPage_ElseToItsVolume()
+    {
+        AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");
+        AddFile("/c/Batman/Batman (2016) - Chapter 0002.cbz", "002");
+        AddFile("/c/Batman/Batman (2016) - Chapter 0003.cbz", "3");
+        AddFile("/c/Batman/Batman (1999) - Chapter 0001.cbz", "1", volumeYear: 1999);
+        AddFile("/c/Batman/Batman - Chapter 0005.cbz", "5", volumeYear: null);
+        AddFile("/c/Batman/Batman Annual - Chapter 0001.cbz", "1", format: "Annual");
+        AddFile("/c/Batman/Batman (2016) - Chapter 0009.cbz", "9");
+        await using (var db = new ComicMaintainerDbContext(_options))
+        {
+            db.ComicVineVolumeLinks.AddRange(
+                new ComicVineVolumeLinkEntity { SeriesKey = "batman", StartYear = 2016, VolumeId = BatmanVolume, VolumeName = "Batman", LinkedUtc = DateTime.UtcNow },
+                new ComicVineVolumeLinkEntity { SeriesKey = "batman", StartYear = 1999, VolumeId = null, LinkedUtc = DateTime.UtcNow });
+            db.ComicVineIssues.AddRange(
+                new ComicVineIssueEntity { Id = 101, VolumeId = BatmanVolume, IssueNumber = "1", Name = "I Am Gotham, Part One", SiteUrl = "https://comicvine.gamespot.com/batman-1/4000-101/", ListedUtc = DateTime.UtcNow },
+                new ComicVineIssueEntity { Id = 102, VolumeId = BatmanVolume, IssueNumber = "2", Name = "I Am Gotham, Part Two", SiteUrl = "https://comicvine.gamespot.com/batman-2/4000-102/", ListedUtc = DateTime.UtcNow },
+                new ComicVineIssueEntity { Id = 990, VolumeId = 4242, IssueNumber = "9", Name = "Elsewhere", SiteUrl = null, ListedUtc = DateTime.UtcNow });
+            // #1 was filled from its issue; #9 from an issue of another volume, with no page.
+            db.ComicVineFileStates.AddRange(
+                new ComicVineFileStateEntity { FilePath = "/c/Batman/Batman (2016) - Chapter 0001.cbz", IssueId = 101, AppliedUtc = DateTime.UtcNow },
+                new ComicVineFileStateEntity { FilePath = "/c/Batman/Batman (2016) - Chapter 0009.cbz", IssueId = 990, AppliedUtc = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        _seriesCache.Setup(c => c.GetByTitleAsync("Batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord { CanonicalTitle = "Batman", Source = "ComicVine", SourceId = "42721", LookupStatus = "success" });
+
+        var links = (await CreateService().GetIssueLinksAsync(_files.Select(f => f.FilePath).ToList())).ToDictionary(link => link.FilePath);
+
+        var volumeUrl = $"https://comicvine.gamespot.com/volume/4050-{BatmanVolume}/";
+        Assert.Equal(
+            new IssueComicVineLink("/c/Batman/Batman (2016) - Chapter 0001.cbz", 101, "1", "I Am Gotham, Part One", "https://comicvine.gamespot.com/batman-1/4000-101/", BatmanVolume, "Batman", volumeUrl, Filled: true),
+            links["/c/Batman/Batman (2016) - Chapter 0001.cbz"]);
+        Assert.Equal(
+            new IssueComicVineLink("/c/Batman/Batman (2016) - Chapter 0002.cbz", 102, "2", "I Am Gotham, Part Two", "https://comicvine.gamespot.com/batman-2/4000-102/", BatmanVolume, "Batman", volumeUrl, Filled: false),
+            links["/c/Batman/Batman (2016) - Chapter 0002.cbz"]);
+        Assert.Equal(
+            new IssueComicVineLink("/c/Batman/Batman (2016) - Chapter 0003.cbz", null, null, null, null, BatmanVolume, "Batman", volumeUrl, Filled: false),
+            links["/c/Batman/Batman (2016) - Chapter 0003.cbz"]);
+        Assert.Equal(
+            new IssueComicVineLink("/c/Batman/Batman - Chapter 0005.cbz", null, null, null, null, 42721, "Batman", "https://comicvine.gamespot.com/volume/4050-42721/", Filled: false),
+            links["/c/Batman/Batman - Chapter 0005.cbz"]);
+        Assert.Equal(
+            new IssueComicVineLink("/c/Batman/Batman (2016) - Chapter 0009.cbz", 990, "9", "Elsewhere", null, 4242, null, "https://comicvine.gamespot.com/volume/4050-4242/", Filled: true),
+            links["/c/Batman/Batman (2016) - Chapter 0009.cbz"]);
+        // An unlinked volume and an Annual have no page.
+        Assert.Equal(5, links.Count);
+        Assert.Empty(await CreateService().GetIssueLinksAsync(["/c/missing.cbz"]));
+    }
+
+    [Fact]
     public async Task GetVolumeLinksAsync_ListsEachVolumeWithItsComicVineLink()
     {
         AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");

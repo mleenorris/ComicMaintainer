@@ -222,20 +222,144 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             return [];
         }
 
-        var seriesKeys = groups.Keys.Select(key => key.Key).Distinct().ToList();
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var stored = await StoredVolumesAsync(db, groups.ToDictionary(group => group.Key, group => group.Value.Series), cancellationToken);
+
+        var result = new List<SeriesVolumeLink>();
+        foreach (var ((key, startYear, volumeNumber), (_, issues)) in groups)
+        {
+            var volume = stored[(key, startYear, volumeNumber)];
+            result.Add(new SeriesVolumeLink(
+                volumeNumber,
+                startYear,
+                issues,
+                volume.Id,
+                volume.Id is null ? null : volume.Name,
+                volume.Id is null ? null : volume.Publisher,
+                volume.Id is { } id ? VolumeSiteUrl(id) : null));
+        }
+
+        return result
+            .OrderBy(volume => volume.VolumeNumber == 0 && volume.StartYear == 0 ? 1 : 0)
+            .ThenBy(volume => volume.StartYear == 0 ? int.MaxValue : volume.StartYear)
+            .ThenBy(volume => volume.VolumeNumber)
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<IssueComicVineLink>> GetIssueLinksAsync(
+        IReadOnlyCollection<string> filePaths,
+        CancellationToken cancellationToken = default)
+    {
+        var files = await LoadFilesAsync(filePaths, cancellationToken);
+        if (files.Count == 0)
+        {
+            return [];
+        }
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var paths = files.Select(file => file.FilePath).ToList();
+        var filled = await db.ComicVineFileStates.AsNoTracking()
+            .Where(state => paths.Contains(state.FilePath))
+            .ToDictionaryAsync(state => state.FilePath, state => state.IssueId, StringComparer.Ordinal, cancellationToken);
+
+        // The other regular issues: the volume their names give (Annuals and Specials are not matched).
+        var volumeOfFile = new Dictionary<string, (string Key, int Year, int Number)>(StringComparer.Ordinal);
+        var seriesOfVolume = new Dictionary<(string Key, int Year, int Number), string>();
+        foreach (var file in files)
+        {
+            var metadata = file.Metadata;
+            if (filled.ContainsKey(file.FilePath) || metadata is null
+                || string.IsNullOrWhiteSpace(metadata.Series) || string.IsNullOrWhiteSpace(metadata.Issue)
+                || IssueFormat.Of(metadata.Format, metadata.Series, metadata.Issue, file.FileName, metadata.Title) is not null)
+            {
+                continue;
+            }
+
+            var (startYear, volumeNumber) = Run.VolumeOf(metadata);
+            var key = (SeriesKey(metadata.Series), startYear, volumeNumber);
+            if (key.Item1.Length > 0)
+            {
+                volumeOfFile[file.FilePath] = key;
+                seriesOfVolume.TryAdd(key, metadata.Series);
+            }
+        }
+
+        var volumes = await StoredVolumesAsync(db, seriesOfVolume, cancellationToken);
+        var issueIds = filled.Values.Distinct().ToList();
+        var volumeIds = volumes.Values.Select(volume => volume.Id).OfType<int>().Distinct().ToList();
+        var issues = await db.ComicVineIssues.AsNoTracking()
+            .Where(issue => issueIds.Contains(issue.Id) || volumeIds.Contains(issue.VolumeId))
+            .ToListAsync(cancellationToken);
+        var issueById = issues.ToDictionary(issue => issue.Id);
+        var issuesOfVolume = issues.ToLookup(issue => issue.VolumeId);
+
+        // Names for the volumes of filled issues, which their files may no longer name.
+        var namedVolumes = issues.Select(issue => issue.VolumeId).Distinct().ToList();
+        var volumeNames = (await db.ComicVineVolumeLinks.AsNoTracking()
+                .Where(link => link.VolumeId != null && namedVolumes.Contains(link.VolumeId.Value) && link.VolumeName != null)
+                .Select(link => new { VolumeId = link.VolumeId!.Value, link.VolumeName })
+                .ToListAsync(cancellationToken))
+            .GroupBy(link => link.VolumeId)
+            .ToDictionary(group => group.Key, group => group.First().VolumeName);
+
+        var result = new List<IssueComicVineLink>();
+        foreach (var file in files)
+        {
+            if (filled.TryGetValue(file.FilePath, out var issueId))
+            {
+                if (issueById.TryGetValue(issueId, out var issue))
+                {
+                    result.Add(new IssueComicVineLink(
+                        file.FilePath, issue.Id, issue.IssueNumber, issue.Name, issue.SiteUrl,
+                        issue.VolumeId, volumeNames.GetValueOrDefault(issue.VolumeId), VolumeSiteUrl(issue.VolumeId), Filled: true));
+                }
+
+                continue;
+            }
+
+            if (!volumeOfFile.TryGetValue(file.FilePath, out var key) || volumes[key].Id is not { } volumeId)
+            {
+                continue;
+            }
+
+            var matched = issuesOfVolume[volumeId].FirstOrDefault(candidate => SameNumber(candidate.IssueNumber, file.Metadata!.Issue!));
+            result.Add(new IssueComicVineLink(
+                file.FilePath, matched?.Id, matched?.IssueNumber, matched?.Name, matched?.SiteUrl,
+                volumeId, volumes[key].Name ?? volumeNames.GetValueOrDefault(volumeId), VolumeSiteUrl(volumeId), Filled: false));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// The stored ComicVine volume of each series volume (series key, start year, volume number),
+    /// from the links issue-details runs made; a volume whose files name neither a start year nor
+    /// a number is the series' own ComicVine match, read afresh. Id is null when the volume is not
+    /// linked. Asks ComicVine nothing.
+    /// </summary>
+    private async Task<Dictionary<(string Key, int Year, int Number), (int? Id, string? Name, string? Publisher)>> StoredVolumesAsync(
+        ComicMaintainerDbContext db,
+        IReadOnlyDictionary<(string Key, int Year, int Number), string> seriesOfVolume,
+        CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<(string Key, int Year, int Number), (int? Id, string? Name, string? Publisher)>();
+        if (seriesOfVolume.Count == 0)
+        {
+            return result;
+        }
+
+        var seriesKeys = seriesOfVolume.Keys.Select(key => key.Key).Distinct().ToList();
         var links = (await db.ComicVineVolumeLinks.AsNoTracking()
                 .Where(link => seriesKeys.Contains(link.SeriesKey))
                 .ToListAsync(cancellationToken))
             .ToDictionary(link => (link.SeriesKey, link.StartYear, link.VolumeNumber));
 
-        var result = new List<SeriesVolumeLink>();
-        foreach (var ((key, startYear, volumeNumber), (series, issues)) in groups)
+        foreach (var ((key, startYear, volumeNumber), series) in seriesOfVolume)
         {
             links.TryGetValue((key, startYear, volumeNumber), out var link);
             int? volumeId = link?.VolumeId;
             var name = link?.VolumeName;
-            var publisher = link?.Publisher;
             if (startYear == 0 && volumeNumber == 0
                 && await _seriesCache.GetByTitleAsync(series, cancellationToken) is { } record
                 && string.Equals(record.Source, "ComicVine", StringComparison.OrdinalIgnoreCase)
@@ -247,21 +371,10 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 name ??= record.CanonicalTitle;
             }
 
-            result.Add(new SeriesVolumeLink(
-                volumeNumber,
-                startYear,
-                issues,
-                volumeId,
-                volumeId is null ? null : name,
-                volumeId is null ? null : publisher,
-                volumeId is { } id ? VolumeSiteUrl(id) : null));
+            result[(key, startYear, volumeNumber)] = (volumeId, name, link?.Publisher);
         }
 
-        return result
-            .OrderBy(volume => volume.VolumeNumber == 0 && volume.StartYear == 0 ? 1 : 0)
-            .ThenBy(volume => volume.StartYear == 0 ? int.MaxValue : volume.StartYear)
-            .ThenBy(volume => volume.VolumeNumber)
-            .ToList();
+        return result;
     }
 
     /// <inheritdoc />

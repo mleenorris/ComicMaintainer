@@ -188,6 +188,32 @@ public sealed class WorkflowTests
 
     [Theory]
     [MemberData(nameof(WorkflowFiles))]
+    public void TrivyScans_UseTheLatestTrivyRelease(string file)
+    {
+        // trivy-action installs the Trivy release it was built with unless told otherwise, which lags
+        // behind Trivy's own releases; Dependabot bumps the action but cannot see that version.
+        foreach (var (job, step) in TrivySteps(Load(file)))
+        {
+            Assert.True(step.Children.ContainsKey(new YamlScalarNode("with")), $"{file}: a Trivy step in job {job} sets no version");
+            Assert.Equal("latest", Scalar(Mapping(step, "with"), "version"));
+        }
+    }
+
+    [Theory]
+    [InlineData(ContainerTests)]
+    [InlineData(SecurityScan)]
+    public void TrivyScans_RunInTheContainerTestAndSecurityScan(string file)
+    {
+        Assert.NotEmpty(TrivySteps(Load(file)));
+    }
+
+    private static List<(string Job, YamlMappingNode Step)> TrivySteps(YamlMappingNode workflow) =>
+        Steps(workflow)
+            .Where(entry => Scalar(entry.Step, "uses")?.StartsWith("aquasecurity/trivy-action@", StringComparison.Ordinal) == true)
+            .ToList();
+
+    [Theory]
+    [MemberData(nameof(WorkflowFiles))]
     public void Workflows_UseMaintainedActionsAndLinkTheDotnetBranch(string file)
     {
         var text = File.ReadAllText(Path.Join(WorkflowDirectory, file));
@@ -295,6 +321,23 @@ public sealed class WorkflowTests
             .Select(rule => Scalar(rule, "dependency-name"));
 
         Assert.DoesNotContain("SharpCompress", ignored);
+    }
+
+    [Fact]
+    public void Dependabot_ChecksTheActionsDaily_InOneGroup()
+    {
+        // The scanners (Trivy, CodeQL) are actions: a new release is proposed within a day, in one pull request.
+        var stream = new YamlStream();
+        using (var reader = new StringReader(File.ReadAllText(Path.Join(Path.GetDirectoryName(WorkflowDirectory)!, "dependabot.yml"))))
+        {
+            stream.Load(reader);
+        }
+
+        var updates = Assert.IsType<YamlSequenceNode>(((YamlMappingNode)stream.Documents[0].RootNode).Children[new YamlScalarNode("updates")]);
+        var actions = Assert.Single(updates.Children.Cast<YamlMappingNode>(), update => Scalar(update, "package-ecosystem") == "github-actions");
+
+        Assert.Equal("daily", Scalar(Mapping(actions, "schedule"), "interval"));
+        Assert.Equal(["*"], Sequence(Mapping(Mapping(actions, "groups"), "actions"), "patterns"));
     }
 
     [Fact]

@@ -37,12 +37,14 @@ updates:
           - "Microsoft.*"
           - "System.*"
 
-  # GitHub Actions used by the workflows in .github/workflows.
+  # GitHub Actions used by the workflows in .github/workflows, the scanners among them (the Trivy,
+  # CodeQL and setup actions). Checked daily so a new release is proposed within a day; the group
+  # below keeps that to one pull request at a time. Trivy itself is not pinned: the workflows ask
+  # for its latest release (version: latest).
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: daily
     open-pull-requests-limit: 5
     labels:
       - dependencies

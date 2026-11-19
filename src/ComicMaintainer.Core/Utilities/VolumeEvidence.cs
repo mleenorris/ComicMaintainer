@@ -330,12 +330,11 @@ public static class VolumeEvidence
         do
         {
             before = key;
-            foreach (var suffix in PublisherSuffixes)
+            var suffix = PublisherSuffixes.FirstOrDefault(
+                candidate => key.EndsWith(candidate, StringComparison.Ordinal) && key.Length > candidate.Length);
+            if (suffix is not null)
             {
-                if (key.EndsWith(suffix, StringComparison.Ordinal) && key.Length > suffix.Length)
-                {
-                    key = key[..^suffix.Length];
-                }
+                key = key[..^suffix.Length];
             }
         }
         while (key != before);

@@ -849,7 +849,7 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         var candidates = await CreateService().GetCoverCandidatesAsync(file.FilePath);
 
         Assert.NotNull(candidates);
-        Assert.Equal((9999, "Batman Annual", 559, (string?)null), (candidates!.VolumeId!.Value, candidates.VolumeName, candidates.MatchedIssueId!.Value, candidates.Reason));
+        Assert.Equal((9999, "Batman Annual", 559, null), (candidates!.VolumeId!.Value, candidates.VolumeName, candidates.MatchedIssueId!.Value, candidates.Reason));
         Assert.Equal([559, 560], candidates.Covers.Select(cover => cover.IssueId));
     }
 
@@ -940,7 +940,7 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         Assert.Equal("I Am Gotham, Part One", Assert.Single(_writes).Metadata.Title);
         _search.Verify(s => s.SearchVolumesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         var volume = Assert.Single(await CreateService().GetVolumeLinksAsync(paths));
-        Assert.Equal((ComicVineVolumeDecision.Manual, "Batman", (string?)null), (volume.Decision, volume.Name, volume.ReviewReason));
+        Assert.Equal((ComicVineVolumeDecision.Manual, "Batman", null), (volume.Decision, volume.Name, volume.ReviewReason));
 
         // None of them: never searched for, and the file says why it is not filled.
         Assert.Equal(ChooseVolumeOutcome.Chosen, await CreateService().ChooseVolumeAsync(paths, null, 2016, 0, null));

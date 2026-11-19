@@ -66,6 +66,7 @@ public static class ComicInfoXml
             Year = int.TryParse(root.Element(ns + "Year")?.Value, out var year) ? year : null,
             Summary = root.Element(ns + "Summary")?.Value,
             Format = root.Element(ns + "Format")?.Value,
+            ComicVineIssueId = ComicVineTagId.FromTags(root.Element(ns + "Notes")?.Value, root.Element(ns + "Web")?.Value),
             Authors = SplitList(root.Elements(ns + "Writer").Select(e => e.Value)),
             Tags = SplitList(root.Elements(ns + "Tags").Concat(root.Elements(ns + LegacyTagElement)).Select(e => e.Value))
         };
@@ -112,7 +113,12 @@ public static class ComicInfoXml
     /// </summary>
     /// <remarks>
     /// <c>Unknown</c> in Manga and <c>-1</c> in Count are the schema's defaults, which taggers
-    /// write to mean "not set", so they count as empty.
+    /// write to mean "not set", so they count as empty. An issue's ComicVine id
+    /// (<see cref="ProviderComicInfoFields.ComicVineIssueId"/>) is recorded too: its page replaces
+    /// a ComicVine volume page in Web (the series' match wrote it), and <c>[CVDB12345]</c> is
+    /// added to Notes (see <see cref="ComicVineTagId.WithIssueId"/>). With
+    /// <see cref="ProviderComicInfoFields.ReplacesComicVineIssueId"/>, another issue's id and page
+    /// are replaced as well.
     /// </remarks>
     public static XDocument FillEmptyFields(XDocument? existing, ProviderComicInfoFields values)
     {
@@ -123,6 +129,25 @@ public static class ComicInfoXml
         FillIfEmpty(root, "Summary", values.Summary);
         FillIfEmpty(root, "Count", values.Count?.ToString(System.Globalization.CultureInfo.InvariantCulture), unsetValue: "-1");
         FillIfEmpty(root, "Genre", values.Genre);
+        if (values.ComicVineIssueId is { } issueId)
+        {
+            var ns = root.Name.Namespace;
+            var web = root.Element(ns + "Web")?.Value;
+            if (values.Web is not null
+                && (ComicVineTagId.IsVolumePage(web)
+                    || (values.ReplacesComicVineIssueId && ComicVineTagId.IssuePageId(web) is { } other && other != issueId)))
+            {
+                SetElement(root, "Web", values.Web);
+            }
+
+            var notes = root.Element(ns + "Notes")?.Value;
+            var recorded = ComicVineTagId.WithIssueId(notes, issueId, values.ReplacesComicVineIssueId);
+            if (!string.Equals(notes, recorded, StringComparison.Ordinal))
+            {
+                SetElement(root, "Notes", recorded);
+            }
+        }
+
         FillIfEmpty(root, "Web", values.Web);
         FillIfEmpty(root, "Manga", values.Manga, unsetValue: "Unknown");
         FillIfEmpty(root, "StoryArc", values.StoryArc);

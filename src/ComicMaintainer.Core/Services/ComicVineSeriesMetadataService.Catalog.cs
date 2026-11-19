@@ -18,6 +18,7 @@ public partial class ComicVineSeriesMetadataService
 
     private const string IssueListFields = "id,issue_number,name,cover_date,deck,description,site_detail_url,image";
     private const string IssueDetailFields = "id,person_credits,story_arc_credits";
+    private const string IssueFields = IssueListFields + ",volume," + "person_credits,story_arc_credits";
     private const string StoryArcFields = "id,name,deck,description,site_detail_url,issues";
 
     /// <inheritdoc />
@@ -81,6 +82,25 @@ public partial class ComicVineSeriesMetadataService
     }
 
     /// <inheritdoc />
+    public async Task<ComicVineIssue?> GetIssueAsync(int issueId, CancellationToken cancellationToken = default)
+    {
+        var config = Settings.CurrentValue;
+        if (!CanQuery(config))
+        {
+            return null;
+        }
+
+        return await SendAsync(
+            config,
+            () => CreateJsonRequest($"{BaseUri(config)}/issue/4000-{issueId}/?{ApiKeyQuery(config)}&field_list={IssueFields}"),
+            $"issue {issueId}",
+            ParseIssue,
+            maxPermitWait: null,
+            cancellationToken,
+            notFoundIsEmpty: true);
+    }
+
+    /// <inheritdoc />
     public async Task<ComicVineStoryArc?> GetStoryArcAsync(int storyArcId, CancellationToken cancellationToken = default)
     {
         var config = Settings.CurrentValue;
@@ -114,24 +134,47 @@ public partial class ComicVineSeriesMetadataService
         var issues = new List<ComicVineIssueSummary>();
         foreach (var item in results.EnumerateArray())
         {
-            if (ReadIntId(item) is not { } id || ReadString(item, "issue_number")?.Trim() is not { Length: > 0 } number)
+            if (ReadIssueSummary(item) is { } issue)
             {
-                continue;
+                issues.Add(issue);
             }
-
-            var (cover, thumbnail) = ReadCoverUrls(item);
-            issues.Add(new ComicVineIssueSummary(
-                id,
-                number,
-                ReadString(item, "name")?.Trim() is { Length: > 0 } name ? name : null,
-                ReadString(item, "cover_date")?.Trim() is { Length: > 0 } date ? date : null,
-                ExtractSynopsis(item),
-                ProviderMetadataText.HttpUrl(ReadString(item, "site_detail_url")),
-                cover,
-                thumbnail));
         }
 
         return issues;
+    }
+
+    /// <summary>One issue read by its id; null without an id, a number or a volume.</summary>
+    internal static ComicVineIssue? ParseIssue(JsonElement root)
+    {
+        if (!root.TryGetProperty("results", out var item) || item.ValueKind != JsonValueKind.Object
+            || ReadIssueSummary(item) is not { } summary
+            || !item.TryGetProperty("volume", out var volume) || volume.ValueKind != JsonValueKind.Object
+            || ReadIntId(volume) is not { } volumeId
+            || ParseIssueDetails(root) is not { } details)
+        {
+            return null;
+        }
+
+        return new ComicVineIssue(summary, volumeId, ReadString(volume, "name")?.Trim() is { Length: > 0 } name ? name : null, details);
+    }
+
+    private static ComicVineIssueSummary? ReadIssueSummary(JsonElement item)
+    {
+        if (ReadIntId(item) is not { } id || ReadString(item, "issue_number")?.Trim() is not { Length: > 0 } number)
+        {
+            return null;
+        }
+
+        var (cover, thumbnail) = ReadCoverUrls(item);
+        return new ComicVineIssueSummary(
+            id,
+            number,
+            ReadString(item, "name")?.Trim() is { Length: > 0 } name ? name : null,
+            ReadString(item, "cover_date")?.Trim() is { Length: > 0 } date ? date : null,
+            ExtractSynopsis(item),
+            ProviderMetadataText.HttpUrl(ReadString(item, "site_detail_url")),
+            cover,
+            thumbnail);
     }
 
     internal static ComicVineIssueDetails? ParseIssueDetails(JsonElement root)

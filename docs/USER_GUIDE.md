@@ -89,7 +89,20 @@ ComicVine knows each issue's title, cover date, summary, writers and story arcs.
 - a missing summary, or one that is only the series' synopsis;
 - missing writers, and an empty Story Arc and Web link.
 
-A field you changed yourself is never touched. Each issue is matched to a ComicVine volume through its series:
+It also records which ComicVine issue the file was filled from: `[CVDB12345]` is added to `<Notes>`, the way ComicTagger
+writes it, and the issue's ComicVine page goes into `<Web>` when that is empty or still holds the series' ComicVine page.
+What else the notes hold, and a web link you set yourself, is kept. The file then names its issue wherever it goes.
+
+A field you changed yourself is never touched.
+
+An issue whose tags already name its ComicVine issue, because ComicTagger, Mylar or this app tagged it, needs no
+matching: `[CVDB12345]` or `[Issue ID 12345]` in `<Notes>`, or the issue's ComicVine page in `<Web>`. It is filled from
+that issue, Annuals and Specials too, and its volume becomes the ComicVine volume of its series' volume when that has none
+yet, so the rest of the volume is found there. A tag is not trusted when ComicVine's issue has another number than the
+file (the tags were copied from another file), when `<Notes>` and `<Web>` name different issues, or when ComicVine has no
+such issue: the issue is then matched as below, and the wrong id is replaced by the right one.
+
+Any other issue is matched to a ComicVine volume through its series:
 
 - by the year its volume started, as for volume numbers;
 - else by its volume number: Vol. 2 is the publisher's second volume of that name, one-shots not counted. A volume
@@ -99,7 +112,11 @@ A field you changed yourself is never touched. Each issue is matched to a ComicV
 - else, when it knows neither, by the series' own ComicVine match. Matching the series to ComicVine takes effect the next
   time.
 
-Annuals, Specials and duplicates are left out. An issue that cannot be matched counts as failed in the job, with the
+The volume is looked for in ComicVine's search first. For a much-used name such as Batman, the search can leave the right
+volume out, so when it finds none that fits, every ComicVine volume with exactly that name is listed, oldest first, and
+looked through too. That takes up to 5 more requests.
+
+Without a tag naming their issue, Annuals and Specials are left out, and duplicates always are. An issue that cannot be matched counts as failed in the job, with the
 reason, such as `ComicVine has no Batman Vol. 7`. Set its volume number or start year with **Update**, or match the series
 to ComicVine, and run it again. A volume ComicVine did not have is searched for again each time you run **Fetch Issue
 Details**; the scheduled job waits 30 days before searching again.

@@ -1474,6 +1474,9 @@ namespace ComicMaintainer.Core.Migrations
                                 .IsRequired()
                                 .HasColumnType("TEXT");
 
+                            b1.Property<int?>("ComicVineIssueId")
+                                .HasColumnType("INTEGER");
+
                             b1.Property<string>("Format")
                                 .HasMaxLength(64)
                                 .HasColumnType("TEXT");

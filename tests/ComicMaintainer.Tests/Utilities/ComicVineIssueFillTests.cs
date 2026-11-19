@@ -40,7 +40,7 @@ public class ComicVineIssueFillTests
         Assert.Equal(2016, plan.Metadata.Year);
         Assert.Equal("Batman meets Gotham.", plan.Metadata.Summary);
         Assert.Equal(["Tom King"], plan.Metadata.Authors);
-        Assert.Equal(new ProviderComicInfoFields(Web: "https://comicvine.example/batman-1", StoryArc: "I Am Gotham", Month: 8), plan.Fill);
+        Assert.Equal(new ProviderComicInfoFields(Web: "https://comicvine.example/batman-1", StoryArc: "I Am Gotham", Month: 8, ComicVineIssueId: 1), plan.Fill);
         Assert.False(plan.IsEmpty);
     }
 
@@ -74,7 +74,7 @@ public class ComicVineIssueFillTests
         var plan = ComicVineIssueFill.For(Tags(), Issue(name: null, coverDate: null, summary: null, writers: null, arcs: null), null);
 
         Assert.Equal(ComicMetadataFieldFlags.None, plan.Fields);
-        Assert.Equal(new ProviderComicInfoFields(Web: "https://comicvine.example/batman-1"), plan.Fill);
+        Assert.Equal(new ProviderComicInfoFields(Web: "https://comicvine.example/batman-1", ComicVineIssueId: 1), plan.Fill);
     }
 
     [Fact]

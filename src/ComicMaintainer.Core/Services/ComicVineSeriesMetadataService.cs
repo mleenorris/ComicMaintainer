@@ -153,6 +153,61 @@ public partial class ComicVineSeriesMetadataService : ExternalSeriesMetadataProv
         return volumes;
     }
 
+    /// <summary>The most volumes ComicVine returns to one list request.</summary>
+    private const int VolumeListPageSize = 100;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The name filter takes no commas or colons (they separate filters), so the longest part of
+    /// the title between them is asked for, and the exact name is checked here. A background job
+    /// asks, so the wait for a permit is not limited.
+    /// </remarks>
+    public async Task<ComicVineResult<IReadOnlyList<ExternalSeriesMetadata>>> ListVolumesNamedAsync(
+        string title,
+        int maxRequests,
+        CancellationToken cancellationToken = default)
+    {
+        var config = Settings.CurrentValue;
+        var volumes = new List<ExternalSeriesMetadata>();
+        var key = NameKey(title);
+        var filter = title.Split([',', ':'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .OrderByDescending(part => part.Length)
+            .FirstOrDefault();
+        var requests = 0;
+        if (key.Length == 0 || filter is null || !CanQuery(config))
+        {
+            return new ComicVineResult<IReadOnlyList<ExternalSeriesMetadata>>(volumes, requests);
+        }
+
+        var apiKey = Uri.EscapeDataString(config.ComicVineApiKey ?? string.Empty);
+        var baseUrl = config.ComicVineBaseUrl.TrimEnd('/');
+        while (requests < maxRequests)
+        {
+            var offset = requests * VolumeListPageSize;
+            var page = await SendAsync(
+                           config,
+                           () => CreateJsonRequest(
+                               $"{baseUrl}/volumes/?api_key={apiKey}&format=json&field_list={FieldList}" +
+                               $"&filter=name:{Uri.EscapeDataString(filter)}&sort=start_year:asc&limit={VolumeListPageSize}&offset={offset}"),
+                           title,
+                           ParseSearchResults,
+                           maxPermitWait: null,
+                           cancellationToken)
+                       ?? Array.Empty<ExternalSeriesMetadata>();
+            requests++;
+            volumes.AddRange(page.Where(volume => NameKey(volume.CanonicalTitle) == key));
+            if (page.Count < VolumeListPageSize)
+            {
+                break;
+            }
+        }
+
+        return new ComicVineResult<IReadOnlyList<ExternalSeriesMetadata>>(volumes, requests);
+    }
+
+    private static string NameKey(string? text)
+        => new((text ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
     private protected override HttpRequestMessage CreateGetByIdRequest(AppSettings settings, string sourceId)
     {
         var apiKey = Uri.EscapeDataString(settings.ComicVineApiKey ?? string.Empty);

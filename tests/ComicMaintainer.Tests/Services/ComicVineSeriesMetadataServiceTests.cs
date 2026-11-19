@@ -364,6 +364,96 @@ public class ComicVineSeriesMetadataServiceTests
     }
 
     [Fact]
+    public async Task ListVolumesNamedAsync_ListsByName_KeepsOnlyTheExactName_UpToTheRequestLimit()
+    {
+        var requests = new List<string>();
+        static string Page(int count, int firstYear, string name)
+            => "{\"status_code\":1,\"results\":[" + string.Join(",", Enumerable.Range(0, count)
+                .Select(i => $"{{\"id\":{firstYear + i},\"name\":\"{(i % 2 == 0 ? name : "Batman: " + name)}\",\"start_year\":\"{firstYear + i}\",\"publisher\":{{\"name\":\"DC Comics\"}}}}")) + "]}";
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri!.AbsoluteUri;
+            requests.Add(uri);
+            return JsonResponse(uri.Contains("offset=100") ? Page(3, 2100, "Dark Knight") : Page(100, 1900, "The Dark Knight"));
+        });
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableExternalSeriesMetadata = true,
+            ComicVineApiKey = "test-key",
+            ComicVineBaseUrl = "https://comicvine.example/api"
+        });
+
+        var all = await service.ListVolumesNamedAsync("Batman: The Dark Knight", 5);
+
+        // The longest part between the filter's separators is asked for; only the exact name is kept.
+        Assert.Equal(2, all.Requests);
+        Assert.All(requests, uri =>
+        {
+            Assert.Contains("/volumes/?", uri);
+            Assert.Contains("filter=name:The%20Dark%20Knight", uri);
+            Assert.Contains("sort=start_year:asc", uri);
+        });
+        Assert.Equal(50, all.Value.Count);
+        Assert.All(all.Value, volume => Assert.Equal("Batman: The Dark Knight", volume.CanonicalTitle));
+
+        requests.Clear();
+        var limited = await service.ListVolumesNamedAsync("Batman: The Dark Knight", 1);
+        Assert.Equal((1, 1), (limited.Requests, requests.Count));
+    }
+
+    [Theory]
+    [InlineData(null, "Batman")]
+    [InlineData("test-key", " :, ")]
+    public async Task ListVolumesNamedAsync_NotConfiguredOrNoName_AsksNothing(string? apiKey, string title)
+    {
+        var handler = new StubHttpMessageHandler(_ => throw new InvalidOperationException("no request expected"));
+        var service = CreateService(handler, new AppSettings { EnableExternalSeriesMetadata = true, ComicVineApiKey = apiKey, ComicVineBaseUrl = "https://comicvine.example/api" });
+
+        var result = await service.ListVolumesNamedAsync(title, 5);
+
+        Assert.Equal((0, 0), (result.Requests, result.Value.Count));
+    }
+
+    [Fact]
+    public async Task GetIssueAsync_ReadsTheIssue_ItsVolume_AndItsDetails_InOneRequest()
+    {
+        var requests = new List<string>();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            requests.Add(request.RequestUri!.ToString());
+            return JsonResponse(
+                "{\"status_code\":1,\"results\":{\"id\":555,\"issue_number\":\"3\",\"name\":\"Tagged\",\"cover_date\":\"2016-09-01\"," +
+                "\"site_detail_url\":\"https://comicvine.gamespot.com/batman-3/4000-555/\",\"image\":{\"original_url\":\"https://comicvine.example/c.jpg\"}," +
+                "\"volume\":{\"id\":4242,\"name\":\"Batman\"}," +
+                "\"person_credits\":[{\"name\":\"Tom King\",\"role\":\"writer\"},{\"name\":\"David Finch\",\"role\":\"penciler\"}]," +
+                "\"story_arc_credits\":[{\"id\":9,\"name\":\"I Am Gotham\"}]}}");
+        });
+        var service = CreateService(handler, new AppSettings { EnableExternalSeriesMetadata = true, ComicVineApiKey = "test-key", ComicVineBaseUrl = "https://comicvine.example/api" });
+
+        var issue = await service.GetIssueAsync(555);
+
+        Assert.NotNull(issue);
+        Assert.Equal((555, "3", "Tagged", 4242, "Batman"), (issue!.Summary.Id, issue.Summary.IssueNumber, issue.Summary.Name, issue.VolumeId, issue.VolumeName));
+        Assert.Equal(["Tom King"], issue.Details.Writers);
+        Assert.Equal("I Am Gotham", Assert.Single(issue.Details.StoryArcs).Name);
+        var uri = Assert.Single(requests);
+        Assert.Contains("/issue/4000-555/", uri);
+        Assert.Contains("volume", uri);
+    }
+
+    [Fact]
+    public async Task GetIssueAsync_AnIssueWithoutAVolume_OrNotFound_IsNull()
+    {
+        var answers = new Queue<string>(["{\"status_code\":1,\"results\":{\"id\":555,\"issue_number\":\"3\"}}", "{\"status_code\":101,\"error\":\"Object Not Found\",\"results\":[]}"]);
+        var handler = new StubHttpMessageHandler(_ => JsonResponse(answers.Dequeue()));
+        var service = CreateService(handler, new AppSettings { EnableExternalSeriesMetadata = true, ComicVineApiKey = "test-key", ComicVineBaseUrl = "https://comicvine.example/api" });
+
+        Assert.Null(await service.GetIssueAsync(555));
+        Assert.Null(await service.GetIssueAsync(556));
+        Assert.Null(await CreateService(handler, new AppSettings { EnableExternalSeriesMetadata = true, ComicVineBaseUrl = "https://comicvine.example/api" }).GetIssueAsync(1));
+    }
+
+    [Fact]
     public async Task ListVolumeIssuesAsync_ReadsPagesOfAHundred_UpToTheRequestLimit()
     {
         var requests = new List<string>();

@@ -89,6 +89,13 @@ public class ComicMetadata
     /// keeps it.
     /// </summary>
     public int? VolumeYear { get; set; }
+
+    /// <summary>
+    /// The ComicVine issue the archive's tags name (see <see cref="Utilities.ComicVineTagId"/>):
+    /// <c>[CVDB12345]</c> in <c>&lt;Notes&gt;</c> or the issue's page in <c>&lt;Web&gt;</c>. Read from
+    /// the archive on every scan; null when the tags name none, or name two different issues.
+    /// </summary>
+    public int? ComicVineIssueId { get; set; }
     public List<string> Authors { get; set; } = new();
     public List<string> Tags { get; set; } = new();
     public bool IsUserEdited { get; set; }
@@ -110,6 +117,7 @@ public class ComicMetadata
             Summary = this.Summary,
             Format = this.Format,
             VolumeYear = this.VolumeYear,
+            ComicVineIssueId = this.ComicVineIssueId,
             Authors = new List<string>(this.Authors),
             Tags = new List<string>(this.Tags),
             IsUserEdited = this.IsUserEdited,

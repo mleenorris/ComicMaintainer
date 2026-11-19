@@ -42,6 +42,8 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         _fileStore.Setup(f => f.FileExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string path, CancellationToken _) => _files.Any(f => f.FilePath == path));
         _client.SetupGet(c => c.IsConfigured).Returns(true);
+        _search.Setup(s => s.ListVolumesNamedAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicVineResult<IReadOnlyList<ExternalSeriesMetadata>>([], 0));
         _search.Setup(s => s.SearchVolumesAsync("Batman", It.IsAny<CancellationToken>())).ReturnsAsync(
         [
             new ExternalSeriesMetadata { CanonicalTitle = "Batman", StartYear = 2016, Publisher = "DC Comics", SourceId = BatmanVolume.ToString(), TotalChapters = 158 },
@@ -508,6 +510,163 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         var candidates = await CreateService().GetCoverCandidatesAsync("/c/ANXM/All-New X-Men - Vol. 2 Chapter 0005.cbz");
 
         Assert.Equal(88888, candidates!.VolumeId);
+    }
+
+    private static ComicVineIssue TaggedIssue(int id, string number, int volumeId = 4242, string volumeName = "Batman")
+        => new(
+            new ComicVineIssueSummary(id, number, $"Tagged {number}", "2016-09-01", "Tagged summary.", $"https://comicvine.gamespot.com/batman-{number}/4000-{id}/",
+                $"https://comicvine.example/covers/{id}.jpg", $"https://comicvine.example/covers/{id}-thumb.jpg"),
+            volumeId,
+            volumeName,
+            new ComicVineIssueDetails(id, ["Tom King"], [new ComicVineArcReference(9, "Tagged Arc")]));
+
+    [Fact]
+    public async Task RunAsync_AFileWhoseTagsNameItsIssue_IsFilledFromIt_WithoutMatching()
+    {
+        // No year and no number, and the series has no ComicVine match: matching could not find it.
+        var file = AddFile("/c/Batman/Batman - Chapter 0003.cbz", "3", volumeYear: null, volume: "3");
+        file.Metadata!.ComicVineIssueId = 555;
+        _client.Setup(c => c.GetIssueAsync(555, It.IsAny<CancellationToken>())).ReturnsAsync(TaggedIssue(555, "3"));
+
+        var summary = await CreateService().RunAsync(null, 20);
+
+        Assert.Equal(1, summary.Filled);
+        Assert.Equal(1, summary.Requests);
+        var write = Assert.Single(_writes);
+        Assert.Equal("Tagged 3", write.Metadata.Title);
+        Assert.Equal(555, write.Fill.ComicVineIssueId);
+        Assert.False(write.Fill.ReplacesComicVineIssueId);
+        Assert.Equal("Tagged Arc", write.Fill.StoryArc);
+        _search.Verify(s => s.SearchVolumesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _client.Verify(c => c.GetIssueDetailsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        // The series' Vol. 3 is linked to the issue's volume, so its other issues are found there.
+        await using var db = new ComicMaintainerDbContext(_options);
+        var link = Assert.Single(db.ComicVineVolumeLinks);
+        Assert.Equal(("batman", 0, 3, 4242, "Batman"), (link.SeriesKey, link.StartYear, link.VolumeNumber, link.VolumeId, link.VolumeName));
+        Assert.Equal(555, Assert.Single(db.ComicVineFileStates).IssueId);
+        Assert.NotNull(db.ComicVineIssues.Single(issue => issue.Id == 555).DetailsUtc);
+
+        // The next run reads the stored issue and asks ComicVine nothing.
+        var again = await CreateService().RunAsync(null, 20);
+        Assert.Equal((0, 1, 0), (again.Filled, again.Unchanged, again.Requests));
+    }
+
+    [Fact]
+    public async Task RunAsync_ATaggedAnnual_IsFilled_ButLinksNoVolume()
+    {
+        var file = AddFile("/c/Batman/Batman Annual - Chapter 0001.cbz", "1", format: "Annual");
+        file.Metadata!.ComicVineIssueId = 556;
+        _client.Setup(c => c.GetIssueAsync(556, It.IsAny<CancellationToken>())).ReturnsAsync(TaggedIssue(556, "1", volumeId: 9999, volumeName: "Batman Annual"));
+
+        var summary = await CreateService().RunAsync(null, 20);
+
+        Assert.Equal(1, summary.Filled);
+        Assert.Equal(556, Assert.Single(_writes).Fill.ComicVineIssueId);
+        await using var db = new ComicMaintainerDbContext(_options);
+        Assert.Empty(db.ComicVineVolumeLinks);
+    }
+
+    [Theory]
+    // The tagged issue has another number than the file: tags copied from another file.
+    [InlineData(true)]
+    // ComicVine has no such issue.
+    [InlineData(false)]
+    public async Task RunAsync_ATagThatCannotBeTrusted_IsMatchedInstead_AndTheTagReplaced(bool otherNumber)
+    {
+        var file = AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");
+        file.Metadata!.ComicVineIssueId = 557;
+        _client.Setup(c => c.GetIssueAsync(557, It.IsAny<CancellationToken>())).ReturnsAsync(otherNumber ? TaggedIssue(557, "7") : null);
+
+        var summary = await CreateService().RunAsync(null, 20);
+
+        Assert.Equal(1, summary.Filled);
+        var write = Assert.Single(_writes);
+        Assert.Equal("I Am Gotham, Part One", write.Metadata.Title);
+        Assert.Equal(101, write.Fill.ComicVineIssueId);
+        Assert.True(write.Fill.ReplacesComicVineIssueId);
+    }
+
+    [Fact]
+    public async Task RunAsync_NoRequestsLeftToReadATaggedIssue_StopsEarly()
+    {
+        var file = AddFile("/c/Batman/Batman Annual - Chapter 0001.cbz", "1", format: "Annual");
+        file.Metadata!.ComicVineIssueId = 558;
+
+        var summary = await CreateService().RunAsync(null, 0);
+
+        Assert.Equal((1, true), (summary.Skipped, summary.StoppedEarly));
+        _client.Verify(c => c.GetIssueAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RunAsync_TheRankedSearchMissesTheVolume_ItIsFoundInTheListByName()
+    {
+        AddFile("/c/Batman/Batman (2011) - Chapter 0001.cbz", "1", volumeYear: 2011);
+        _search.Setup(s => s.ListVolumesNamedAsync("Batman", It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicVineResult<IReadOnlyList<ExternalSeriesMetadata>>(
+                [new ExternalSeriesMetadata { CanonicalTitle = "Batman", StartYear = 2011, Publisher = "DC Comics", SourceId = "42721", TotalChapters = 52 }], 2));
+        _client.Setup(c => c.ListVolumeIssuesAsync(42721, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicVineResult<IReadOnlyList<ComicVineIssueSummary>>([new ComicVineIssueSummary(4201, "1", "Knightfall", "2011-11-01", null, null)], 1));
+        _client.Setup(c => c.GetIssueDetailsAsync(4201, It.IsAny<CancellationToken>())).ReturnsAsync(new ComicVineIssueDetails(4201, [], []));
+
+        var summary = await CreateService().RunAsync(null, 20);
+
+        Assert.Equal(1, summary.Filled);
+        Assert.Equal("Knightfall", Assert.Single(_writes).Metadata.Title);
+        // One search page, two list pages, one issue list, one issue's details.
+        Assert.Equal(1 + 2 + 1 + 1, summary.Requests);
+        _search.Verify(s => s.ListVolumesNamedAsync("Batman", 5, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RunAsync_TheRankedSearchFindsTheVolume_TheListByNameIsNotRead()
+    {
+        AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");
+
+        await CreateService().RunAsync(null, 20);
+
+        _search.Verify(s => s.ListVolumesNamedAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetCoverCandidatesAsync_ATaggedIssue_ShowsItsVolumesCovers_WithItChosen()
+    {
+        var file = AddFile("/c/Batman/Batman Annual - Chapter 0001.cbz", "1", format: "Annual");
+        file.Metadata!.ComicVineIssueId = 559;
+        _client.Setup(c => c.GetIssueAsync(559, It.IsAny<CancellationToken>())).ReturnsAsync(TaggedIssue(559, "1", volumeId: 9999, volumeName: "Batman Annual"));
+        _client.Setup(c => c.ListVolumeIssuesAsync(9999, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicVineResult<IReadOnlyList<ComicVineIssueSummary>>(
+            [
+                new ComicVineIssueSummary(559, "1", "Tagged 1", "2016-09-01", null, null, "https://comicvine.example/covers/559.jpg"),
+                new ComicVineIssueSummary(560, "2", "Annual Two", "2017-09-01", null, null, "https://comicvine.example/covers/560.jpg"),
+            ], 1));
+
+        var candidates = await CreateService().GetCoverCandidatesAsync(file.FilePath);
+
+        Assert.NotNull(candidates);
+        Assert.Equal((9999, "Batman Annual", 559, (string?)null), (candidates!.VolumeId!.Value, candidates.VolumeName, candidates.MatchedIssueId!.Value, candidates.Reason));
+        Assert.Equal([559, 560], candidates.Covers.Select(cover => cover.IssueId));
+    }
+
+    [Fact]
+    public async Task GetIssueLinksAsync_ATaggedIssue_LinksToIt_WhenStoredWithTheFilesNumber()
+    {
+        var tagged = AddFile("/c/Batman/Batman Annual - Chapter 0001.cbz", "1", format: "Annual");
+        tagged.Metadata!.ComicVineIssueId = 561;
+        var mismatched = AddFile("/c/Batman/Batman Annual - Chapter 0002.cbz", "2", format: "Annual");
+        mismatched.Metadata!.ComicVineIssueId = 561;
+        var unknown = AddFile("/c/Batman/Batman Annual - Chapter 0003.cbz", "3", format: "Annual");
+        unknown.Metadata!.ComicVineIssueId = 562;
+        await using (var db = new ComicMaintainerDbContext(_options))
+        {
+            db.ComicVineIssues.Add(new ComicVineIssueEntity { Id = 561, VolumeId = 9999, IssueNumber = "1", Name = "Annual One", SiteUrl = "https://comicvine.gamespot.com/a-1/4000-561/", ListedUtc = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+        }
+
+        var link = Assert.Single(await CreateService().GetIssueLinksAsync(_files.Select(f => f.FilePath).ToList()));
+
+        Assert.Equal(new IssueComicVineLink(tagged.FilePath, 561, "1", "Annual One", "https://comicvine.gamespot.com/a-1/4000-561/", 9999, null, "https://comicvine.gamespot.com/volume/4050-9999/", Filled: false), link);
     }
 
     [Fact]

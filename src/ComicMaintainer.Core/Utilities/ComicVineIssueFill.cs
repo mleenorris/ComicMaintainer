@@ -10,8 +10,10 @@ namespace ComicMaintainer.Core.Utilities;
 /// What a ComicVine issue adds to a file's tags. It only ever fills in: a title that is a
 /// placeholder (<c>Chapter 8</c>, <c>#8</c>, an old file name), a missing cover year (or the
 /// 1970 some downloaders write when they do not know it), a missing summary or one that is only
-/// the series' synopsis, missing writers, and empty Story Arc, Month and Web elements. A field
-/// the user has locked by editing it is never changed.
+/// the series' synopsis, missing writers, and empty Story Arc, Month and Web elements. It also
+/// records the issue's id (<c>[CVDB12345]</c> in Notes, its page in Web), so the file names its
+/// ComicVine issue from then on (see <see cref="ComicVineTagId"/>). A field the user has locked
+/// by editing it is never changed.
 /// </summary>
 public static partial class ComicVineIssueFill
 {
@@ -92,7 +94,9 @@ public static partial class ComicVineIssueFill
         var fill = new ProviderComicInfoFields(
             Web: ProviderMetadataText.HttpUrl(issue.SiteUrl),
             StoryArc: arcs.Count == 0 ? null : string.Join(", ", arcs.Select(arc => arc.Name)),
-            Month: month);
+            Month: month,
+            ComicVineIssueId: issue.Id,
+            ReplacesComicVineIssueId: current.ComicVineIssueId is { } tagged && tagged != issue.Id);
         return new Plan(update, fields, fill);
     }
 

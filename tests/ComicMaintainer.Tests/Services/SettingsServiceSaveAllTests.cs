@@ -160,15 +160,16 @@ public sealed class SettingsServiceSaveAllTests : IDisposable
 
         await _service.UpdateSettingsAsync(new SettingsUpdate
         {
-            ExternalSeriesMetadata = new ExternalSeriesMetadataUpdate(MetronUsername: "reader", MetronPassword: "metron secret", MetronBaseUrl: "https://metron.example/api"),
+            ExternalSeriesMetadata = new ExternalSeriesMetadataUpdate(MetronUsername: "reader", MetronPassword: " metron secret ", MetronBaseUrl: "https://metron.example/api"),
         });
         var saved = SavedSection();
-        Assert.Equal(("reader", "metron secret", "https://metron.example/api"),
+        // The password is kept exactly as typed, spaces and all.
+        Assert.Equal(("reader", " metron secret ", "https://metron.example/api"),
             (saved.GetProperty("MetronUsername").GetString(), saved.GetProperty("MetronPassword").GetString(), saved.GetProperty("MetronBaseUrl").GetString()));
 
         // Null keeps the stored password and base URL; blank clears the password and username.
         await _service.UpdateSettingsAsync(new SettingsUpdate { ExternalSeriesMetadata = new ExternalSeriesMetadataUpdate(MetronUsername: "other") });
-        Assert.Equal("metron secret", SavedSection().GetProperty("MetronPassword").GetString());
+        Assert.Equal(" metron secret ", SavedSection().GetProperty("MetronPassword").GetString());
         await _service.UpdateSettingsAsync(new SettingsUpdate { ExternalSeriesMetadata = new ExternalSeriesMetadataUpdate(MetronUsername: "", MetronPassword: "", MetronBaseUrl: " ") });
         saved = SavedSection();
         Assert.Equal(JsonValueKind.Null, saved.GetProperty("MetronPassword").ValueKind);

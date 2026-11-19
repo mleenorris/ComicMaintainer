@@ -294,7 +294,8 @@ public sealed class NotificationSettingsTests : IDisposable
             Mock.Of<ISeriesLanguagePreferenceRetagService>(),
             Mock.Of<IEventBroadcaster>(),
             Mock.Of<IProcessingHistoryService>(),
-            administrator ? TestAuthorization.Administrator : TestAuthorization.NotAdministrator);
+            administrator ? TestAuthorization.Administrator : TestAuthorization.NotAdministrator,
+            Mock.Of<IMetronClient>());
 
         var json = JsonSerializer.SerializeToElement(((OkObjectResult)(await controller.GetAllSettings()).Result!).Value);
 
@@ -325,7 +326,8 @@ public sealed class NotificationSettingsTests : IDisposable
             Mock.Of<ISeriesLanguagePreferenceRetagService>(),
             Mock.Of<IEventBroadcaster>(),
             Mock.Of<IProcessingHistoryService>(),
-            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator);
+            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator,
+            Mock.Of<IMetronClient>());
 
         var json = JsonSerializer.Serialize(((OkObjectResult)(await controller.GetAllSettings()).Result!).Value);
 

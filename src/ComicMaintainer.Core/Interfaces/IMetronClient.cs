@@ -26,6 +26,16 @@ public interface IMetronClient
     /// <summary>True when a Metron username and password are set and external metadata is on.</summary>
     bool IsConfigured { get; }
 
-    /// <summary>The Metron series that records ComicVine volume <paramref name="comicVineVolumeId"/>.</summary>
-    Task<MetronAnswer> SeriesOfComicVineVolumeAsync(int comicVineVolumeId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Why Metron is left out for the account set now (a refused sign-in, a wrong address, a failure),
+    /// for the settings to show; null when nothing is wrong, or Metron is not set up.
+    /// </summary>
+    string? Problem { get; }
+
+    /// <summary>
+    /// The Metron series that records ComicVine volume <paramref name="comicVineVolumeId"/>. With
+    /// <paramref name="waitForPermit"/> (a background run), a request over Metron's per-minute limit
+    /// waits for it rather than being skipped.
+    /// </summary>
+    Task<MetronAnswer> SeriesOfComicVineVolumeAsync(int comicVineVolumeId, bool waitForPermit = false, CancellationToken cancellationToken = default);
 }

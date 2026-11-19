@@ -58,7 +58,8 @@ public class SettingsControllerTests
             Mock.Of<ISeriesLanguagePreferenceRetagService>(),
             Mock.Of<IEventBroadcaster>(),
             Mock.Of<IProcessingHistoryService>(),
-            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator);
+            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator,
+            Mock.Of<IMetronClient>());
     }
 
     [Fact]

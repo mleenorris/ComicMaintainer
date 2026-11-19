@@ -1559,7 +1559,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             foreach (var candidate in ranked.Take(3))
             {
                 var answer = int.TryParse(candidate.Volume.SourceId, NumberStyles.None, CultureInfo.InvariantCulture, out var volumeId)
-                    ? await owner._metron.SeriesOfComicVineVolumeAsync(volumeId, cancellationToken)
+                    ? await owner._metron.SeriesOfComicVineVolumeAsync(volumeId, waitForPermit: !ListForCovers, cancellationToken)
                     : MetronAnswer.Unavailable;
                 weighed.Add(answer.Series is { } series
                     ? VolumeEvidence.WithMetron(candidate, series.Volume, series.YearBegan, startYear, volumeNumber)
@@ -1574,7 +1574,7 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
         {
             if (!owner._metron.IsConfigured
                 || !int.TryParse(choice.Volume.SourceId, NumberStyles.None, CultureInfo.InvariantCulture, out var volumeId)
-                || (await owner._metron.SeriesOfComicVineVolumeAsync(volumeId, cancellationToken)).Series is not { } series)
+                || (await owner._metron.SeriesOfComicVineVolumeAsync(volumeId, waitForPermit: !ListForCovers, cancellationToken)).Series is not { } series)
             {
                 return null;
             }
@@ -1612,14 +1612,13 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 return ranked;
             }
 
-            var weighed = new List<VolumeCandidate>();
+            var compared = new List<(VolumeCandidate Candidate, int Same, int Other, int Compared)>();
             foreach (var candidate in ranked.Take(3))
             {
                 var listed = int.TryParse(candidate.Volume.SourceId, NumberStyles.None, CultureInfo.InvariantCulture, out var volumeId)
                     ? await CoverUrlsAsync(volumeId, cancellationToken)
                     : [];
-                var same = 0;
-                var other = 0;
+                var (same, other, count) = (0, 0, 0);
                 foreach (var (issue, cover) in heldCovers)
                 {
                     if (listed.FirstOrDefault(entry => IssueNumberParser.AreEquivalent(entry.Number, issue.Number)) is not { Url: { } url }
@@ -1629,13 +1628,18 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                     }
 
                     var distance = CoverFingerprint.Distance(cover, theirs);
+                    count++;
                     same += distance <= CoverFingerprint.SameCover ? 1 : 0;
                     other += distance >= CoverFingerprint.OtherCover ? 1 : 0;
                 }
 
-                weighed.Add(VolumeEvidence.WithCovers(candidate, same, other));
+                compared.Add((candidate, same, other, count));
             }
 
+            // Covers that differ count against a volume only when every volume's covers were compared:
+            // otherwise the one that could not be (a variant cover, an unlisted issue) would win by default.
+            var allCompared = compared.All(entry => entry.Compared > 0);
+            var weighed = compared.Select(entry => VolumeEvidence.WithCovers(entry.Candidate, entry.Same, allCompared ? entry.Other : 0));
             return VolumeEvidence.Order(weighed.Concat(ranked.Skip(3)));
         }
 

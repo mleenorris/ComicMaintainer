@@ -143,8 +143,10 @@ not filled until you choose.
 under **Settings** > **External Metadata**, every volume taken is also checked against Metron's record of it: when Metron
 counts it as another volume number, or a start year more than one off, it is left for you to review with the reason
 (`ComicVine's Batman (2016) fits best, but Metron lists it as Vol. 2 (2010), not started in 2016`). Metron allows 20
-requests a minute; the app asks at most 18, remembers each answer for a week, and leaves Metron out for 10 minutes after a
-refusal or failure. Matching never waits for Metron, and goes on without it.
+requests a minute and 5,000 a day; the app asks at most 18 a minute (a background job waits for the next one) and 4,900 a
+day, remembers each answer for a week, and leaves Metron out for 10 minutes after a refusal or failure. The address must be
+https, so the password is never sent in the clear. A rejected username or password stops Metron until you change them, and
+the settings show why Metron is left out. Matching goes on without Metron when it cannot be asked.
 
 The volume is looked for in ComicVine's search first. For a much-used name such as Batman, the search can leave the right
 volume out, so when it finds none that fits, every ComicVine volume with exactly that name is listed, oldest first, and

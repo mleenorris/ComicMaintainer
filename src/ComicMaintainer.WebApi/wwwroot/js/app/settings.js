@@ -370,9 +370,10 @@ showMessage('Default preferred language updated', 'success');
                 document.getElementById('metronUsername').value = settingsData.metron_username || '';
                 // The password is never returned by the API; only whether one is stored.
                 document.getElementById('metronPassword').value = '';
-                document.getElementById('metronPasswordHint').textContent = settingsData.metron_password_set
+                document.getElementById('metronPasswordHint').textContent = (settingsData.metron_password_set
                     ? 'Leave blank to keep the stored password.'
-                    : 'Leave blank to leave Metron out. The password is stored in user settings on this instance.';
+                    : 'Leave blank to leave Metron out. The password is stored in user settings on this instance.')
+                    + (settingsData.metron_problem ? ` Metron is left out now: ${settingsData.metron_problem}.` : '');
                 document.getElementById('metronClearPasswordCheckbox').checked = false;
                 document.getElementById('metronBaseUrl').value = settingsData.metron_base_url || 'https://metron.cloud/api';
                 document.getElementById('enableMangaDexMetadata').checked = !!settingsData.enable_mangadex_metadata;

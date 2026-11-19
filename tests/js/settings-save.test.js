@@ -334,6 +334,12 @@ test('the stored Metron password is kept unless a new one is typed or "clear" is
     assert.equal(saveBody(page, since).externalSeriesMetadata.metronPassword, '');
 });
 
+test('why Metron is left out is shown under its password', async () => {
+    const page = await bootSettings({ settings: { metron_problem: 'Metron refused the username and password: check them under Settings' } });
+    assert.equal(page.$('#metronPasswordHint').textContent.trim(),
+        'Leave blank to keep the stored password. Metron is left out now: Metron refused the username and password: check them under Settings.');
+});
+
 test('without a stored Metron password the hint says Metron is left out', async () => {
     const page = await bootSettings({ settings: { metron_password_set: false, metron_username: null, metron_base_url: null } });
     assert.equal(page.$('#metronPasswordHint').textContent.trim(), 'Leave blank to leave Metron out. The password is stored in user settings on this instance.');

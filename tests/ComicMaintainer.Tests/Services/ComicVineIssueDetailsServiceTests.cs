@@ -1097,7 +1097,7 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
     private void MetronKnows(int volumeId, int? volume, int? year)
     {
         _metron.SetupGet(m => m.IsConfigured).Returns(true);
-        _metron.Setup(m => m.SeriesOfComicVineVolumeAsync(volumeId, It.IsAny<CancellationToken>()))
+        _metron.Setup(m => m.SeriesOfComicVineVolumeAsync(volumeId, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new MetronAnswer(true, new MetronSeries(volumeId + 1, "Batman", volume, year)));
     }
 
@@ -1139,7 +1139,7 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
     {
         AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");
         _metron.SetupGet(m => m.IsConfigured).Returns(true);
-        _metron.Setup(m => m.SeriesOfComicVineVolumeAsync(It.IsAny<int>(), It.IsAny<CancellationToken>())).ReturnsAsync(MetronAnswer.Unavailable);
+        _metron.Setup(m => m.SeriesOfComicVineVolumeAsync(It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(MetronAnswer.Unavailable);
 
         Assert.Equal(1, (await CreateService().RunAsync(null, 20)).Filled);
     }
@@ -1167,6 +1167,26 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         Assert.Equal(BatmanVolume, link.VolumeId);
         Assert.Contains("a cover of yours matches its cover", link.CandidatesJson);
         Assert.Contains("your covers do not match its covers", link.CandidatesJson);
+    }
+
+    [Fact]
+    public async Task RunAsync_CoversOfOnlyOneVolume_CanOnlyCountForIt()
+    {
+        // The right volume's cover differs (a variant); the other volume lists no cover to compare.
+        // Covers that differ must not hand the pick to the volume that could not be compared.
+        var file = AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");
+        TwoBatmans2016();
+        _client.Setup(c => c.ListVolumeIssuesAsync(BatmanVolume, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComicVineResult<IReadOnlyList<ComicVineIssueSummary>>(
+                [new ComicVineIssueSummary(101, "1", "I Am Gotham, Part One", "2016-08-01", null, null, "https://comicvine.example/101.jpg")], 1));
+        _fingerprints.Setup(f => f.OfFileAsync(file.FilePath, It.IsAny<CancellationToken>())).ReturnsAsync(0x00FF00FF00FF00FFUL);
+        _fingerprints.Setup(f => f.OfImageAsync("https://comicvine.example/101.jpg", It.IsAny<CancellationToken>())).ReturnsAsync(0xFF00FF00FF00FF00UL);
+
+        var summary = await CreateService().RunAsync(null, 20);
+
+        Assert.Equal(1, summary.NoVolume);
+        await using var db = new ComicMaintainerDbContext(_options);
+        Assert.Equal(ComicVineVolumeDecision.Review, db.ComicVineVolumeLinks.Single().Decision);
     }
 
     [Fact]

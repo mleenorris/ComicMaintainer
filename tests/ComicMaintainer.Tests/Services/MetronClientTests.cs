@@ -20,21 +20,22 @@ public sealed class MetronClientTests
     private static HttpResponseMessage Json(string body, HttpStatusCode status = HttpStatusCode.OK)
         => new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
+    private TestOptionsMonitor<AppSettings> _options = null!;
+
+    private static AppSettings Account(string password = "secret", string baseUrl = "https://metron.example/api/") => new()
+    {
+        EnableExternalSeriesMetadata = true,
+        MetronUsername = "reader",
+        MetronPassword = password,
+        MetronBaseUrl = baseUrl,
+    };
+
     private MetronClient CreateClient(AppSettings? settings = null)
     {
         var factory = new Mock<IHttpClientFactory>();
         factory.Setup(f => f.CreateClient(MetronClient.HttpClientName)).Returns(() => new HttpClient(new Handler(this)));
-        return new MetronClient(
-            factory.Object,
-            new TestOptionsMonitor<AppSettings>(settings ?? new AppSettings
-            {
-                EnableExternalSeriesMetadata = true,
-                MetronUsername = "reader",
-                MetronPassword = "secret",
-                MetronBaseUrl = "https://metron.example/api/",
-            }),
-            NullLogger<MetronClient>.Instance,
-            _time);
+        _options = new TestOptionsMonitor<AppSettings>(settings ?? Account());
+        return new MetronClient(factory.Object, _options, NullLogger<MetronClient>.Instance, _time);
     }
 
     private sealed class Handler(MetronClientTests owner) : HttpMessageHandler
@@ -69,20 +70,106 @@ public sealed class MetronClientTests
     }
 
     [Fact]
-    public async Task SeriesOfComicVineVolumeAsync_NoSeries_IsAnAnswer()
+    public async Task SeriesOfComicVineVolumeAsync_NoSeries_IsAnAnswer_ButA404IsAWrongAddress()
     {
         _answer = _ => Json("{\"count\":0,\"results\":[]}");
-        var answer = await CreateClient().SeriesOfComicVineVolumeAsync(1);
+        var client = CreateClient();
+        var answer = await client.SeriesOfComicVineVolumeAsync(1);
         Assert.Equal((true, null), (answer.Available, answer.Series));
+        Assert.Null(client.Problem);
 
         _answer = _ => Json("{}", HttpStatusCode.NotFound);
-        answer = await CreateClient().SeriesOfComicVineVolumeAsync(2);
-        Assert.Equal((true, null), (answer.Available, answer.Series));
+        client = CreateClient();
+        answer = await client.SeriesOfComicVineVolumeAsync(2);
+        Assert.False(answer.Available);
+        Assert.Equal("Metron answered 404: check the Metron address", client.Problem);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task SeriesOfComicVineVolumeAsync_ARefusedSignIn_StopsMetronUntilTheAccountChanges(HttpStatusCode status)
+    {
+        _answer = _ => Json("{}", status);
+        var client = CreateClient();
+
+        Assert.False((await client.SeriesOfComicVineVolumeAsync(1)).Available);
+        Assert.Equal("Metron refused the username and password: check them under Settings", client.Problem);
+        _time.Advance(TimeSpan.FromHours(1));
+        Assert.False((await client.SeriesOfComicVineVolumeAsync(1)).Available);
+        Assert.Single(_requests);
+
+        // A new password is tried, and the problem it had is not shown for it.
+        _options.Set(Account(password: "better"));
+        Assert.Null(client.Problem);
+        _answer = _ => Json("{\"results\":[{\"id\":7,\"volume\":1}]}");
+        Assert.True((await client.SeriesOfComicVineVolumeAsync(1)).Available);
+        Assert.Equal(2, _requests.Count);
+    }
+
+    [Theory]
+    [InlineData("http://metron.example/api")]
+    [InlineData("metron.example/api")]
+    [InlineData("https://[bad")]
+    public async Task SeriesOfComicVineVolumeAsync_AnAddressThatIsNotHttps_SendsNoPassword(string baseUrl)
+    {
+        var client = CreateClient(Account(baseUrl: baseUrl));
+
+        Assert.False((await client.SeriesOfComicVineVolumeAsync(1)).Available);
+        Assert.Empty(_requests);
+        Assert.Equal("The Metron address must be an https address, such as https://metron.cloud/api", client.Problem);
+    }
+
+    [Fact]
+    public async Task SeriesOfComicVineVolumeAsync_AnotherAccountOrAddress_AsksAgain()
+    {
+        var client = CreateClient();
+        await client.SeriesOfComicVineVolumeAsync(1);
+        _options.Set(Account(baseUrl: "https://other.example/api"));
+
+        await client.SeriesOfComicVineVolumeAsync(1);
+
+        Assert.Equal(["https://metron.example/api/series/?cv_id=1", "https://other.example/api/series/?cv_id=1"], _requests.Select(request => request.RequestUri!.AbsoluteUri));
+    }
+
+    [Fact]
+    public async Task SeriesOfComicVineVolumeAsync_ABackgroundRun_WaitsForTheNextPermit()
+    {
+        var client = CreateClient();
+        for (var id = 1; id <= MetronClient.RequestsPerMinute; id++)
+        {
+            await client.SeriesOfComicVineVolumeAsync(id);
+        }
+
+        var waiting = client.SeriesOfComicVineVolumeAsync(99, waitForPermit: true);
+        Assert.False(waiting.IsCompleted);
+        _time.Advance(TimeSpan.FromMinutes(1));
+        Assert.True((await waiting).Available);
+        Assert.Equal(MetronClient.RequestsPerMinute + 1, _requests.Count);
+    }
+
+    [Fact]
+    public async Task SeriesOfComicVineVolumeAsync_StopsForTheDayBeforeMetronsDailyLimit()
+    {
+        var client = CreateClient();
+        for (var id = 1; id <= MetronClient.RequestsPerDay; id++)
+        {
+            if ((id - 1) % MetronClient.RequestsPerMinute == 0 && id > 1)
+            {
+                _time.Advance(TimeSpan.FromMinutes(1));
+            }
+
+            await client.SeriesOfComicVineVolumeAsync(id);
+        }
+
+        _time.Advance(TimeSpan.FromMinutes(1));
+        Assert.False((await client.SeriesOfComicVineVolumeAsync(999999)).Available);
+        _time.Advance(TimeSpan.FromDays(1));
+        Assert.True((await client.SeriesOfComicVineVolumeAsync(999999)).Available);
     }
 
     [Theory]
     [InlineData(HttpStatusCode.TooManyRequests)]
-    [InlineData(HttpStatusCode.Unauthorized)]
     [InlineData(HttpStatusCode.InternalServerError)]
     public async Task SeriesOfComicVineVolumeAsync_ARefusalOrFailure_PausesMetronForTenMinutes(HttpStatusCode status)
     {
@@ -106,6 +193,11 @@ public sealed class MetronClientTests
 
         _answer = _ => Json("not json");
         Assert.False((await CreateClient().SeriesOfComicVineVolumeAsync(1)).Available);
+
+        _answer = _ => throw new InvalidOperationException("anything else");
+        var client = CreateClient();
+        Assert.False((await client.SeriesOfComicVineVolumeAsync(1)).Available);
+        Assert.Equal("anything else", client.Problem);
     }
 
     [Fact]
@@ -141,6 +233,6 @@ public sealed class MetronClientTests
     public async Task SeriesOfComicVineVolumeAsync_Cancelled_Throws()
     {
         _answer = _ => throw new TaskCanceledException();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => CreateClient().SeriesOfComicVineVolumeAsync(1, new CancellationToken(true)));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => CreateClient().SeriesOfComicVineVolumeAsync(1, false, new CancellationToken(true)));
     }
 }

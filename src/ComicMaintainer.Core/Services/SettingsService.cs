@@ -767,9 +767,9 @@ public class SettingsService : ISettingsService
         // A blank base URL keeps the stored one.
         StageIfNotBlank(values, "ComicVineBaseUrl", metadata.ComicVineBaseUrl);
 
-        // As with the ComicVine key: null keeps the stored value, blank clears it.
+        // Null keeps the stored value; blank clears it. The password is kept exactly as typed.
         StageTextIfSet(values, "MetronUsername", metadata.MetronUsername);
-        StageTextIfSet(values, "MetronPassword", metadata.MetronPassword);
+        StageSecretIfSet(values, "MetronPassword", metadata.MetronPassword);
         StageIfNotBlank(values, "MetronBaseUrl", metadata.MetronBaseUrl);
         StageIfSet(values, "EnableMangaDexMetadata", metadata.EnableMangaDex);
         StageIfNotBlank(values, "MangaDexBaseUrl", metadata.MangaDexBaseUrl);

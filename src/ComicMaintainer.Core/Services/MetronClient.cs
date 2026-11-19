@@ -30,6 +30,7 @@ public sealed class MetronClient : IMetronClient
     internal const int RequestsPerDay = 4900;
     private static readonly TimeSpan AnswerLifetime = TimeSpan.FromDays(7);
     private static readonly TimeSpan PauseAfterFailure = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan RetryRejectedSignIn = TimeSpan.FromHours(6);
 
     private readonly IHttpClientFactory _httpClients;
     private readonly IOptionsMonitor<AppSettings> _settings;
@@ -43,6 +44,7 @@ public sealed class MetronClient : IMetronClient
     private int _today;
     private string? _account;
     private string? _rejectedAccount;
+    private DateTimeOffset _rejectedAt;
     private string? _problem;
 
     public MetronClient(IHttpClientFactory httpClients, IOptionsMonitor<AppSettings> settings, ILogger<MetronClient> logger, TimeProvider time)
@@ -105,7 +107,8 @@ public sealed class MetronClient : IMetronClient
                 _pausedUntil = DateTimeOffset.MinValue;
             }
 
-            if (_rejectedAccount == account)
+            // A refused sign-in is tried again after a while: the account may have been fixed on Metron.
+            if (_rejectedAccount == account && _time.GetUtcNow() - _rejectedAt < RetryRejectedSignIn)
             {
                 return MetronAnswer.Unavailable;
             }
@@ -128,11 +131,12 @@ public sealed class MetronClient : IMetronClient
                 "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{config.MetronUsername}:{config.MetronPassword}")));
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             using var response = await _httpClients.CreateClient(HttpClientName).SendAsync(request, cancellationToken);
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
                 lock (_lock)
                 {
                     _rejectedAccount = account;
+                    _rejectedAt = _time.GetUtcNow();
                 }
 
                 Note(config, "Metron refused the username and password: check them under Settings");
@@ -254,13 +258,19 @@ public sealed class MetronClient : IMetronClient
 
     private void Note(AppSettings config, string problem)
     {
+        bool changed;
         lock (_lock)
         {
             _account = Account(config);
+            changed = _problem != problem;
             _problem = problem;
         }
 
-        _logger.LogWarning("Metron is left out for now: {Reason}", LoggingHelper.SanitizeForLog(problem));
+        // Once per problem, not on every request a run makes while it lasts.
+        if (changed)
+        {
+            _logger.LogWarning("Metron is left out for now: {Reason}", LoggingHelper.SanitizeForLog(problem));
+        }
     }
 
     // Who is asked, and where: answers and a refused sign-in belong to it. The password is not kept.

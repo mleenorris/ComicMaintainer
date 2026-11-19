@@ -145,8 +145,9 @@ counts it as another volume number, or a start year more than one off, it is lef
 (`ComicVine's Batman (2016) fits best, but Metron lists it as Vol. 2 (2010), not started in 2016`). Metron allows 20
 requests a minute and 5,000 a day; the app asks at most 18 a minute (a background job waits for the next one) and 4,900 a
 day, remembers each answer for a week, and leaves Metron out for 10 minutes after a refusal or failure. The address must be
-https, so the password is never sent in the clear. A rejected username or password stops Metron until you change them, and
-the settings show why Metron is left out. Matching goes on without Metron when it cannot be asked.
+https, so the password is never sent in the clear. A rejected username or password stops Metron until you change them (or
+for 6 hours), and the settings show why Metron is left out. Metron is a second opinion: when it cannot be asked (it is
+failing, or its daily limit is reached), a volume is taken on ComicVine's evidence alone and not checked later.
 
 The volume is looked for in ComicVine's search first. For a much-used name such as Batman, the search can leave the right
 volume out, so when it finds none that fits, every ComicVine volume with exactly that name is listed, oldest first, and

@@ -85,9 +85,36 @@ public sealed class MetronClientTests
         Assert.Equal("Metron answered 404: check the Metron address", client.Problem);
     }
 
+    [Fact]
+    public async Task SeriesOfComicVineVolumeAsync_ARefusedSignIn_IsTriedAgainAfterSixHours()
+    {
+        _answer = _ => Json("{}", HttpStatusCode.Unauthorized);
+        var client = CreateClient();
+        await client.SeriesOfComicVineVolumeAsync(1);
+
+        _time.Advance(TimeSpan.FromHours(5));
+        await client.SeriesOfComicVineVolumeAsync(1);
+        Assert.Single(_requests);
+        _time.Advance(TimeSpan.FromHours(2));
+        await client.SeriesOfComicVineVolumeAsync(1);
+        Assert.Equal(2, _requests.Count);
+    }
+
+    [Fact]
+    public async Task SeriesOfComicVineVolumeAsync_AForbiddenAnswer_OnlyPauses()
+    {
+        _answer = _ => Json("{}", HttpStatusCode.Forbidden);
+        var client = CreateClient();
+        await client.SeriesOfComicVineVolumeAsync(1);
+
+        Assert.Equal("Metron answered 403", client.Problem);
+        _time.Advance(TimeSpan.FromMinutes(11));
+        await client.SeriesOfComicVineVolumeAsync(1);
+        Assert.Equal(2, _requests.Count);
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.Unauthorized)]
-    [InlineData(HttpStatusCode.Forbidden)]
     public async Task SeriesOfComicVineVolumeAsync_ARefusedSignIn_StopsMetronUntilTheAccountChanges(HttpStatusCode status)
     {
         _answer = _ => Json("{}", status);

@@ -175,6 +175,9 @@ showMessage('Default preferred language updated', 'success');
             enable_external_series_metadata: ['enableExternalSeriesMetadata'],
             comicvine_api_key_set: ['comicVineApiKey', 'comicVineClearApiKeyCheckbox'],
             comicvine_base_url: ['comicVineBaseUrl'],
+            metron_username: ['metronUsername'],
+            metron_password_set: ['metronPassword', 'metronClearPasswordCheckbox'],
+            metron_base_url: ['metronBaseUrl'],
             enable_mangadex_metadata: ['enableMangaDexMetadata'],
             mangadex_base_url: ['mangaDexBaseUrl'],
             enable_anilist_metadata: ['enableAniListMetadata'],
@@ -364,6 +367,15 @@ showMessage('Default preferred language updated', 'success');
                     : 'Leave blank to disable ComicVine lookups. The key is stored in user settings on this instance.';
                 document.getElementById('comicVineClearApiKeyCheckbox').checked = false;
                 document.getElementById('comicVineBaseUrl').value = settingsData.comicvine_base_url || 'https://comicvine.gamespot.com/api';
+                document.getElementById('metronUsername').value = settingsData.metron_username || '';
+                // The password is never returned by the API; only whether one is stored.
+                document.getElementById('metronPassword').value = '';
+                document.getElementById('metronPasswordHint').textContent = (settingsData.metron_password_set
+                    ? 'Leave blank to keep the stored password.'
+                    : 'Leave blank to leave Metron out. The password is stored in user settings on this instance.')
+                    + (settingsData.metron_problem ? ` Metron is left out now: ${settingsData.metron_problem}.` : '');
+                document.getElementById('metronClearPasswordCheckbox').checked = false;
+                document.getElementById('metronBaseUrl').value = settingsData.metron_base_url || 'https://metron.cloud/api';
                 document.getElementById('enableMangaDexMetadata').checked = !!settingsData.enable_mangadex_metadata;
                 document.getElementById('mangaDexBaseUrl').value = settingsData.mangadex_base_url || 'https://api.mangadex.org';
                 document.getElementById('enableAniListMetadata').checked = !!settingsData.enable_anilist_metadata;
@@ -1321,6 +1333,10 @@ errorEl.textContent = 'An error occurred. Please try again.';
             const comicVineApiKey = document.getElementById('comicVineApiKey').value.trim();
             const comicVineClearApiKey = document.getElementById('comicVineClearApiKeyCheckbox').checked;
             const comicVineBaseUrl = document.getElementById('comicVineBaseUrl').value.trim();
+            const metronUsername = document.getElementById('metronUsername').value.trim();
+            const metronPassword = document.getElementById('metronPassword').value;
+            const metronClearPassword = document.getElementById('metronClearPasswordCheckbox').checked;
+            const metronBaseUrl = document.getElementById('metronBaseUrl').value.trim();
             const enableMangaDexMetadata = document.getElementById('enableMangaDexMetadata').checked;
             const mangaDexBaseUrl = document.getElementById('mangaDexBaseUrl').value.trim();
             const enableAniListMetadata = document.getElementById('enableAniListMetadata').checked;
@@ -1434,6 +1450,10 @@ errorEl.textContent = 'An error occurred. Please try again.';
                     // null keeps the stored key; '' clears it.
                     comicVineApiKey: unlessPinned('comicvine_api_key_set', comicVineClearApiKey ? '' : (comicVineApiKey || null)),
                     comicVineBaseUrl: unlessPinned('comicvine_base_url', comicVineBaseUrl || 'https://comicvine.gamespot.com/api'),
+                    // '' clears the username; for the password, null keeps the stored one and '' clears it.
+                    metronUsername: unlessPinned('metron_username', metronUsername),
+                    metronPassword: unlessPinned('metron_password_set', metronClearPassword ? '' : (metronPassword || null)),
+                    metronBaseUrl: unlessPinned('metron_base_url', metronBaseUrl || 'https://metron.cloud/api'),
                     enableMangaDex: unlessPinned('enable_mangadex_metadata', enableMangaDexMetadata),
                     mangaDexBaseUrl: unlessPinned('mangadex_base_url', mangaDexBaseUrl || 'https://api.mangadex.org'),
                     enableAniList: unlessPinned('enable_anilist_metadata', enableAniListMetadata),

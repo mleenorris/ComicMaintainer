@@ -33,7 +33,8 @@ public sealed class SettingsControllerSaveAllTests
             Mock.Of<ISeriesLanguagePreferenceRetagService>(),
             Mock.Of<IEventBroadcaster>(),
             Mock.Of<IProcessingHistoryService>(),
-            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator);
+            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator,
+            Mock.Of<IMetronClient>());
     }
 
     private static JsonElement ProblemJson(ObjectResult result, int status)

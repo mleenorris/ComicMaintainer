@@ -68,7 +68,8 @@ public sealed class AppSettingsEnvironmentOverridesTests : IDisposable
             Mock.Of<ISeriesLanguagePreferenceRetagService>(),
             Mock.Of<IEventBroadcaster>(),
             Mock.Of<IProcessingHistoryService>(),
-            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator);
+            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator,
+            Mock.Of<IMetronClient>());
 
     private static string WwwrootFile(string name)
     {

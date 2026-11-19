@@ -132,8 +132,22 @@ does not: a volume named only by its start year, which another outscores on ever
 year beside the publisher's own a year off), is left for you. When your issues name no publisher, editions cannot be told
 apart that way, so any volume close behind the best has the issue lists read before one is taken. A one-shot or giveaway of the same name counts against itself. When several fit about equally well, their
 issue lists are read too: the volume whose cover years match your issues' (within a year), and whose story titles match
-your real titles, wins. If that still does not settle it, nothing is guessed: the volume is left for you to review, and
-its issues are not filled until you choose.
+your real titles, wins. Then, with a Metron account set (see below), Metron's record of each volume counts: Metron
+records the ComicVine volume of each of its series, with its own volume number and start year, so a volume Metron counts
+as yours gains and one it counts as another loses. Then the covers: your covers of up to two issues are compared with each
+volume's covers of the same numbers, by a fingerprint that survives resizing and re-encoding, and a matching cover counts
+for much. If that still does not settle it, nothing is guessed: the volume is left for you to review, and its issues are
+not filled until you choose.
+
+**Metron (optional).** Metron (metron.cloud) is a free, carefully kept comic database. With a Metron username and password
+under **Settings** > **External Metadata**, every volume taken is also checked against Metron's record of it: when Metron
+counts it as another volume number, or a start year more than one off, it is left for you to review with the reason
+(`ComicVine's Batman (2016) fits best, but Metron lists it as Vol. 2 (2010), not started in 2016`). Metron allows 20
+requests a minute and 5,000 a day; the app asks at most 18 a minute (a background job waits for the next one) and 4,900 a
+day, remembers each answer for a week, and leaves Metron out for 10 minutes after a refusal or failure. The address must be
+https, so the password is never sent in the clear. A rejected username or password stops Metron until you change them (or
+for 6 hours), and the settings show why Metron is left out. Metron is a second opinion: when it cannot be asked (it is
+failing, or its daily limit is reached), a volume is taken on ComicVine's evidence alone and not checked later.
 
 The volume is looked for in ComicVine's search first. For a much-used name such as Batman, the search can leave the right
 volume out, so when it finds none that fits, every ComicVine volume with exactly that name is listed, oldest first, and

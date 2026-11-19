@@ -1335,6 +1335,31 @@
                             <input type="text" id="comicVineBaseUrl" name="comicVineBaseUrl" placeholder="https://comicvine.gamespot.com/api" autocomplete="off">
                         </div>
 
+                        <h4 class="settings-subheading">Metron (second opinion on ComicVine volumes)</h4>
+                        <p class="form-hint">
+                            Optional. With a free metron.cloud account, the ComicVine volume an issue is matched to is checked against
+                            Metron's record of that volume: its volume number and start year.
+                        </p>
+                        <div class="form-group">
+                            <label for="metronUsername">Metron Username</label>
+                            <input type="text" id="metronUsername" name="metronUsername" placeholder="Metron username" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="metronPassword">Metron Password</label>
+                            <input type="password" id="metronPassword" name="metronPassword" placeholder="Metron password" autocomplete="new-password">
+                            <small id="metronPasswordHint" class="form-hint">
+                                Leave blank to leave Metron out. The password is stored in user settings on this instance.
+                            </small>
+                            <label for="metronClearPasswordCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="metronClearPasswordCheckbox" name="metronClearPassword">
+                                <span>Clear stored password on save</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="metronBaseUrl">Metron Base URL</label>
+                            <input type="text" id="metronBaseUrl" name="metronBaseUrl" placeholder="https://metron.cloud/api" autocomplete="off">
+                        </div>
+
                         <h4 class="settings-subheading">MangaDex (manga)</h4>
                         <div class="form-group">
                             <label for="enableMangaDexMetadata" class="checkbox-label">

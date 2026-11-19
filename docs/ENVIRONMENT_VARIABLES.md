@@ -114,6 +114,9 @@ These are read at startup. An empty variable keeps the value from the `AutheliaS
 | `ENABLE_EXTERNAL_SERIES_METADATA` | `false` | Flag | Turns on ComicVine lookups, which also need `COMICVINE_API_KEY`. MangaDex and AniList have their own switches | `enable_external_series_metadata` |
 | `COMICVINE_API_KEY` | Empty | Text | **Secret.** ComicVine API key | `comicvine_api_key_set` |
 | `COMICVINE_BASE_URL` | `https://comicvine.gamespot.com/api` | URL | ComicVine API address | `comicvine_base_url` |
+| `METRON_USERNAME` | Empty | Text | Metron (metron.cloud) account, optional: a second opinion on the ComicVine volume an issue is matched to | `metron_username` |
+| `METRON_PASSWORD` | Empty | Text | **Secret.** That Metron account's password | `metron_password_set` |
+| `METRON_BASE_URL` | `https://metron.cloud/api` | URL | Metron API address | `metron_base_url` |
 | `ENABLE_MANGADEX_METADATA` | `false` | Flag | Turns on MangaDex lookups | `enable_mangadex_metadata` |
 | `MANGADEX_BASE_URL` | `https://api.mangadex.org` | URL | MangaDex API address | `mangadex_base_url` |
 | `ENABLE_ANILIST_METADATA` | `false` | Flag | Turns on AniList lookups | `enable_anilist_metadata` |

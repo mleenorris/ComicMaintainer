@@ -35,6 +35,7 @@ public class SettingsController : ControllerBase
     private readonly IEventBroadcaster _eventBroadcaster;
     private readonly IProcessingHistoryService _processingHistory;
     private readonly IAuthorizationService _authorization;
+    private readonly IMetronClient _metron;
 
     public SettingsController(
         IOptionsMonitor<AppSettings> appSettings, 
@@ -47,8 +48,10 @@ public class SettingsController : ControllerBase
         ISeriesLanguagePreferenceRetagService languageRetag,
         IEventBroadcaster eventBroadcaster,
         IProcessingHistoryService processingHistory,
-        IAuthorizationService authorization)
+        IAuthorizationService authorization,
+        IMetronClient metron)
     {
+        _metron = metron;
         _appSettings = appSettings;
         _logger = logger;
         _dbContextFactory = dbContextFactory;
@@ -90,6 +93,12 @@ public class SettingsController : ControllerBase
             // UI only needs to know whether one is stored.
             comicvine_api_key_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.ComicVineApiKey),
             comicvine_base_url = _appSettings.CurrentValue.ComicVineBaseUrl,
+            metron_username = _appSettings.CurrentValue.MetronUsername,
+            // The password is never returned; only whether one is stored.
+            metron_password_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.MetronPassword),
+            metron_base_url = _appSettings.CurrentValue.MetronBaseUrl,
+            // Why Metron is left out now (a refused sign-in, a wrong address); null when it is fine.
+            metron_problem = _metron.Problem,
             enable_mangadex_metadata = _appSettings.CurrentValue.EnableMangaDexMetadata,
             mangadex_base_url = _appSettings.CurrentValue.MangaDexBaseUrl,
             enable_anilist_metadata = _appSettings.CurrentValue.EnableAniListMetadata,

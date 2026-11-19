@@ -302,6 +302,7 @@ internal static class CoreServiceCollectionExtensions
         services.AddHttpClient(nameof(MangaDexSeriesMetadataService)).ConfigureHttpClient(ConfigureMetadataProviderClient);
         services.AddHttpClient(nameof(AniListManhwaSeriesMetadataService)).ConfigureHttpClient(ConfigureMetadataProviderClient);
         services.AddHttpClient(nameof(AniListMangaSeriesMetadataService)).ConfigureHttpClient(ConfigureMetadataProviderClient);
+        services.AddHttpClient(MetronClient.HttpClientName).ConfigureHttpClient(ConfigureMetadataProviderClient);
         services.AddHttpClient(SuwayomiService.HttpClientName)
             .ConfigureHttpClient(client =>
             {
@@ -316,6 +317,9 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<ComicVineSeriesMetadataService>();
         services.AddSingleton<IComicVineVolumeSearch>(sp => sp.GetRequiredService<ComicVineSeriesMetadataService>());
         services.AddSingleton<IComicVineCatalogClient>(sp => sp.GetRequiredService<ComicVineSeriesMetadataService>());
+        Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddSingleton(services, TimeProvider.System);
+        services.AddSingleton<IMetronClient, MetronClient>();
+        services.AddSingleton<ICoverFingerprintService, CoverFingerprintService>();
         services.AddSingleton<IComicVineIssueDetailsService, ComicVineIssueDetailsService>();
         services.AddSingleton<IIssueCoverWriter, IssueCoverWriter>();
         services.AddSingleton<IIssueCoverService, IssueCoverService>();

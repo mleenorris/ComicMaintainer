@@ -116,6 +116,9 @@ test('saving sends every group in one request with the edited values', async () 
             enabled: true,
             comicVineApiKey: 'new-key',
             comicVineBaseUrl: 'https://comicvine.example/api',
+            metronUsername: 'reader',
+            metronPassword: null,
+            metronBaseUrl: 'https://metron.example/api',
             enableMangaDex: true,
             mangaDexBaseUrl: 'https://api.mangadex.org',
             enableAniList: true,
@@ -278,6 +281,9 @@ test('the stored ComicVine API key is kept unless a new key is typed or "clear" 
         enabled: true,
         comicVineApiKey: null,
         comicVineBaseUrl: 'https://comicvine.example/api',
+        metronUsername: 'reader',
+        metronPassword: null,
+        metronBaseUrl: 'https://metron.example/api',
         enableMangaDex: true,
         mangaDexBaseUrl: 'https://mangadex.example',
         enableAniList: false,
@@ -301,6 +307,44 @@ test('the stored ComicVine API key is kept unless a new key is typed or "clear" 
     assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
     assert.equal(page.$('#comicVineClearApiKeyCheckbox').checked, false, 'the tick is reset by the reload');
     assert.equal(page.$('#comicVineApiKey').value, '');
+});
+
+test('the stored Metron password is kept unless a new one is typed or "clear" is ticked', async () => {
+    const page = await bootSettings();
+    routeSave(page);
+    assert.equal(page.$('#metronUsername').value, 'reader');
+    assert.equal(page.$('#metronPassword').value, '');
+    assert.equal(page.$('#metronPasswordHint').textContent.trim(), 'Leave blank to keep the stored password.');
+    assert.equal(page.$('#metronBaseUrl').value, 'https://metron.example/api');
+
+    let since = await save(page);
+    assert.equal(saveBody(page, since).externalSeriesMetadata.metronPassword, null);
+
+    // The password is sent as typed, spaces and all; the base URL falls back to Metron's.
+    page.input('#metronPassword', ' new secret ');
+    page.input('#metronUsername', ' someone ');
+    page.input('#metronBaseUrl', '');
+    since = await save(page);
+    const typed = saveBody(page, since).externalSeriesMetadata;
+    assert.deepEqual([typed.metronUsername, typed.metronPassword, typed.metronBaseUrl], ['someone', ' new secret ', 'https://metron.cloud/api']);
+
+    page.input('#metronPassword', 'typed but cleared');
+    page.input('#metronClearPasswordCheckbox', true);
+    since = await save(page);
+    assert.equal(saveBody(page, since).externalSeriesMetadata.metronPassword, '');
+});
+
+test('why Metron is left out is shown under its password', async () => {
+    const page = await bootSettings({ settings: { metron_problem: 'Metron refused the username and password: check them under Settings' } });
+    assert.equal(page.$('#metronPasswordHint').textContent.trim(),
+        'Leave blank to keep the stored password. Metron is left out now: Metron refused the username and password: check them under Settings.');
+});
+
+test('without a stored Metron password the hint says Metron is left out', async () => {
+    const page = await bootSettings({ settings: { metron_password_set: false, metron_username: null, metron_base_url: null } });
+    assert.equal(page.$('#metronPasswordHint').textContent.trim(), 'Leave blank to leave Metron out. The password is stored in user settings on this instance.');
+    assert.equal(page.$('#metronUsername').value, '');
+    assert.equal(page.$('#metronBaseUrl').value, 'https://metron.cloud/api');
 });
 
 test('groups whose controls are missing are left out of the request', async () => {

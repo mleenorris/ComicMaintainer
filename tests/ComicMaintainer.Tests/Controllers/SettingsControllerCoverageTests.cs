@@ -45,6 +45,8 @@ public class SettingsControllerCoverageTests
     private readonly Mock<IEventBroadcaster> _broadcaster = new();
     private readonly Mock<IProcessingHistoryService> _history = new();
 
+    private readonly Mock<IMetronClient> _metron = new();
+
     private SettingsController CreateController(
         IDbContextFactory<ComicMaintainerDbContext>? dbFactory = null) =>
         new(
@@ -58,7 +60,8 @@ public class SettingsControllerCoverageTests
             _retag.Object,
             _broadcaster.Object,
             _history.Object,
-            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator);
+            ComicMaintainer.Tests.Helpers.TestAuthorization.Administrator,
+            _metron.Object);
 
     private static JsonElement OkJson(ActionResult<object> result) =>
         JsonSerializer.SerializeToElement(Assert.IsType<OkObjectResult>(result.Result).Value);
@@ -101,6 +104,8 @@ public class SettingsControllerCoverageTests
         _settings.SuwayomiPassword = "suwayomi-pw-do-not-echo";
         _settings.ErrorReportingGitHubToken = "ghp_token_do_not_echo";
         _settings.ComicVineApiKey = "cv-key-do-not-echo";
+        _settings.MetronUsername = "reader";
+        _settings.MetronPassword = "metron-pw-do-not-echo";
 
         var result = await CreateController().GetAllSettings();
 
@@ -109,6 +114,13 @@ public class SettingsControllerCoverageTests
         Assert.True(json.GetProperty("suwayomi_password_set").GetBoolean());
         Assert.True(json.GetProperty("error_reporting_github_token_set").GetBoolean());
         Assert.True(json.GetProperty("comicvine_api_key_set").GetBoolean());
+        Assert.True(json.GetProperty("metron_password_set").GetBoolean());
+        Assert.Equal("reader", json.GetProperty("metron_username").GetString());
+        Assert.Equal("https://metron.cloud/api", json.GetProperty("metron_base_url").GetString());
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("metron_problem").ValueKind);
+        _metron.SetupGet(m => m.Problem).Returns("Metron refused the username and password: check them under Settings");
+        Assert.Equal("Metron refused the username and password: check them under Settings",
+            OkJson(await CreateController().GetAllSettings()).GetProperty("metron_problem").GetString());
         // Any signed-in user (read-only ones included) may read these settings.
         Assert.False(json.TryGetProperty("comicvine_api_key", out _));
         var raw = json.GetRawText();
@@ -116,6 +128,7 @@ public class SettingsControllerCoverageTests
         Assert.DoesNotContain("suwayomi-pw-do-not-echo", raw);
         Assert.DoesNotContain("ghp_token_do_not_echo", raw);
         Assert.DoesNotContain("cv-key-do-not-echo", raw);
+        Assert.DoesNotContain("metron-pw-do-not-echo", raw);
     }
 
     [Theory]
@@ -127,6 +140,7 @@ public class SettingsControllerCoverageTests
         _settings.SuwayomiPassword = secret;
         _settings.ErrorReportingGitHubToken = secret;
         _settings.ComicVineApiKey = secret;
+        _settings.MetronPassword = secret;
 
         var json = OkJson(await CreateController().GetAllSettings());
 
@@ -134,6 +148,7 @@ public class SettingsControllerCoverageTests
         Assert.False(json.GetProperty("suwayomi_password_set").GetBoolean());
         Assert.False(json.GetProperty("error_reporting_github_token_set").GetBoolean());
         Assert.False(json.GetProperty("comicvine_api_key_set").GetBoolean());
+        Assert.False(json.GetProperty("metron_password_set").GetBoolean());
     }
 
     [Fact]

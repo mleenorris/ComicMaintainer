@@ -239,12 +239,9 @@ public sealed class MetronClient : IMetronClient
     internal static string? CleanToken(string? token)
     {
         var text = token?.Trim();
-        foreach (var prefix in new[] { "Bearer ", "Token " })
+        foreach (var prefix in new[] { "Bearer ", "Token " }.Where(p => text is not null && text.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
         {
-            if (text is not null && text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                text = text[prefix.Length..].Trim();
-            }
+            text = text![prefix.Length..].Trim();
         }
 
         return string.IsNullOrEmpty(text) ? null : text;

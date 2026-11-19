@@ -111,7 +111,7 @@ public sealed class MetronClientTests
 
         var health = await client.CheckHealthAsync();
 
-        Assert.Equal(("Metron", enabled, false, (bool?)null, message), (health.Name, health.Enabled, health.Configured, health.Reachable, health.StatusMessage));
+        Assert.Equal(("Metron", enabled, false, null, message), (health.Name, health.Enabled, health.Configured, health.Reachable, health.StatusMessage));
         Assert.Empty(_requests);
     }
 
@@ -411,7 +411,7 @@ public sealed class MetronClientTests
         _time.Advance(TimeSpan.FromMinutes(10));
         _answer = _ => Json("{\"results\":[]}");
         health = await client.CheckHealthAsync();
-        Assert.Equal(((bool?)true, "Reachable", false, (DateTime?)null), (health.Reachable, health.StatusMessage, health.RateLimited, health.RateLimitedUntilUtc));
+        Assert.Equal(((bool?)true, "Reachable", false, null), (health.Reachable, health.StatusMessage, health.RateLimited, health.RateLimitedUntilUtc));
     }
 
     [Fact]
@@ -431,7 +431,7 @@ public sealed class MetronClientTests
         // Nothing known of a new account: not checked, and checked as soon as a request is free.
         _options.Set(Account(password: "another"));
         health = await client.CheckHealthAsync();
-        Assert.Equal(((bool?)null, "Request limit reached: not checked now", true), (health.Reachable, health.StatusMessage, health.RateLimited));
+        Assert.Equal((null, "Request limit reached: not checked now", true), (health.Reachable, health.StatusMessage, health.RateLimited));
 
         _time.Advance(TimeSpan.FromMinutes(1));
         health = await client.CheckHealthAsync();
@@ -484,7 +484,7 @@ public sealed class MetronClientTests
 
         var health = await client.CheckHealthAsync();
 
-        Assert.Equal(((bool?)null, "Not checked yet"), (health.Reachable, health.StatusMessage));
+        Assert.Equal((null, "Not checked yet"), (health.Reachable, health.StatusMessage));
         Assert.Single(_requests);
     }
 
@@ -557,7 +557,7 @@ public sealed class MetronClientTests
 
         // The old account's failure neither pauses the new one nor shows as its problem.
         var health = await client.CheckHealthAsync();
-        Assert.Equal(((bool?)true, "Reachable", (string?)null, false), (health.Reachable, health.StatusMessage, health.LastError, health.RateLimited));
+        Assert.Equal(((bool?)true, "Reachable", null, false), (health.Reachable, health.StatusMessage, health.LastError, health.RateLimited));
         Assert.True((await client.SeriesOfComicVineVolumeAsync(2)).Available);
         Assert.Equal(3, _requests.Count);
     }
@@ -573,7 +573,7 @@ public sealed class MetronClientTests
 
         var health = await client.CheckHealthAsync();
 
-        Assert.Equal(((bool?)false, "Metron answered 503", true, (DateTime?)resumes), (health.Reachable, health.StatusMessage, health.RateLimited, health.RateLimitedUntilUtc));
+        Assert.Equal(((bool?)false, "Metron answered 503", true, resumes), (health.Reachable, health.StatusMessage, health.RateLimited, health.RateLimitedUntilUtc));
         Assert.Single(_requests);
     }
 
@@ -589,7 +589,7 @@ public sealed class MetronClientTests
         _options.Set(settings);
         var health = await client.CheckHealthAsync();
 
-        Assert.Equal(("Disabled in settings", (string?)null, (bool?)null, 1L), (health.StatusMessage, health.LastError, health.Reachable, health.FailureCount));
+        Assert.Equal(("Disabled in settings", null, null, 1L), (health.StatusMessage, health.LastError, health.Reachable, health.FailureCount));
     }
 
     [Fact]

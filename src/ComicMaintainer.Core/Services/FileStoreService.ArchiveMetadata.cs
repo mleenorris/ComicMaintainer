@@ -147,6 +147,7 @@ public partial class FileStoreService
         target.Summary = source.Summary;
         target.Format = source.Format;
         target.ComicVineIssueId = source.ComicVineIssueId;
+        target.ComicVineIssueMatchedByName = source.ComicVineIssueMatchedByName;
         // New list instances, so change tracking sees the converted columns change.
         target.Authors = new List<string>(source.Authors);
         target.Tags = new List<string>(source.Tags);

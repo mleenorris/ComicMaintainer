@@ -219,10 +219,10 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<DateTime>("AppliedUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<bool>("FromTag")
+                    b.Property<int>("IssueId")
                         .HasColumnType("INTEGER");
 
-                    b.Property<int>("IssueId")
+                    b.Property<int?>("RejectedTagId")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("FilePath");
@@ -1481,6 +1481,9 @@ namespace ComicMaintainer.Core.Migrations
                                 .HasColumnType("TEXT");
 
                             b1.Property<int?>("ComicVineIssueId")
+                                .HasColumnType("INTEGER");
+
+                            b1.Property<bool>("ComicVineIssueMatchedByName")
                                 .HasColumnType("INTEGER");
 
                             b1.Property<string>("Format")

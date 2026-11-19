@@ -67,6 +67,7 @@ public static class ComicInfoXml
             Summary = root.Element(ns + "Summary")?.Value,
             Format = root.Element(ns + "Format")?.Value,
             ComicVineIssueId = ComicVineTagId.FromTags(root.Element(ns + "Notes")?.Value, root.Element(ns + "Web")?.Value),
+            ComicVineIssueMatchedByName = ComicVineTagId.IsNameMatch(root.Element(ns + "Notes")?.Value),
             Authors = SplitList(root.Elements(ns + "Writer").Select(e => e.Value)),
             Tags = SplitList(root.Elements(ns + "Tags").Concat(root.Elements(ns + LegacyTagElement)).Select(e => e.Value))
         };
@@ -140,7 +141,7 @@ public static class ComicInfoXml
             }
 
             var notes = root.Element(ns + "Notes")?.Value;
-            var recorded = ComicVineTagId.WithIssueId(notes, issueId, values.ReplacesComicVineIssueId);
+            var recorded = ComicVineTagId.WithIssueId(notes, issueId, values.ReplacesComicVineIssueId, values.ComicVineIssueMatchedByName);
             if (!string.Equals(notes, recorded, StringComparison.Ordinal))
             {
                 SetElement(root, "Notes", recorded);

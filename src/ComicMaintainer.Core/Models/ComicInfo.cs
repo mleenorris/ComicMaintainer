@@ -144,6 +144,7 @@ public class ComicInfo
             Summary = Summary,
             Format = Format,
             ComicVineIssueId = Utilities.ComicVineTagId.FromTags(Notes, Web),
+            ComicVineIssueMatchedByName = Utilities.ComicVineTagId.IsNameMatch(Notes),
             Authors = new[] { Writer, Penciller, Inker, Colorist, Letterer, Editor }
                 .Where(a => !string.IsNullOrWhiteSpace(a))
                 .Select(a => a!)

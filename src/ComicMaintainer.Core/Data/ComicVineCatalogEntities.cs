@@ -88,12 +88,10 @@ public class ComicVineFileStateEntity
     public DateTime AppliedUtc { get; set; }
 
     /// <summary>
-    /// True when the issue was the one the file's tags named (a tagger's id, see
-    /// <see cref="Utilities.ComicVineTagId"/>), false when it was matched by the series' names. A tag
-    /// naming the issue of a name match is this application's own record of that match, which a
-    /// volume the user sets later must be able to change.
+    /// The ComicVine id the file's tags named that ComicVine did not give, when it was matched by name
+    /// instead: the tag is kept, and not asked for again while it stays the same.
     /// </summary>
-    public bool FromTag { get; set; }
+    public int? RejectedTagId { get; set; }
 }
 
 /// <summary>A ComicVine story arc and its issues in ComicVine's order, fetched when first viewed.</summary>

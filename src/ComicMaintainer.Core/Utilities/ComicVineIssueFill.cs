@@ -40,14 +40,18 @@ public static partial class ComicVineIssueFill
     /// that was a different one (it was matched to the wrong volume): what it wrote counts as not
     /// filled, so the right issue's details replace it. <paramref name="replacesTaggedIssue"/> is
     /// true when the issue the tags name is shown to be wrong (another number, or this
-    /// application's own earlier match): its id and page are replaced by this issue's.
+    /// application's own earlier match): its id and page are replaced by this issue's. When the tags
+    /// name another issue that is kept, neither its id nor a page is written, so they do not end
+    /// up naming two issues. <paramref name="matchedByName"/> marks the id written as this
+    /// application's own match (see <see cref="ComicVineTagId.NameMatchMarker"/>).
     /// </remarks>
     public static Plan For(
         ComicMetadata current,
         ComicVineIssueEntity issue,
         string? seriesSynopsis,
         ComicVineIssueEntity? previous = null,
-        bool replacesTaggedIssue = false)
+        bool replacesTaggedIssue = false,
+        bool matchedByName = false)
     {
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(issue);
@@ -98,12 +102,14 @@ public static partial class ComicVineIssueFill
         }
 
         var arcs = StoryArcs(issue.StoryArcsJson);
+        var keepsAnotherTag = current.ComicVineIssueId is { } tagged && tagged != issue.Id && !replacesTaggedIssue;
         var fill = new ProviderComicInfoFields(
-            Web: ProviderMetadataText.HttpUrl(issue.SiteUrl),
+            Web: keepsAnotherTag ? null : ProviderMetadataText.HttpUrl(issue.SiteUrl),
             StoryArc: arcs.Count == 0 ? null : string.Join(", ", arcs.Select(arc => arc.Name)),
             Month: month,
-            ComicVineIssueId: issue.Id,
-            ReplacesComicVineIssueId: replacesTaggedIssue);
+            ComicVineIssueId: keepsAnotherTag ? null : issue.Id,
+            ReplacesComicVineIssueId: replacesTaggedIssue,
+            ComicVineIssueMatchedByName: matchedByName && !keepsAnotherTag);
         return new Plan(update, fields, fill);
     }
 

@@ -27,6 +27,10 @@ namespace ComicMaintainer.Core.Models;
 /// True when the tags named another ComicVine issue, which the file was not filled from: its id
 /// in Notes, and its page in Web, are replaced by this issue's.
 /// </param>
+/// <param name="ComicVineIssueMatchedByName">
+/// True when the issue was matched by the series' names: the id written is marked as this
+/// application's own (see <see cref="ComicVineTagId.NameMatchMarker"/>).
+/// </param>
 public sealed record ProviderComicInfoFields(
     string? Summary = null,
     string? Genre = null,
@@ -36,7 +40,8 @@ public sealed record ProviderComicInfoFields(
     string? StoryArc = null,
     int? Month = null,
     int? ComicVineIssueId = null,
-    bool ReplacesComicVineIssueId = false)
+    bool ReplacesComicVineIssueId = false,
+    bool ComicVineIssueMatchedByName = false)
 {
     /// <summary>The ComicInfo value for manga read from right to left.</summary>
     public const string MangaRightToLeft = "YesAndRightToLeft";

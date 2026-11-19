@@ -544,7 +544,8 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         await using var db = new ComicMaintainerDbContext(_options);
         var link = Assert.Single(db.ComicVineVolumeLinks);
         Assert.Equal(("batman", 0, 3, 4242, "Batman"), (link.SeriesKey, link.StartYear, link.VolumeNumber, link.VolumeId, link.VolumeName));
-        Assert.Equal((555, true), (db.ComicVineFileStates.Single().IssueId, db.ComicVineFileStates.Single().FromTag));
+        Assert.Equal(555, db.ComicVineFileStates.Single().IssueId);
+        Assert.False(write.Fill.ComicVineIssueMatchedByName);
         Assert.NotNull(db.ComicVineIssues.Single(issue => issue.Id == 555).DetailsUtc);
 
         // The next run reads the stored issue and asks ComicVine nothing.
@@ -583,8 +584,26 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         Assert.Equal(1, summary.Filled);
         var write = Assert.Single(_writes);
         Assert.Equal("I Am Gotham, Part One", write.Metadata.Title);
-        Assert.Equal(101, write.Fill.ComicVineIssueId);
         Assert.Equal(otherNumber, write.Fill.ReplacesComicVineIssueId);
+        if (otherNumber)
+        {
+            // The wrong id gives way to this match, marked as the app's own.
+            Assert.Equal((101, true), (write.Fill.ComicVineIssueId!.Value, write.Fill.ComicVineIssueMatchedByName));
+            return;
+        }
+
+        // The tag is kept, and nothing is written beside it that would name another issue.
+        Assert.Null(write.Fill.ComicVineIssueId);
+        Assert.Null(write.Fill.Web);
+        await using (var db = new ComicMaintainerDbContext(_options))
+        {
+            Assert.Equal(557, db.ComicVineFileStates.Single().RejectedTagId);
+        }
+
+        // The next run does not ask for it again.
+        _writes.Clear();
+        await CreateService().RunAsync(null, 20);
+        _client.Verify(c => c.GetIssueAsync(557, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
@@ -608,16 +627,11 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
     [Fact]
     public async Task RunAsync_ATagThisAppWrote_IsMatchedAgain_SoAVolumeTheUserSetTakesEffect()
     {
-        // Filled from Batman (2016) #1 by name before, which wrote [CVDB101]; the user has since said
-        // the file is from the 2011 volume.
+        // Filled from Batman (2016) #1 by name before, which wrote "[CVDB101] (matched by name …)";
+        // the file has since been renamed (no stored state), and the user has said it is from 2011.
         var file = AddFile("/c/Batman/Batman (2011) - Chapter 0001.cbz", "1", volumeYear: 2011);
         file.Metadata!.ComicVineIssueId = 101;
-        await using (var db = new ComicMaintainerDbContext(_options))
-        {
-            db.ComicVineIssues.Add(new ComicVineIssueEntity { Id = 101, VolumeId = BatmanVolume, IssueNumber = "1", Name = "I Am Gotham, Part One", ListedUtc = DateTime.UtcNow, DetailsUtc = DateTime.UtcNow });
-            db.ComicVineFileStates.Add(new ComicVineFileStateEntity { FilePath = file.FilePath, IssueId = 101, AppliedUtc = DateTime.UtcNow });
-            await db.SaveChangesAsync();
-        }
+        file.Metadata.ComicVineIssueMatchedByName = true;
 
         _search.Setup(s => s.SearchVolumesAsync("Batman", It.IsAny<CancellationToken>())).ReturnsAsync(
             [new ExternalSeriesMetadata { CanonicalTitle = "Batman", StartYear = 2011, Publisher = "DC Comics", SourceId = "42721", TotalChapters = 52 }]);
@@ -629,7 +643,7 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
 
         Assert.Equal(1, summary.Filled);
         var write = Assert.Single(_writes);
-        Assert.Equal((4201, true), (write.Fill.ComicVineIssueId!.Value, write.Fill.ReplacesComicVineIssueId));
+        Assert.Equal((4201, true, true), (write.Fill.ComicVineIssueId!.Value, write.Fill.ReplacesComicVineIssueId, write.Fill.ComicVineIssueMatchedByName));
         _client.Verify(c => c.GetIssueAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -701,6 +715,7 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
 
         Assert.Equal(1, summary.Filled);
         Assert.Equal("Knightfall", Assert.Single(_writes).Metadata.Title);
+        Assert.True(Assert.Single(_writes).Fill.ComicVineIssueMatchedByName);
         // One search page, two list pages, one issue list, one issue's details.
         Assert.Equal(1 + 2 + 1 + 1, summary.Requests);
         _search.Verify(s => s.ListVolumesNamedAsync("Batman", 5, It.IsAny<CancellationToken>()), Times.Once);

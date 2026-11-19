@@ -96,6 +96,13 @@ public class ComicMetadata
     /// the archive on every scan; null when the tags name none, or name two different issues.
     /// </summary>
     public int? ComicVineIssueId { get; set; }
+
+    /// <summary>
+    /// True when <see cref="ComicVineIssueId"/> is this application's own record of a name match
+    /// (see <see cref="Utilities.ComicVineTagId.NameMatchMarker"/>) rather than a tagger's id. Read
+    /// from the archive on every scan.
+    /// </summary>
+    public bool ComicVineIssueMatchedByName { get; set; }
     public List<string> Authors { get; set; } = new();
     public List<string> Tags { get; set; } = new();
     public bool IsUserEdited { get; set; }
@@ -118,6 +125,7 @@ public class ComicMetadata
             Format = this.Format,
             VolumeYear = this.VolumeYear,
             ComicVineIssueId = this.ComicVineIssueId,
+            ComicVineIssueMatchedByName = this.ComicVineIssueMatchedByName,
             Authors = new List<string>(this.Authors),
             Tags = new List<string>(this.Tags),
             IsUserEdited = this.IsUserEdited,

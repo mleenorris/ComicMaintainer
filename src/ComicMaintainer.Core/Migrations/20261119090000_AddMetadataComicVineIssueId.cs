@@ -17,11 +17,16 @@ namespace ComicMaintainer.Core.Migrations
                 nullable: true);
 
             migrationBuilder.AddColumn<bool>(
-                name: "FromTag",
+                name: "Metadata_ComicVineIssueMatchedByName",
+                table: "ComicFiles",
+                type: "INTEGER",
+                nullable: true);
+
+            migrationBuilder.AddColumn<int>(
+                name: "RejectedTagId",
                 table: "ComicVineFileStates",
                 type: "INTEGER",
-                nullable: false,
-                defaultValue: false);
+                nullable: true);
 
             // Every archive's tags are read again by the background scan, so the ComicVine issue
             // they name is stored for files scanned before this column existed.
@@ -32,8 +37,12 @@ namespace ComicMaintainer.Core.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropColumn(
-                name: "FromTag",
+                name: "RejectedTagId",
                 table: "ComicVineFileStates");
+
+            migrationBuilder.DropColumn(
+                name: "Metadata_ComicVineIssueMatchedByName",
+                table: "ComicFiles");
 
             migrationBuilder.DropColumn(
                 name: "Metadata_ComicVineIssueId",

@@ -16,6 +16,8 @@ public class ComicVineTagIdTests
     [InlineData("Tagged with ComicTagger 1.6.0 using info from Metron on 2024-01-01. [Issue ID 4242]", null, null)]
     [InlineData("Tagged with ComicTagger 1.6.0 using info from Comic Vine on 2024-01-01. [Issue ID 4242]", null, 4242)]
     [InlineData("Tagged with ComicTagger 1.6.0 using info from Grand Comics Database. [Issue ID 4242] [CVDB5]", null, 5)]
+    // The source is the one ComicTagger names, not "comicvine" said elsewhere.
+    [InlineData("Tagged with ComicTagger 1.6.0 using info from Metron on 2024-01-01. [Issue ID 4242] Also on comicvine.", null, null)]
     // The issue's page, in Web or in the notes.
     [InlineData(null, "https://comicvine.gamespot.com/batman-1-i-am-gotham-part-one/4000-543101/", 543101)]
     [InlineData(null, "http://www.comicvine.com/batman-1/4000-99/", 99)]
@@ -58,7 +60,36 @@ public class ComicVineTagIdTests
     [InlineData("Tagged using info from Metron. [Issue ID 999]", true, "Tagged using info from Metron. [Issue ID 999] [CVDB12345]")]
     public void WithIssueId_RecordsTheIdAndKeepsTheNotes(string? notes, bool replace, string expected)
     {
-        Assert.Equal(expected, ComicVineTagId.WithIssueId(notes, 12345, replace));
+        Assert.Equal(expected, ComicVineTagId.WithIssueId(notes, 12345, replace, matchedByName: false));
+    }
+
+    [Theory]
+    // A name match is marked as the app's own, which survives in the archive.
+    [InlineData(null, false, true, "[CVDB12345] (matched by name in ComicMaintainer)")]
+    [InlineData("Scanned.", false, true, "Scanned. [CVDB12345] (matched by name in ComicMaintainer)")]
+    // A tagger's id that is kept gets no marker.
+    [InlineData("[CVDB999]", false, true, "[CVDB999]")]
+    // Replacing a tagger's id with a name match marks it; replacing an own match keeps one marker.
+    [InlineData("Tagged. [CVDB999]", true, true, "Tagged. [CVDB12345] (matched by name in ComicMaintainer)")]
+    [InlineData("[CVDB999] (matched by name in ComicMaintainer)", true, true, "[CVDB12345] (matched by name in ComicMaintainer)")]
+    // A tagger's id replacing an own match drops the marker.
+    [InlineData("[CVDB999] (matched by name in ComicMaintainer)", true, false, "[CVDB12345]")]
+    public void WithIssueId_MarksTheAppsOwnMatches(string? notes, bool replace, bool matchedByName, string expected)
+    {
+        var recorded = ComicVineTagId.WithIssueId(notes, 12345, replace, matchedByName);
+
+        Assert.Equal(expected, recorded);
+        Assert.Equal(expected.Contains(ComicVineTagId.NameMatchMarker, StringComparison.Ordinal), ComicVineTagId.IsNameMatch(recorded));
+    }
+
+    [Fact]
+    public void IsNameMatch_NeedsTheMarkerAndAComicVineId()
+    {
+        Assert.False(ComicVineTagId.IsNameMatch("(matched by name in ComicMaintainer)"));
+        Assert.False(ComicVineTagId.IsNameMatch("[CVDB5]"));
+        Assert.False(ComicVineTagId.IsNameMatch(null));
+        Assert.True(ComicVineTagId.IsNameMatch("[CVDB5] (Matched by name in ComicMaintainer)"));
+        Assert.True(ComicInfoXml.Read(XDocument.Parse("<ComicInfo><Notes>[CVDB5] (matched by name in ComicMaintainer)</Notes></ComicInfo>"))!.ComicVineIssueMatchedByName);
     }
 
     [Theory]
@@ -131,9 +162,14 @@ public class ComicVineTagIdTests
         var issue = new ComicMaintainer.Core.Data.ComicVineIssueEntity { Id = 12345, VolumeId = 1, IssueNumber = "1", SiteUrl = "https://comicvine.gamespot.com/batman-1/4000-12345/" };
         var tagged = new ComicMetadata { Series = "Batman", Issue = "1", Title = "A Story", ComicVineIssueId = 999 };
 
-        var plain = ComicVineIssueFill.For(new ComicMetadata { Series = "Batman", Issue = "1", Title = "A Story" }, issue, null).Fill;
-        Assert.Equal((12345, false), (plain.ComicVineIssueId!.Value, plain.ReplacesComicVineIssueId));
-        Assert.False(ComicVineIssueFill.For(tagged, issue, null).Fill.ReplacesComicVineIssueId);
-        Assert.True(ComicVineIssueFill.For(tagged, issue, null, replacesTaggedIssue: true).Fill.ReplacesComicVineIssueId);
+        var plain = ComicVineIssueFill.For(new ComicMetadata { Series = "Batman", Issue = "1", Title = "A Story" }, issue, null, matchedByName: true).Fill;
+        Assert.Equal((12345, false, true), (plain.ComicVineIssueId!.Value, plain.ReplacesComicVineIssueId, plain.ComicVineIssueMatchedByName));
+
+        // A kept tag naming another issue: nothing is written that would name a second one.
+        var kept = ComicVineIssueFill.For(tagged, issue, null, matchedByName: true).Fill;
+        Assert.Equal((null, null, false, false), (kept.ComicVineIssueId, kept.Web, kept.ReplacesComicVineIssueId, kept.ComicVineIssueMatchedByName));
+
+        var replaced = ComicVineIssueFill.For(tagged, issue, null, replacesTaggedIssue: true, matchedByName: true).Fill;
+        Assert.Equal((12345, true), (replaced.ComicVineIssueId!.Value, replaced.ReplacesComicVineIssueId));
     }
 }

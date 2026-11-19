@@ -92,9 +92,10 @@ public sealed class FileStoreServiceArchiveMetadataTests : IAsyncLifetime
         var candidate = Assert.Single(await _store.GetFilesNeedingMetadataScanAsync(0, 10));
         var tagged = Archive("Saga", "1", "Chapter One");
         tagged.ComicVineIssueId = 12345;
+        tagged.ComicVineIssueMatchedByName = true;
 
         Assert.True(await _store.RecordScannedArchiveMetadataAsync(candidate, tagged));
-        Assert.Equal(12345, (await RowAsync(path)).Metadata!.ComicVineIssueId);
+        Assert.Equal((12345, true), ((await RowAsync(path)).Metadata!.ComicVineIssueId, (await RowAsync(path)).Metadata!.ComicVineIssueMatchedByName));
         Assert.Equal(12345, (await _store.GetFileAsync(path))!.Metadata!.ComicVineIssueId);
 
         // A write whose tags no longer name it clears it.

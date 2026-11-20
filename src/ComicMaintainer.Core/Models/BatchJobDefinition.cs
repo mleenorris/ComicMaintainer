@@ -24,9 +24,14 @@ public readonly record struct BatchItemResult(bool Success, string? Error = null
 /// Optional follow-up work after the per-item loop, before the job is marked
 /// <see cref="JobStatus.Completed"/>. An exception from it fails the job.
 /// </param>
+/// <param name="Sequential">
+/// True to run the items one at a time, in the order they were given, for work where one item
+/// depends on the one before it (each takes a name the one before it freed).
+/// </param>
 public sealed record BatchJobDefinition(
     string OperationName,
     string ActionDescription,
     Func<string, CancellationToken, Task<BatchItemResult>> ItemOperation,
     string FailureMessage,
-    Func<IBatchJobReport, CancellationToken, Task>? PostLoopAsync = null);
+    Func<IBatchJobReport, CancellationToken, Task>? PostLoopAsync = null,
+    bool Sequential = false);

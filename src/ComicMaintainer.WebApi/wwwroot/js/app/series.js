@@ -1422,10 +1422,10 @@
         }
 
         // What the shift makes of one issue number: the new number, or null when it is not a
-        // plain number or would fall below 0 (the server leaves that file as it is).
+        // plain number or would fall below 0 (that issue is left out of the shift).
         function shiftedIssueNumber(issue, offset) {
             const text = typeof issue === 'string' ? issue.trim() : (typeof issue === 'number' ? String(issue) : '');
-            if (!/^\d+(\.\d+)?$/.test(text)) return null;
+            if (!/^(\d+\.?\d*|\.\d+)$/.test(text)) return null;
             const decimals = (text.split('.')[1] || '').length;
             const shifted = Number((Number(text) + offset).toFixed(decimals));
             return shifted < 0 ? null : String(shifted);
@@ -1442,10 +1442,12 @@
                 const name = path.split('/').pop();
                 const number = issue ? issue.issue : null;
                 const shifted = offset === null || !issue ? null : shiftedIssueNumber(number, offset);
-                return { name, number, shifted };
+                return { path, name, number, shifted };
             }).sort((a, b) => (parseFloat(a.number) || 0) - (parseFloat(b.number) || 0));
-            const valid = offset !== null && rows.some(row => row.shifted !== null);
-            apply.disabled = !valid;
+            // Only the issues of this series the shift moves are sent: one picked elsewhere,
+            // or whose number cannot move, is left as it is.
+            current.shifting = offset === null ? [] : rows.filter(row => row.shifted !== null).map(row => row.path);
+            apply.disabled = current.shifting.length === 0;
             renderHtml(list, rows.map(row => html`
                 <div class="shift-issues-row">
                     <span class="shift-issues-name">${row.name}</span>
@@ -1464,14 +1466,14 @@
         async function applyShiftIssues() {
             const current = shiftIssuesCurrent;
             const offset = shiftIssuesOffset();
-            if (!current || offset === null) return;
+            if (!current || offset === null || !current.shifting || !current.shifting.length) return;
             if (!jobProgress.canStartJob()) return;
             closeShiftIssuesModal();
             showProgressModal('Shifting issue numbers...');
             try {
                 const data = await apiFetch('/api/jobs/shift-issues-selected', {
                     method: 'POST',
-                    body: { Files: current.files, IssueOffset: offset },
+                    body: { Files: current.shifting, IssueOffset: offset },
                     errorMessage: 'Failed to start shifting issue numbers'
                 });
                 showMessage(`Started shifting the issue numbers of ${data.total_items} issue(s)`, 'info');

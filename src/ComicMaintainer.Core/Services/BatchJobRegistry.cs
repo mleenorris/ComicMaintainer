@@ -378,7 +378,8 @@ public sealed class BatchJobRegistry : IBatchJobRegistry, IDisposable
         var parallelOptions = new ParallelOptions
         {
             CancellationToken = cancellationToken,
-            MaxDegreeOfParallelism = _maxWorkers
+            // One at a time takes the items in the order they were given.
+            MaxDegreeOfParallelism = definition.Sequential ? 1 : _maxWorkers
         };
 
         await Parallel.ForEachAsync(

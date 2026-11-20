@@ -375,12 +375,18 @@ Duplicates**.
 
 Some downloaders number a run from the wrong start, so every issue is off by the same amount (The Amazing Spider-Man
 files where issue 3 is really #1). On the series page, tick the issues, choose **Shift Issue Numbers**, and enter how far
-to move them: `-2` makes issue 3 issue 1. The dialog shows each issue's number before and after. The shift runs as a job:
+to move them: `-2` makes issue 3 issue 1. The dialog shows each issue's number before and after; an issue whose number
+is not plain (`1.MU`, `Annual 1`) or would fall below 0 is left out.
 
-- each new number is written and locked, so processing keeps it, and a generated title (`Chapter 3`) follows it;
-- the files are then renamed one at a time, the lowest new number first when the numbers go down (the highest first
-  when they go up), so each takes a name the one before it freed instead of being left as its duplicate;
-- a number that is not plain (`1.MU`, `Annual 1`) or would fall below 0 is left as it is, and the job lists it.
+Nothing changes unless every issue sent can move: no two may end on one number of one volume, and none may end on a
+number an issue left out of the shift keeps in that folder (shift it too, or leave the one that would land on it out).
+The reasons are shown and nothing is written. Otherwise the shift runs as a job, one issue at a time, the lowest new
+number first when the numbers go down (the highest first when they go up), so each takes a name the one before it freed:
+
+- its new number is written and locked, so processing keeps it, and a generated title (`Chapter 3`) follows it;
+- the file is renamed to match, unless renaming is turned off in the settings;
+- if one fails, the issues after it are skipped and left as they were, so none is left as another's duplicate. A
+  cancelled job leaves the issues it reached shifted and renamed, and the rest untouched.
 
 ### How the series name is chosen
 

@@ -29,7 +29,11 @@ public partial class ComicProcessorService
     /// <param name="FailureReason">
     /// Why not, when that can be told to users: see <see cref="MetadataWriteResult.FailureReason"/>.
     /// </param>
-    private readonly record struct ArchiveMetadataRead(ComicMetadata? Metadata, string? FailureReason = null);
+    /// <param name="FromComicInfo">
+    /// True when the values come from the archive's ComicInfo.xml; false when it has none and
+    /// they were taken from the file and folder names.
+    /// </param>
+    private readonly record struct ArchiveMetadataRead(ComicMetadata? Metadata, string? FailureReason = null, bool FromComicInfo = false);
 
     /// <summary>Like <see cref="GetMetadataAsync"/>, keeping the reason a read failed.</summary>
     private async Task<ArchiveMetadataRead> ReadMetadataAsync(string filePath, CancellationToken cancellationToken)
@@ -94,7 +98,7 @@ public partial class ComicProcessorService
                 ? metadata
                 : ApplyPendingDatabaseEdit(metadata, PendingEditOf(tracked));
             effective.VolumeYear = tracked?.Metadata?.VolumeYear;
-            return new ArchiveMetadataRead(effective);
+            return new ArchiveMetadataRead(effective, FromComicInfo: comicInfoEntry != null);
         }
         catch (ArchiveLimitExceededException ex)
         {

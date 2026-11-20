@@ -68,7 +68,7 @@ test('the preview shows each selected issue before and after, and Shift waits fo
     assert.equal(page.$('#shiftIssuesModal').classList.contains('active'), false);
 });
 
-test('Shift starts the job for the selected issues and follows it', async (t) => {
+test('Shift starts the job for the issues it moves, and follows it', async (t) => {
     const page = await h.bootSeriesDetail(t, {
         issues,
         routes: {
@@ -76,7 +76,9 @@ test('Shift starts the job for the selected issues and follows it', async (t) =>
             [`GET /api/jobs/${h.JOB_ID}`]: h.jobStatus({ total_items: 2 })
         }
     });
-    await openWith(page, [ISSUE_3, ISSUE_4]);
+    // Selected elsewhere, or a tie-in whose number cannot move: left out of the request.
+    page.run("selectedFiles.add('Other/Other 001.cbz')");
+    await openWith(page, [ISSUE_3, ISSUE_4, TIE_IN]);
     page.input('#shiftIssuesOffset', '-2');
 
     page.click('#shiftIssuesApply');

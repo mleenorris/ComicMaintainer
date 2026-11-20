@@ -124,13 +124,25 @@ public interface IComicProcessorService
     Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, bool forceReprocess, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Moves the issue number of each file by <paramref name="offset"/> as a batch job, for
-    /// issues a downloader numbered from the wrong start (issue 3 that is #1: an offset of -2).
-    /// Each new number is written and locked as the user's edit (a generated "Chapter N" title
-    /// follows it), then the files are renamed one at a time in an order that frees each name
-    /// before it is taken. A number that is not plain, or would fall below 0, fails that file.
+    /// Checks that the issue numbers of the files can be moved by <paramref name="offset"/>
+    /// (see <see cref="ShiftIssueNumbersAsync"/>), without changing anything: the problems that
+    /// stop it, and the order the files are shifted in.
     /// </summary>
     /// <param name="offset">Not 0, at most <c>ComicProcessorService.MaxIssueNumberShift</c> either way.</param>
+    Task<IssueShiftPlan> PlanIssueShiftAsync(IEnumerable<string> filePaths, int offset, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Moves the issue number of each file by <paramref name="offset"/> as a batch job, for
+    /// issues a downloader numbered from the wrong start (issue 3 that is #1: an offset of -2).
+    /// Nothing is written unless every file can move (see <see cref="PlanIssueShiftAsync"/>):
+    /// each has a plain number that stays at or above 0, no two end on one number, and no file
+    /// left out already has one of the new numbers. The files are then shifted one at a time,
+    /// each into a name the one before it freed: its new number written and locked as the user's
+    /// edit (a generated "Chapter N" title follows it), and the file renamed to match unless
+    /// renaming is off. When one fails, the rest are skipped, so no file takes a name still in use.
+    /// </summary>
+    /// <param name="offset">Not 0, at most <c>ComicProcessorService.MaxIssueNumberShift</c> either way.</param>
+    /// <exception cref="IssueShiftRefusedException">The files cannot all be shifted; nothing was written.</exception>
     Task<Guid> ShiftIssueNumbersAsync(IEnumerable<string> filePaths, int offset, CancellationToken cancellationToken = default);
 
     /// <summary>

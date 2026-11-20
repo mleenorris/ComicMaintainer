@@ -390,6 +390,24 @@ public class JobsControllerBatchTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task ShiftIssues_ThatCannotAllMove_IsRefusedWithTheReasons()
+    {
+        _processor.Setup(p => p.ShiftIssueNumbersAsync(It.IsAny<IEnumerable<string>>(), -2, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new IssueShiftRefusedException(new[] { "a.cbz: #1 would fall below 0", "b.cbz: it has no issue number" }));
+
+        var result = await _controller.StartBatchJob("shift-issues", "selected", new JobsController.BatchJobRequest
+        {
+            Files = new() { "/c/a.cbz", "/c/b.cbz" },
+            IssueOffset = -2
+        });
+
+        Assert.Equal("a.cbz: #1 would fall below 0 (and 1 more)", ErrorOf(result));
+        var body = Assert.IsType<BadRequestObjectResult>(result.Result).Value!;
+        Assert.Equal(new[] { "a.cbz: #1 would fall below 0", "b.cbz: it has no issue number" },
+            (IReadOnlyList<string>)body.GetType().GetProperty("problems")!.GetValue(body)!);
+    }
+
     [Theory]
     [InlineData(null, "No issue number shift specified")]
     [InlineData(0, "No issue number shift specified")]

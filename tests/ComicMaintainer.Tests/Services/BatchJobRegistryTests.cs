@@ -65,6 +65,41 @@ public sealed class BatchJobRegistryTests
         await registry.WaitForCompletionAsync(jobId).WaitAsync(Timeout);
     }
 
+    [Fact]
+    public async Task ASequentialJob_RunsItsItemsOneAtATime_InTheOrderGiven()
+    {
+        var registry = TestServices.CreateBatchJobRegistry(
+            new TestOptionsMonitor<AppSettings>(new AppSettings { MaxWorkers = 4 }),
+            NullLogger<BatchJobRegistry>.Instance);
+        var order = new List<string>();
+        var running = 0;
+        var mostAtOnce = 0;
+        var definition = new BatchJobDefinition(
+            "TestJob",
+            "testing",
+            async (item, _) =>
+            {
+                var now = Interlocked.Increment(ref running);
+                lock (order)
+                {
+                    mostAtOnce = Math.Max(mostAtOnce, now);
+                    order.Add(item);
+                }
+
+                await Task.Delay(5);
+                Interlocked.Decrement(ref running);
+                return true;
+            },
+            "Item failed",
+            Sequential: true);
+        var items = Enumerable.Range(0, 12).Select(i => $"/c/{11 - i}.cbz").ToArray();
+
+        await registry.WaitForCompletionAsync(registry.StartJob(definition, items)).WaitAsync(Timeout);
+
+        Assert.Equal(1, mostAtOnce);
+        Assert.Equal(items, order);
+    }
+
     // ---- waiting for a job ---------------------------------------------------------------
 
     [Fact]

@@ -221,7 +221,16 @@ public class JobsController : ControllerBase
             return Ok(new BatchJobResponse(Guid.Empty.ToString(), 0));
         }
 
-        var jobId = await batchOperation.Start(new BatchInvocation(_processor, files, request, forceReprocess || request.ForceReprocess));
+        Guid jobId;
+        try
+        {
+            jobId = await batchOperation.Start(new BatchInvocation(_processor, files, request, forceReprocess || request.ForceReprocess));
+        }
+        catch (IssueShiftRefusedException refused)
+        {
+            // Checked before anything is written: the files cannot all be shifted.
+            return BadRequest(new { error = refused.Message, problems = refused.Problems });
+        }
 
         _logger.LogInformation(
             LoggingHelper.WithWebsitePrefix("Batch {Operation}-{Scope}: job {JobId} started for {TotalFiles} file(s)"),

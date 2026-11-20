@@ -116,10 +116,6 @@ public class SeriesMetadataCacheRecord
     [JsonPropertyName("origin")]
     public string? Origin { get; set; }
 
-    /// <summary>See <see cref="ExternalSeriesMetadata.Publisher"/>.</summary>
-    [JsonPropertyName("publisher")]
-    public string? Publisher { get; set; }
-
     /// <summary>
     /// Monotonic version bumped on every cache mutation that should
     /// invalidate stale per-file metadata stamps. Surfaced so external

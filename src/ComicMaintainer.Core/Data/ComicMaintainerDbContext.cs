@@ -227,7 +227,6 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.SiteUrl).HasMaxLength(ProviderMetadataText.MaxSiteUrlLength);
             entity.Property(e => e.PublicationStatus).HasMaxLength(32);
             entity.Property(e => e.Origin).HasMaxLength(ProviderMetadataText.MaxOriginLength);
-            entity.Property(e => e.Publisher).HasMaxLength(ProviderMetadataText.MaxPublisherLength);
             // Aliases and UserAliases are stored as newline-delimited strings to
             // keep the entity model portable across providers without requiring
             // additional join tables.
@@ -812,9 +811,6 @@ public class SeriesMetadataCacheEntity
 
     /// <summary>Primary language tag the series was first published in, null until a lookup reports it.</summary>
     public string? Origin { get; set; }
-
-    /// <summary>The series' publisher as its provider lists it (ComicVine does), null until a lookup reports it.</summary>
-    public string? Publisher { get; set; }
 }
 
 /// <summary>

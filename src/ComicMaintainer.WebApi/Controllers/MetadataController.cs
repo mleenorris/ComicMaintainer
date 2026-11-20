@@ -792,7 +792,6 @@ public class MetadataController : ControllerBase
                     PublicationStatus = request.PublicationStatus,
                     TotalChapters = request.TotalChapters,
                     Origin = request.Origin,
-                    Publisher = request.Publisher,
                     // Preserve provider-supplied language tags so the cached
                     // record's LocalizedTitles list keeps per-alias language
                     // info; without this the cache falls back to untagged
@@ -1072,9 +1071,6 @@ public class MetadataController : ControllerBase
 
         /// <summary>The candidate's original language (<c>origin</c> of a search result).</summary>
         public string? Origin { get; set; }
-
-        /// <summary>The candidate's publisher (<c>publisher</c> of a search result).</summary>
-        public string? Publisher { get; set; }
 
         /// <summary>
         /// Optional language-tagged titles to preserve from the candidate

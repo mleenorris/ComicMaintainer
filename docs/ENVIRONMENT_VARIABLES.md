@@ -122,13 +122,13 @@ These are read at startup. An empty variable keeps the value from the `AutheliaS
 | `MANGADEX_BASE_URL` | `https://api.mangadex.org` | URL | MangaDex API address | `mangadex_base_url` |
 | `ENABLE_ANILIST_METADATA` | `false` | Flag | Turns on AniList lookups | `enable_anilist_metadata` |
 | `ANILIST_BASE_URL` | `https://graphql.anilist.co` | URL | AniList API address | `anilist_base_url` |
-| `FILL_COMICINFO_FROM_PROVIDERS` | `true` | Flag | When a file is normalized, fills its empty `Summary`, `Genre`, `Web`, `Count`, `Manga` and `Publisher` fields from the series' provider match. See below | `fill_comicinfo_from_providers` |
+| `FILL_COMICINFO_FROM_PROVIDERS` | `true` | Flag | When a file is normalized, fills its empty `Summary`, `Genre`, `Web`, `Count` and `Manga` fields from the series' provider match. See below | `fill_comicinfo_from_providers` |
 | `MANGADEX_REQUESTS_PER_SECOND` | `4` | 1 or more | Client-side pace for MangaDex | No field |
 | `ANILIST_REQUESTS_PER_MINUTE` | `28` | 1 or more | Client-side pace for AniList | No field |
 | `COMICVINE_REQUESTS_PER_HOUR` | `180` | 1 or more | Hourly budget for ComicVine. Requests are also spaced at least 1 second apart. Once spent, ComicVine is skipped until the hour frees up | No field |
 | `METADATA_PROVIDER_TIMEOUT_SECONDS` | `15` | 1 or more; treated as 1 to 30 | Time allowed for one provider request | No field |
 
-**About the ComicInfo fill.** It runs as part of the normalize step, so it does nothing while normalize is off. A value already in a file, or a `Summary` or `Publisher` locked by a user, is never changed. Existing files change only when they are next processed. Because filling writes to the file, a CBR, RAR or ZIP is converted to CBZ at that point, unless [conversion](#settings-without-a-named-variable) is off.
+**About the ComicInfo fill.** It runs as part of the normalize step, so it does nothing while normalize is off. A value already in a file, or a `Summary` locked by a user, is never changed. Existing files change only when they are next processed. Because filling writes to the file, a CBR, RAR or ZIP is converted to CBZ at that point, unless [conversion](#settings-without-a-named-variable) is off.
 
 ## Series images
 

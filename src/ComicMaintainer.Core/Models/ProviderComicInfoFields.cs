@@ -27,7 +27,10 @@ namespace ComicMaintainer.Core.Models;
 /// True when the tags named another ComicVine issue, which the file was not filled from: its id
 /// in Notes, and its page in Web, are replaced by this issue's.
 /// </param>
-/// <param name="Publisher">The publisher: the series' (ComicVine lists one per volume), or the issue's volume's.</param>
+/// <param name="Publisher">
+/// The publisher ComicVine lists for the issue's volume. Never the series' match's: several volumes
+/// of one name share that match, and each may have another publisher.
+/// </param>
 /// <param name="ComicVineIssueMatchedByName">
 /// True when the issue was matched by the series' names: the id written is marked as this
 /// application's own (see <see cref="ComicVineTagId.NameMatchMarker"/>).
@@ -65,7 +68,6 @@ public sealed record ProviderComicInfoFields(
             genres.Count == 0 ? null : string.Join(", ", genres),
             ProviderMetadataText.HttpUrl(record.SiteUrl),
             finished && record.TotalChapters > 0 ? record.TotalChapters : null,
-            string.Equals(record.Origin, JapaneseOrigin, StringComparison.OrdinalIgnoreCase) ? MangaRightToLeft : null,
-            Publisher: ProviderMetadataText.Publisher(record.Publisher));
+            string.Equals(record.Origin, JapaneseOrigin, StringComparison.OrdinalIgnoreCase) ? MangaRightToLeft : null);
     }
 }

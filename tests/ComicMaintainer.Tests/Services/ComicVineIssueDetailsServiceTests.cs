@@ -64,7 +64,16 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         _client.Setup(c => c.GetIssueDetailsAsync(102, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ComicVineIssueDetails(102, [], [new ComicVineArcReference(7, "I Am Gotham"), new ComicVineArcReference(8, "Night of the Monster Men")]));
         _processor.Setup(p => p.WriteProviderDetailsAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<ProviderComicInfoFields>(), It.IsAny<CancellationToken>()))
-            .Callback((string path, ComicMetadata metadata, ComicMetadataFieldFlags fields, ProviderComicInfoFields fill, CancellationToken _) => _writes.Add((path, metadata, fields, fill)))
+            .Callback((string path, ComicMetadata metadata, ComicMetadataFieldFlags fields, ProviderComicInfoFields fill, CancellationToken _) =>
+            {
+                _writes.Add((path, metadata, fields, fill));
+
+                // The archive now holds the publisher filled into an empty element, and the store reads it back.
+                if (fill.Publisher is not null && _files.FirstOrDefault(f => f.FilePath == path)?.Metadata is { } stored && string.IsNullOrWhiteSpace(stored.Publisher))
+                {
+                    stored.Publisher = fill.Publisher;
+                }
+            })
             .ReturnsAsync((string path, ComicMetadata _, ComicMetadataFieldFlags _, ProviderComicInfoFields _, CancellationToken _) => new MetadataWriteResult(MetadataWriteOutcome.Written, path));
     }
 
@@ -139,6 +148,27 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         Assert.Empty(_writes);
         Assert.Empty(_search.Invocations);
         Assert.Empty(_client.Invocations);
+    }
+
+    [Fact]
+    public async Task RunAsync_AFileFilledBeforeItsPublisherWasKnown_GetsItOnce()
+    {
+        var file = AddFile("/c/Batman/Batman (2016) - Chapter 0001.cbz", "1");
+        await CreateService().RunAsync(null, 20);
+        file.Metadata!.Publisher = null;
+        _writes.Clear();
+
+        var again = await CreateService().RunAsync(null, 20);
+
+        Assert.Equal("DC Comics", Assert.Single(_writes).Fill.Publisher);
+        Assert.Equal(1, again.Filled);
+
+        // A publisher of the user's, or a locked empty one, is left as it is and asks for no write.
+        _writes.Clear();
+        file.Metadata.Publisher = null;
+        file.Metadata.UserLockedFieldsMask = (long)ComicMetadataFieldFlags.Publisher;
+        await CreateService().RunAsync(null, 20);
+        Assert.Empty(_writes);
     }
 
     [Fact]

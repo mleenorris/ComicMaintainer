@@ -512,6 +512,69 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
         Assert.Equal(expected, ReadComicInfo(path).Element("Number")?.Value);
     }
 
+    [Theory]
+    [InlineData("Issue #40.cbz", "Issue #40", "40")]
+    [InlineData("#6.cbz", "#6", "6")]
+    [InlineData("Green Lantern - New Guardians - Chapter 0040.cbz", "Chapter 40", "40")]
+    public async Task Normalize_ANumberTheFileNameAndTitleBothContradict_IsCorrected(string fileName, string title, string expected)
+    {
+        // A downloader numbered the issues by their place in its list (after an Issue #0).
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("Green Lantern - New Guardians", fileName,
+            $"<ComicInfo><Series>Green Lantern - New Guardians</Series><Number>41</Number><Title>{title}</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var info = ReadComicInfo(path);
+        Assert.Equal((expected, $"Chapter {expected}"), (info.Element("Number")?.Value, info.Element("Title")?.Value));
+    }
+
+    [Theory]
+    [InlineData("Issue #40.cbz", "Issue #39")] // the title names another number
+    [InlineData("Issue #40.cbz", "The Last Lantern")] // a real title
+    [InlineData("Issue #40.cbz", "")] // no title to agree
+    [InlineData("40.cbz", "Issue #40")] // the file name marks no number
+    [InlineData("Issue #41.cbz", "Issue #41")] // they agree with the tags
+    public async Task Normalize_ANumberOnlyOneOtherSourceContradicts_IsKept(string fileName, string title)
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("Green Lantern - New Guardians", fileName,
+            $"<ComicInfo><Series>Green Lantern - New Guardians</Series><Number>41</Number><Title>{title}</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        Assert.Equal("41", ReadComicInfo(path).Element("Number")?.Value);
+    }
+
+    [Fact]
+    public async Task Normalize_ALockedNumberTheFileNameAndTitleContradict_IsKept()
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("Green Lantern - New Guardians", "Issue #40.cbz",
+            "<ComicInfo><Series>Green Lantern - New Guardians</Series><Number>41</Number><Title>Issue #40</Title></ComicInfo>");
+        _fileStore.Setup(f => f.GetFileAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(new ComicFile
+        {
+            FilePath = path,
+            Metadata = new ComicMetadata { Issue = "41", IsUserEdited = true, UserLockedFieldsMask = (long)ComicMetadataFieldFlags.Issue }
+        });
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        Assert.Equal("41", ReadComicInfo(path).Element("Number")?.Value);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_ANumberTheFileNameAndTitleContradict_IsRenamedByTheirNumber()
+    {
+        var path = WriteArchive("Green Lantern - New Guardians", "Issue #40.cbz",
+            "<ComicInfo><Series>Green Lantern - New Guardians</Series><Number>41</Number><Title>Issue #40</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var renamed = Directory.GetFiles(Path.Join(_root, "Green Lantern - New Guardians")).Single();
+        Assert.EndsWith("Chapter 0040.cbz", renamed);
+    }
+
     [Fact]
     public async Task Normalize_ALockedIssueThatRepeatsTheVolume_IsKept()
     {

@@ -197,8 +197,8 @@ public partial class ComicProcessorService
             return false;
         }
 
-        // A volume number a tagger put in <Number> is corrected from the file name (see IssueMistakenForVolumeAsync).
-        if (await IssueMistakenForVolumeAsync(metadata, filePath, cancellationToken) is not null)
+        // A <Number> a tagger got wrong is corrected from the file name (see CorrectedIssueAsync).
+        if (await CorrectedIssueAsync(metadata, filePath, cancellationToken) is not null)
         {
             return false;
         }
@@ -327,6 +327,46 @@ public partial class ComicProcessorService
     private async Task<bool> IsFieldLockedAsync(string filePath, ComicMetadataFieldFlags field, CancellationToken cancellationToken)
         => await GetTrackedFileAsync(filePath, cancellationToken) is { Metadata: { } stored }
            && ((ComicMetadataFieldFlags)stored.UserLockedFieldsMask).HasFlag(field);
+
+    /// <summary>
+    /// The issue number to write instead of a <c>&lt;Number&gt;</c> the file name shows is wrong
+    /// (see <see cref="IssueMistakenForVolumeAsync"/> and <see cref="IssueNamedByFileNameAndTitleAsync"/>),
+    /// or null when the tags are trusted.
+    /// </summary>
+    private async Task<string?> CorrectedIssueAsync(ComicMetadata metadata, string filePath, CancellationToken cancellationToken)
+        => await IssueMistakenForVolumeAsync(metadata, filePath, cancellationToken)
+           ?? await IssueNamedByFileNameAndTitleAsync(metadata, filePath, cancellationToken);
+
+    /// <summary>
+    /// The issue number the file name and the title both name, when <c>&lt;Number&gt;</c> says
+    /// another: some downloaders number an issue by its place in the list, so <c>Issue #40.cbz</c>
+    /// titled <c>Issue #40</c> comes tagged Number 41 (after an <c>Issue #0</c>), and would be
+    /// renamed Chapter 0041. It is taken only when the file name marks its number (<c>Issue
+    /// #40</c>, <c>#40</c>, <c>Chapter 40</c>, see <see cref="IssueNumberParser.ParseMarked"/>), the
+    /// title names nothing but an issue and marks the same number, and the user has not locked
+    /// the issue. An old file name in the title alone is not enough: the tags are trusted over it.
+    /// </summary>
+    /// <remarks>
+    /// Not for a title this application generated (<c>Chapter 41</c>): with its own file name it
+    /// always agrees, and only repeats an earlier <c>&lt;Number&gt;</c> that the user, ComicTagger
+    /// or another tool has since corrected. Nor for tags that name a ComicVine issue: its number
+    /// goes with the id, page and details they hold.
+    /// </remarks>
+    private async Task<string?> IssueNamedByFileNameAndTitleAsync(ComicMetadata metadata, string filePath, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(metadata.Issue)
+            || metadata.ComicVineIssueId is not null
+            || GeneratedChapterTitlePattern.IsMatch(metadata.Title ?? string.Empty)
+            || IssueNumberParser.ParseMarked(Path.GetFileNameWithoutExtension(filePath)) is not { } named
+            || IssueNumberParser.AreEquivalent(named, metadata.Issue.Trim())
+            || !IssueNumberParser.AreEquivalent(IssueNumberParser.ParseMarked(metadata.Title), named)
+            || !ComicVineIssueFill.IsPlaceholderTitle(metadata.Title, metadata.Series, named))
+        {
+            return null;
+        }
+
+        return await IsFieldLockedAsync(filePath, ComicMetadataFieldFlags.Issue, cancellationToken) ? null : named;
+    }
 
     /// <summary>
     /// The file name's issue number when the tags hold the volume's number as the issue: some
@@ -532,9 +572,9 @@ public partial class ComicProcessorService
             normalizedMetadata.Issue = AnnualIssue.IssueNumber(normalizedMetadata.Issue);
         }
 
-        if (await IssueMistakenForVolumeAsync(metadata, filePath, cancellationToken) is { } fromFileName)
+        if (await CorrectedIssueAsync(metadata, filePath, cancellationToken) is { } fromFileName)
         {
-            _logger.LogDebug("Replacing an issue number that repeats the volume with the file name's: {Before} -> {After}",
+            _logger.LogDebug("Replacing an issue number the file name shows is wrong: {Before} -> {After}",
                 LoggingHelper.SanitizeForLog(normalizedMetadata.Issue),
                 LoggingHelper.SanitizeForLog(fromFileName));
             normalizedMetadata.Issue = fromFileName;

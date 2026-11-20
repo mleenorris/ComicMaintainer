@@ -87,7 +87,8 @@ ComicVine knows each issue's title, cover date, summary, writers and story arcs.
 - a title that only names the issue, such as `Chapter 8`, `#8` or an old file name. A real title is kept;
 - a missing cover year, or the `1970` some downloaders write when they do not know it, and the cover month;
 - a missing summary, or one that is only the series' synopsis;
-- missing writers, and an empty Story Arc and Web link.
+- missing writers, and an empty Story Arc and Web link;
+- an empty publisher, with the one ComicVine lists for the issue's volume (once a series is linked to that volume).
 
 It also records which ComicVine issue the file was filled from: `[CVDB12345]` is added to `<Notes>`, the way ComicTagger
 writes it, and the issue's ComicVine page goes into `<Web>` when that is empty or still holds the series' ComicVine page.
@@ -515,8 +516,10 @@ empty from the series' match:
 | Web | The series' page on the provider's site |
 | Count | Total issues, only when the provider says the series is finished |
 | Manga | `YesAndRightToLeft`, only for Japanese origin |
+| Publisher | The publisher the provider lists (ComicVine does; AniList and MangaDex do not) |
 
-`LanguageISO` is never written. A value already in the file is never changed, and neither is a locked Summary. `Manga`
+`LanguageISO` is never written. A value already in the file is never changed, and neither is a locked Summary or
+Publisher. A series matched before this release has no publisher until its match is refreshed (**Refresh Metadata**). `Manga`
 set to `Unknown` and `Count` set to `-1` count as empty. Existing files change only when they are next processed. Values
 filled from a wrong match are not removed if you correct the match later.
 

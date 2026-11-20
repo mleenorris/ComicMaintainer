@@ -515,7 +515,7 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     [Theory]
     [InlineData("Issue #40.cbz", "Issue #40", "40")]
     [InlineData("#6.cbz", "#6", "6")]
-    [InlineData("Green Lantern - New Guardians - Chapter 0040.cbz", "Chapter 40", "40")]
+    [InlineData("Green Lantern - New Guardians - Issue 40.cbz", "Issue 40", "40")]
     public async Task Normalize_ANumberTheFileNameAndTitleBothContradict_IsCorrected(string fileName, string title, string expected)
     {
         // A downloader numbered the issues by their place in its list (after an Issue #0).
@@ -535,11 +535,25 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     [InlineData("Issue #40.cbz", "")] // no title to agree
     [InlineData("40.cbz", "Issue #40")] // the file name marks no number
     [InlineData("Issue #41.cbz", "Issue #41")] // they agree with the tags
+    // This application's own name and title, from before the number was corrected elsewhere.
+    [InlineData("Green Lantern - New Guardians - Chapter 0040.cbz", "Chapter 40")]
     public async Task Normalize_ANumberOnlyOneOtherSourceContradicts_IsKept(string fileName, string title)
     {
         _settings.WatcherEnableRename = false;
         var path = WriteArchive("Green Lantern - New Guardians", fileName,
             $"<ComicInfo><Series>Green Lantern - New Guardians</Series><Number>41</Number><Title>{title}</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        Assert.Equal("41", ReadComicInfo(path).Element("Number")?.Value);
+    }
+
+    [Fact]
+    public async Task Normalize_TagsNamingAComicVineIssue_KeepTheirNumber()
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("Green Lantern - New Guardians", "Issue #40.cbz",
+            "<ComicInfo><Series>Green Lantern - New Guardians</Series><Number>41</Number><Title>Issue #40</Title><Notes>[CVDB12345]</Notes></ComicInfo>");
 
         Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
 

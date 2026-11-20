@@ -346,9 +346,17 @@ public partial class ComicProcessorService
     /// title names nothing but an issue and marks the same number, and the user has not locked
     /// the issue. An old file name in the title alone is not enough: the tags are trusted over it.
     /// </summary>
+    /// <remarks>
+    /// Not for a title this application generated (<c>Chapter 41</c>): with its own file name it
+    /// always agrees, and only repeats an earlier <c>&lt;Number&gt;</c> that the user, ComicTagger
+    /// or another tool has since corrected. Nor for tags that name a ComicVine issue: its number
+    /// goes with the id, page and details they hold.
+    /// </remarks>
     private async Task<string?> IssueNamedByFileNameAndTitleAsync(ComicMetadata metadata, string filePath, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(metadata.Issue)
+            || metadata.ComicVineIssueId is not null
+            || GeneratedChapterTitlePattern.IsMatch(metadata.Title ?? string.Empty)
             || IssueNumberParser.ParseMarked(Path.GetFileNameWithoutExtension(filePath)) is not { } named
             || IssueNumberParser.AreEquivalent(named, metadata.Issue.Trim())
             || !IssueNumberParser.AreEquivalent(IssueNumberParser.ParseMarked(metadata.Title), named)

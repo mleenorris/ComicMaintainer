@@ -236,7 +236,9 @@ gives no issue after the volume. An issue number you locked is kept.
 The file name and the title together also outweigh `<Number>`. Some downloaders number an issue by its place in the
 list, so `Issue #40.cbz` titled `Issue #40` comes tagged Number 41 (counting an `Issue #0`). When the file name marks
 its number (`Issue #40`, `#40`, `Chapter 40`) and a title that names nothing but an issue marks the same number, that
-number is used. A locked issue number is kept, and an old file name in the title alone is still not enough.
+number is used. A locked issue number is kept, and an old file name in the title alone is still not enough. Neither
+counts when the title is one this application generated (`Chapter 40`), which only repeats an earlier number, nor when
+the tags name a ComicVine issue.
 
 Annuals keep "Annual" in their series, the way ComicVine names them. That means `<Series>Green Lantern Annual</Series>`
 with `<Number>1</Number>`, and an issue written as `Annual 1` becomes number `1`. A file is an Annual when its series

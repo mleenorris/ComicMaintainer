@@ -371,6 +371,17 @@ Duplicates**.
 | `All New X-Men v2 001.MU (2017)` | 1.MU |
 | `Series (2023)` | None |
 
+#### Shifting issue numbers
+
+Some downloaders number a run from the wrong start, so every issue is off by the same amount (The Amazing Spider-Man
+files where issue 3 is really #1). On the series page, tick the issues, choose **Shift Issue Numbers**, and enter how far
+to move them: `-2` makes issue 3 issue 1. The dialog shows each issue's number before and after. The shift runs as a job:
+
+- each new number is written and locked, so processing keeps it, and a generated title (`Chapter 3`) follows it;
+- the files are then renamed one at a time, the lowest new number first when the numbers go down (the highest first
+  when they go up), so each takes a name the one before it freed instead of being left as its duplicate;
+- a number that is not plain (`1.MU`, `Annual 1`) or would fall below 0 is left as it is, and the job lists it.
+
 ### How the series name is chosen
 
 The first of these that gives a name wins:

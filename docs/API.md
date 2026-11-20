@@ -555,6 +555,7 @@ So the concrete routes are:
 - `POST /api/jobs/normalize-selected`, `POST /api/jobs/normalize-all`, `POST /api/jobs/normalize-unmarked`
 - `POST /api/jobs/remove-metadata-selected`, `POST /api/jobs/remove-metadata-all`
 - `POST /api/jobs/update-metadata-selected`
+- `POST /api/jobs/shift-issues-selected`: body `{"Files":[...],"IssueOffset":-2}`. Moves each file's issue number by the offset (not 0, at most 10000 either way), locks it, and renames the files one at a time so each takes a name the one before it freed. A number that is not plain (`1.MU`) or would fall below 0 fails that file.
 - `POST /api/jobs/delete-selected`
 - `POST /api/jobs/recheck-duplicates-selected`, `POST /api/jobs/recheck-duplicates-all`
 

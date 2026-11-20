@@ -124,6 +124,16 @@ public interface IComicProcessorService
     Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, bool forceReprocess, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Moves the issue number of each file by <paramref name="offset"/> as a batch job, for
+    /// issues a downloader numbered from the wrong start (issue 3 that is #1: an offset of -2).
+    /// Each new number is written and locked as the user's edit (a generated "Chapter N" title
+    /// follows it), then the files are renamed one at a time in an order that frees each name
+    /// before it is taken. A number that is not plain, or would fall below 0, fails that file.
+    /// </summary>
+    /// <param name="offset">Not 0, at most <c>ComicProcessorService.MaxIssueNumberShift</c> either way.</param>
+    Task<Guid> ShiftIssueNumbersAsync(IEnumerable<string> filePaths, int offset, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Applies the fields of <paramref name="metadata"/> that carry a value to multiple comic
     /// files as a batch job; fields left empty are kept as they are.
     /// </summary>

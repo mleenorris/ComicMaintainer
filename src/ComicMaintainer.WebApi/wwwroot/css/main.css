@@ -3129,6 +3129,35 @@
             margin-bottom: 16px;
         }
 
+        /* Shift Issue Numbers: one line per selected issue, its number before and after. */
+        #shiftIssuesPreview {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            max-height: 50vh;
+            overflow-y: auto;
+        }
+
+        .shift-issues-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 4px 8px;
+            border-bottom: 1px solid var(--border-color, rgba(128, 128, 128, 0.2));
+        }
+
+        .shift-issues-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+        }
+
+        .shift-issues-change {
+            flex-shrink: 0;
+            font-variant-numeric: tabular-nums;
+        }
+
         .combine-folder-card {
             background: var(--bg-hover);
             border: 2px solid transparent;

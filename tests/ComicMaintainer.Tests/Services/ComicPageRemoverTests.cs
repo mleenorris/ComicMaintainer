@@ -105,7 +105,7 @@ public sealed class ComicPageRemoverTests : IDisposable
         Assert.Equal(new[] { "ComicInfo.xml", "p02.jpg", "p04.jpg" }, entries);
         Assert.Equal("2", info!.Element("PageCount")?.Value);
         var pages = info.Element("Pages")!.Elements("Page").Select(p => ((string?)p.Attribute("Image"), (string?)p.Attribute("Type"))).ToArray();
-        Assert.Equal(new[] { ((string?)"0", (string?)null), ("1", "Other") }, pages);
+        Assert.Equal(new (string?, string?)[] { ("0", null), ("1", "Other") }, pages);
         _watcher.Verify(w => w.SuppressProcessing(path), Times.AtLeastOnce);
         _coverCache.Verify(c => c.InvalidateAsync(path, It.IsAny<CancellationToken>()), Times.Once);
         _fileStore.Verify(f => f.RefreshFileStatsAsync(It.Is<IEnumerable<string>>(p => p.Single() == path), It.IsAny<CancellationToken>()), Times.Once);

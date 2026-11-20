@@ -53,7 +53,8 @@ public sealed class SeriesMetadataCacheProviderDetailsTests : IDisposable
         Genres = new List<string> { "Action", "Drama" },
         PublicationStatus = SeriesPublicationStatus.Completed,
         TotalChapters = 364,
-        Origin = "ja"
+        Origin = "ja",
+        Publisher = "  Hakusensha \t "
     };
 
     /// <summary>A record cached before this release: matched, with none of the new details.</summary>
@@ -93,6 +94,7 @@ public sealed class SeriesMetadataCacheProviderDetailsTests : IDisposable
         Assert.Equal(SeriesPublicationStatus.Completed, record.PublicationStatus);
         Assert.Equal(364, record.TotalChapters);
         Assert.Equal("ja", record.Origin);
+        Assert.Equal("Hakusensha", record.Publisher);
     }
 
     [Fact]
@@ -169,6 +171,7 @@ public sealed class SeriesMetadataCacheProviderDetailsTests : IDisposable
         Assert.Null(record.PublicationStatus);
         Assert.Null(record.TotalChapters);
         Assert.Null(record.Origin);
+        Assert.Null(record.Publisher);
     }
 
     [Fact]
@@ -235,7 +238,8 @@ public sealed class SeriesMetadataCacheProviderDetailsTests : IDisposable
             Genres = new List<string> { "<b>Action</b>", "  ", "action" },
             PublicationStatus = "<script>",
             TotalChapters = -4,
-            Origin = "<ja>"
+            Origin = "<ja>",
+            Publisher = new string('x', ProviderMetadataText.MaxPublisherLength + 1)
         });
 
         Assert.Null(record.SiteUrl);
@@ -243,6 +247,7 @@ public sealed class SeriesMetadataCacheProviderDetailsTests : IDisposable
         Assert.Null(record.PublicationStatus);
         Assert.Null(record.TotalChapters);
         Assert.Null(record.Origin);
+        Assert.Null(record.Publisher);
     }
 
     [Fact]
@@ -314,6 +319,7 @@ public sealed class SeriesMetadataCacheProviderDetailsTests : IDisposable
         Assert.Null(record.PublicationStatus);
         Assert.Null(record.TotalChapters);
         Assert.Null(record.Origin);
+        Assert.Null(record.Publisher);
     }
 
     [Theory]

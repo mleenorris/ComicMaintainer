@@ -130,6 +130,7 @@ public static class ComicInfoXml
         FillIfEmpty(root, "Summary", values.Summary);
         FillIfEmpty(root, "Count", values.Count?.ToString(System.Globalization.CultureInfo.InvariantCulture), unsetValue: "-1");
         FillIfEmpty(root, "Genre", values.Genre);
+        FillIfEmpty(root, "Publisher", values.Publisher);
         if (values.ComicVineIssueId is { } issueId)
         {
             var ns = root.Name.Namespace;

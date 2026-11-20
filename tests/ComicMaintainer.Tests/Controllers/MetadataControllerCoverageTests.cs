@@ -965,7 +965,8 @@ public sealed class MetadataControllerCoverageTests : IDisposable
                 Genres = new() { "Action", "Drama" },
                 PublicationStatus = "completed",
                 TotalChapters = 364,
-                Origin = "ja"
+                Origin = "ja",
+                Publisher = "Hakusensha"
             },
             CancellationToken.None);
 
@@ -976,6 +977,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         Assert.Equal("completed", _appliedMatch.PublicationStatus);
         Assert.Equal(364, _appliedMatch.TotalChapters);
         Assert.Equal("ja", _appliedMatch.Origin);
+        Assert.Equal("Hakusensha", _appliedMatch.Publisher);
     }
 
     [Fact]

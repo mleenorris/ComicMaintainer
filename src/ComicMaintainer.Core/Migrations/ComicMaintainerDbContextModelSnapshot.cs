@@ -936,6 +936,10 @@ namespace ComicMaintainer.Core.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Publisher")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("RemoteImageUrl")
                         .HasMaxLength(2048)
                         .HasColumnType("TEXT");

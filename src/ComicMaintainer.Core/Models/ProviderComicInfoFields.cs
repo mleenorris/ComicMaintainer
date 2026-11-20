@@ -27,6 +27,7 @@ namespace ComicMaintainer.Core.Models;
 /// True when the tags named another ComicVine issue, which the file was not filled from: its id
 /// in Notes, and its page in Web, are replaced by this issue's.
 /// </param>
+/// <param name="Publisher">The publisher: the series' (ComicVine lists one per volume), or the issue's volume's.</param>
 /// <param name="ComicVineIssueMatchedByName">
 /// True when the issue was matched by the series' names: the id written is marked as this
 /// application's own (see <see cref="ComicVineTagId.NameMatchMarker"/>).
@@ -41,7 +42,8 @@ public sealed record ProviderComicInfoFields(
     int? Month = null,
     int? ComicVineIssueId = null,
     bool ReplacesComicVineIssueId = false,
-    bool ComicVineIssueMatchedByName = false)
+    bool ComicVineIssueMatchedByName = false,
+    string? Publisher = null)
 {
     /// <summary>The ComicInfo value for manga read from right to left.</summary>
     public const string MangaRightToLeft = "YesAndRightToLeft";
@@ -50,7 +52,7 @@ public sealed record ProviderComicInfoFields(
 
     /// <summary>True when there is nothing to fill.</summary>
     public bool IsEmpty => Summary is null && Genre is null && Web is null && Count is null && Manga is null
-                           && StoryArc is null && Month is null && ComicVineIssueId is null;
+                           && StoryArc is null && Month is null && ComicVineIssueId is null && Publisher is null;
 
     /// <summary>The values a cached provider match supplies.</summary>
     public static ProviderComicInfoFields From(SeriesMetadataCacheRecord record)
@@ -63,6 +65,7 @@ public sealed record ProviderComicInfoFields(
             genres.Count == 0 ? null : string.Join(", ", genres),
             ProviderMetadataText.HttpUrl(record.SiteUrl),
             finished && record.TotalChapters > 0 ? record.TotalChapters : null,
-            string.Equals(record.Origin, JapaneseOrigin, StringComparison.OrdinalIgnoreCase) ? MangaRightToLeft : null);
+            string.Equals(record.Origin, JapaneseOrigin, StringComparison.OrdinalIgnoreCase) ? MangaRightToLeft : null,
+            Publisher: ProviderMetadataText.Publisher(record.Publisher));
     }
 }

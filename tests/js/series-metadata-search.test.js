@@ -559,6 +559,7 @@ test('Use This Match asks first, then replaces the cached provider metadata', as
         publicationStatus: 'ongoing',
         totalChapters: 66,
         origin: 'en',
+        publisher: 'Image',
         localizedTitles: [
             { title: 'サーガ', language: 'ja' },
             { title: 'Saga (Image Comics)', language: 'en' },
@@ -601,6 +602,7 @@ test('Use This Match sends what a sparse candidate has and ignores one without a
         sourceId: null,
         imageUrl: null,
         thumbnailUrl: null,
+        publisher: 'Planeta DeAgostini',
         localizedTitles: []
     });
 

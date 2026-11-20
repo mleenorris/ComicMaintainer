@@ -11,7 +11,8 @@ public class ComicInfoXmlFillTests
         Genre: "Action, Drama",
         Web: "https://example.org/series",
         Count: 12,
-        Manga: ProviderComicInfoFields.MangaRightToLeft);
+        Manga: ProviderComicInfoFields.MangaRightToLeft,
+        Publisher: "Image");
 
     [Fact]
     public void FillEmptyFields_PutsNewElementsInSchemaOrderAndKeepsTheRest()
@@ -21,7 +22,7 @@ public class ComicInfoXmlFillTests
         var filled = ComicInfoXml.FillEmptyFields(document, AllFields);
 
         Assert.Equal(
-            new[] { "Series", "Number", "Count", "Summary", "Writer", "Genre", "Web", "Manga", "Pages" },
+            new[] { "Series", "Number", "Count", "Summary", "Writer", "Publisher", "Genre", "Web", "Manga", "Pages" },
             filled.Root!.Elements().Select(e => e.Name.LocalName));
         Assert.Equal("Action, Drama", filled.Root.Element("Genre")?.Value);
     }
@@ -55,6 +56,7 @@ public class ComicInfoXmlFillTests
     [InlineData("<Count>0</Count>", "Count", "0")]
     [InlineData("<Count>not a number</Count>", "Count", "not a number")]
     [InlineData("<Manga>No</Manga>", "Manga", "No")]
+    [InlineData("<Publisher>Image Comics</Publisher>", "Publisher", "Image Comics")]
     [InlineData("<Manga>Yes</Manga>", "Manga", "Yes")]
     public void FillEmptyFields_LeavesAnyExistingValue(string element, string name, string expected)
     {

@@ -924,7 +924,9 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             var previous = state is not null && state.IssueId != issue.Id
                 ? await StoredIssueAsync(state.IssueId, cancellationToken)
                 : null;
-            var plan = ComicVineIssueFill.For(metadata, issue, synopsis, previous, replacesTag && metadata.ComicVineIssueId != issue.Id, matchedByName: !fromTag);
+            var plan = ComicVineIssueFill.For(
+                metadata, issue, synopsis, previous, replacesTag && metadata.ComicVineIssueId != issue.Id, matchedByName: !fromTag,
+                publisher: await VolumePublisherAsync(issue.VolumeId, cancellationToken));
             var outcome = Outcome.Unchanged;
             if (!plan.IsEmpty)
             {
@@ -1714,6 +1716,20 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             }
 
             return VolumeEvidence.Order(weighed.Concat(ranked.Skip(3)));
+        }
+
+        /// <summary>
+        /// The publisher ComicVine lists for a volume, as stored with a series' link to it (an issue
+        /// its tags name is in a volume some series links to once it is matched); null when none is.
+        /// </summary>
+        private async Task<string?> VolumePublisherAsync(int volumeId, CancellationToken cancellationToken)
+        {
+            await using var db = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
+            return await db.ComicVineVolumeLinks.AsNoTracking()
+                .Where(link => link.VolumeId == volumeId && link.Publisher != null && link.Publisher != "")
+                .OrderByDescending(link => link.LinkedUtc)
+                .Select(link => link.Publisher)
+                .FirstOrDefaultAsync(cancellationToken);
         }
 
         private async Task<ComicVineIssueEntity?> StoredIssueAsync(int issueId, CancellationToken cancellationToken)

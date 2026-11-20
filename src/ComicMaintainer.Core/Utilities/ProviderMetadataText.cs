@@ -26,6 +26,9 @@ public static class ProviderMetadataText
     /// <summary>Longest origin language tag kept; matches the database column.</summary>
     public const int MaxOriginLength = 16;
 
+    /// <summary>Longest publisher name kept; matches the database columns.</summary>
+    public const int MaxPublisherLength = 256;
+
     /// <summary>
     /// The absolute http or https address in <paramref name="value"/>, or null for anything
     /// else (a relative path, <c>javascript:</c>, an over-long address). Spaces and other
@@ -88,6 +91,18 @@ public static class ProviderMetadataText
     {
         var primary = value?.Trim().Split('-', 2)[0].ToLowerInvariant();
         return primary is { Length: >= 2 and <= 8 } && primary.All(char.IsAsciiLetterLower) ? primary : null;
+    }
+
+    /// <summary>
+    /// A provider's publisher name ("DC Comics") with its whitespace collapsed and characters an
+    /// XML document cannot hold removed, or null when nothing is left or it is longer than
+    /// <see cref="MaxPublisherLength"/> (not a name, then).
+    /// </summary>
+    public static string? Publisher(string? value)
+    {
+        var text = string.Join(' ', (RemoveInvalidXmlCharacters(value) ?? string.Empty)
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return text.Length is > 0 and <= MaxPublisherLength ? text : null;
     }
 
     /// <summary>

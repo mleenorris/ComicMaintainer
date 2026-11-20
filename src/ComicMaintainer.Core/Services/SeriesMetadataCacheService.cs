@@ -1141,6 +1141,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         entity.PublicationStatus = null;
         entity.TotalChapters = null;
         entity.Origin = null;
+        entity.Publisher = null;
 
         // Revert the provider-derived canonical title to the normalized key
         // so the UI shows a recognisable placeholder rather than a stale
@@ -1195,7 +1196,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
             Genres = DeserializeGenres(entity.GenresJson),
             PublicationStatus = entity.PublicationStatus,
             TotalChapters = entity.TotalChapters,
-            Origin = entity.Origin
+            Origin = entity.Origin,
+            Publisher = entity.Publisher
         };
 
         // Compute the single authoritative name via the shared resolver so
@@ -1248,6 +1250,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVe
         entity.PublicationStatus = SeriesPublicationStatus.Normalize(lookup.PublicationStatus) ?? (otherEntry ? null : entity.PublicationStatus);
         entity.TotalChapters = lookup.TotalChapters > 0 ? lookup.TotalChapters : (otherEntry ? null : entity.TotalChapters);
         entity.Origin = ProviderMetadataText.PrimaryLanguage(lookup.Origin) ?? (otherEntry ? null : entity.Origin);
+        entity.Publisher = ProviderMetadataText.Publisher(lookup.Publisher) ?? (otherEntry ? null : entity.Publisher);
     }
 
     /// <summary>

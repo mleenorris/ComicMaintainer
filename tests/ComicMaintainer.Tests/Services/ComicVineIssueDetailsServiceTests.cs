@@ -114,6 +114,8 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         Assert.Equal(["Tom King"], first.Metadata.Authors);
         Assert.Equal("I Am Gotham", first.Fill.StoryArc);
         Assert.Equal(8, first.Fill.Month);
+        // The publisher ComicVine lists for the volume, stored with its link.
+        Assert.Equal("DC Comics", first.Fill.Publisher);
         Assert.Equal("I Am Gotham, Night of the Monster Men", _writes.Single(w => w.Path.EndsWith("0002.cbz")).Fill.StoryArc);
 
         await using var db = new ComicMaintainerDbContext(_options);
@@ -546,6 +548,8 @@ public sealed class ComicVineIssueDetailsServiceTests : IAsyncLifetime
         Assert.Equal(555, write.Fill.ComicVineIssueId);
         Assert.False(write.Fill.ReplacesComicVineIssueId);
         Assert.Equal("Tagged Arc", write.Fill.StoryArc);
+        // An issue says nothing of its volume's publisher, and no link of the volume knows it yet.
+        Assert.Null(write.Fill.Publisher);
         _search.Verify(s => s.SearchVolumesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         _client.Verify(c => c.GetIssueDetailsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
 

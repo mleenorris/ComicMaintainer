@@ -13,8 +13,8 @@ public partial class ComicProcessorService
     /// off, the series has no provider match, or the match reports nothing usable.
     /// </summary>
     /// <remarks>
-    /// A Summary the user has locked is left out, even an empty one: clearing it was the
-    /// user's decision. Best effort; a failure here must never fail normalizing the file.
+    /// A Summary or Publisher the user has locked is left out, even an empty one: clearing it was
+    /// the user's decision. Best effort; a failure here must never fail normalizing the file.
     /// </remarks>
     private async Task<ProviderComicInfoFields?> ResolveProviderFillAsync(
         string filePath,
@@ -50,7 +50,8 @@ public partial class ComicProcessorService
 
             var tracked = await _fileStore.GetFileAsync(filePath, cancellationToken);
             var locked = (ComicMetadataFieldFlags)(tracked?.Metadata?.UserLockedFieldsMask ?? 0L);
-            return locked.HasFlag(ComicMetadataFieldFlags.Summary) ? fill with { Summary = null } : fill;
+            fill = WithoutLocked(fill, locked);
+            return fill.IsEmpty ? null : fill;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -65,6 +66,13 @@ public partial class ComicProcessorService
             return null;
         }
     }
+
+    /// <summary>The fill without the values of fields the user locked by editing them.</summary>
+    internal static ProviderComicInfoFields WithoutLocked(ProviderComicInfoFields fill, ComicMetadataFieldFlags locked) => fill with
+    {
+        Summary = locked.HasFlag(ComicMetadataFieldFlags.Summary) ? null : fill.Summary,
+        Publisher = locked.HasFlag(ComicMetadataFieldFlags.Publisher) ? null : fill.Publisher,
+    };
 
     /// <summary>
     /// True when the record holds a provider's match. A record whose last lookup found nothing

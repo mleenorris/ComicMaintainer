@@ -1202,6 +1202,7 @@
                         publicationStatus: result.publication_status,
                         totalChapters: result.total_chapters,
                         origin: result.origin,
+                        publisher: result.publisher,
                         // Forward the provider's per-title language tags so
                         // the cached record preserves them and the per-series
                         // preferred-language resolver can later swap the

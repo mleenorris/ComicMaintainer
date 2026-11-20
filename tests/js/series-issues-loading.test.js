@@ -619,3 +619,39 @@ test('a filtered answer under another id does not move the page', async () => {
     assert.equal(page.evaluate('currentSeriesDetailId'), 'saga');
     assert.equal(page.evaluate('window.location.hash'), '#/series/saga');
 });
+
+test('a refresh queued before a move reloads the list under the new id', async () => {
+    const moved = seriesCard({ id: 'saga-2' });
+    const gate = deferred();
+    const page = await bootSeries();
+    await page.settle();
+    // The refresh in flight answers under the new id; the one queued behind it must follow.
+    page.route(`GET ${ISSUES}`, () => gate.promise.then(() => issuesBody(moved, [issue(1)])));
+    page.route(`GET ${issuesPath('saga-2')}`, issuesBody(moved, [issue(1), issue(2)]));
+
+    const first = page.evaluate("loadSeriesIssues('saga', true, { immediate: true })");
+    const queued = page.evaluate("loadSeriesIssues('saga', true, { immediate: true })");
+    gate.resolve();
+    await first;
+    await queued;
+    await page.settle();
+
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'saga-2');
+    assert.equal(callsTo(page, issuesPath('saga-2')).length, 1, 'the queued refresh asks for the new id');
+    assert.equal(issueCards(page).length, 2);
+    assert.equal(page.evaluate("seriesIssuesCache.has('saga')"), false, 'and leaves nothing under the former one');
+});
+
+test('a move replaces an older list of the new id', async () => {
+    const moved = seriesCard({ id: 'saga-2' });
+    const page = await bootSeries();
+    await page.settle();
+    page.evaluate("seriesIssuesCache.set('saga-2', { issues: [], loaded: true, loading: false, error: false, filter: 'all' })");
+    page.route(`GET ${ISSUES}`, issuesBody(moved, [issue(1), issue(2)]));
+
+    await page.evaluate("loadSeriesIssues('saga', true, { immediate: true })");
+    await page.settle();
+
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'saga-2');
+    assert.equal(issueCards(page).length, 2);
+});

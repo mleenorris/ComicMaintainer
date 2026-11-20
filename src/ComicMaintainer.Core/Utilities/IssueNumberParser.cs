@@ -74,11 +74,14 @@ public static class IssueNumberParser
 
     /// <summary>
     /// A volume token directly followed by an issue number, which may be marked ("Vol. 2 004",
-    /// "v01 - 012", "Vol.1 Ch.12", "Vol 3 #5"), with nothing glued after the number.
+    /// "v01 - 012", "Vol.1 Ch.12", "Vol 3 #5"), with nothing glued after the number. Not a range
+    /// ("Vol. 2 001-006", a collected edition's issues) and not an unmarked year ("Vol. 2 2016").
     /// </summary>
     private static readonly Regex VolumeAndIssuePattern = new(
         @"(?<!\p{L})v(?:ol(?:ume)?)?\.?[\s._-]*(?<volume>\d+(?:\.\d+)?)[\s._–—-]+" +
-        @"(?:(?:ch(?:ap(?:ter)?)?|issue)[\s._#-]*|#\s*)?(?<issue>\d+" + Fraction + @")(?![\p{L}\p{N}])",
+        @"(?:(?:(?:ch(?:ap(?:ter)?)?|issue)[\s._#-]*|#\s*)(?<issue>\d+" + Fraction + @")" +
+        @"|(?!(?:19|20)\d{2}(?!\d))(?<issue>\d+" + Fraction + @"))" +
+        @"(?![\p{L}\p{N}])(?![\s_]*[-–—][\s_]*\d)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
         MatchTimeout);
 

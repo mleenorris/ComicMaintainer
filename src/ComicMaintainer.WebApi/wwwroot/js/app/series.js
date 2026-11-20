@@ -88,6 +88,16 @@
         // id), as the issues of a former id are (see fetchSeriesIssues).
         const movedSeriesIds = new Map();
 
+        // The id a series has now, following its moves (a refresh queued
+        // before one still names the former id).
+        function seriesIdNow(seriesId) {
+            let id = seriesId;
+            for (let hops = 0; movedSeriesIds.has(id) && hops < 10; hops++) {
+                id = movedSeriesIds.get(id);
+            }
+            return id;
+        }
+
         function remapCurrentSeriesDetailId() {
             if (!currentSeriesDetailId) return null;
             const remapped = findSeriesByTitleKeys(currentSeriesDetailTitleKeys);
@@ -212,6 +222,7 @@
         // Starts the queued refresh, if any, unless something still holds it back.
         function startTrailingSeriesIssuesRefresh(seriesId, state) {
             if (!state.trailing || state.busy) return;
+            seriesId = seriesIdNow(seriesId);
             const cached = seriesIssuesCache.get(seriesId);
             if (cached && cached.loading) {
                 Promise.resolve(cached.settled).then(() => startTrailingSeriesIssuesRefresh(seriesId, state));
@@ -223,6 +234,7 @@
         }
 
         async function startSeriesIssuesRefresh(seriesId, state) {
+            seriesId = seriesIdNow(seriesId);
             state.busy = true;
             const startedAt = Date.now();
             try {
@@ -320,7 +332,7 @@
                     entry.error = false;
                     // A filter can shift the id of what it shows (fewer files, another
                     // representative): only an unfiltered answer says the series moved.
-                    if (filterMode === 'all' && typeof data.id === 'string' && data.id && data.id !== seriesId) {
+                    if (entry.filter === 'all' && typeof data.id === 'string' && data.id && data.id !== seriesId) {
                         movedTo = data.id;
                     }
                     entry.titles = {
@@ -376,9 +388,22 @@
             // server found it by its former name. Open it under its id now, so
             // the address and every later request use it; the list just read
             // is kept for it (as remapCurrentSeriesDetailId moves a list).
+            const listedAtNewId = movedTo ? seriesIssuesCache.get(movedTo) : null;
             if (movedTo && currentSeriesDetailId === seriesId && seriesIssuesCache.get(seriesId) === entry
-                && !seriesIssuesCache.has(movedTo)) {
+                && !(listedAtNewId && listedAtNewId.loading)) {
+                if (listedAtNewId) {
+                    // An older list of the new id (opened before, or merged
+                    // into it) gives way; what it still had to confirm is
+                    // confirmed by this one.
+                    handSeriesIssuePathsOver(listedAtNewId, movedTo);
+                }
                 transferSeriesIssuePaths(seriesId, movedTo);
+                // Refreshes of the list, queued or cooling down, go on under the new id.
+                const refreshes = seriesIssuesRefreshes.get(seriesId);
+                if (refreshes) {
+                    seriesIssuesRefreshes.delete(seriesId);
+                    seriesIssuesRefreshes.set(movedTo, refreshes);
+                }
                 // A library list read before the move still has the series
                 // under its former id: it must not be remapped back to it.
                 movedSeriesIds.set(seriesId, movedTo);

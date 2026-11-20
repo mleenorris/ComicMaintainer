@@ -41,6 +41,10 @@ public class WriteOperationAuthorizationConvention : IActionModelConvention
         ["SeriesImages"] = AuthorizationPolicies.CanModifyLibrary,
         // Replacing a cover rewrites the archive.
         ["Covers"] = AuthorizationPolicies.CanModifyLibrary,
+        // Removing pages rewrites the archive.
+        ["ComicPages"] = AuthorizationPolicies.CanModifyLibrary,
+        // Swapping a duplicate renames both files.
+        ["Duplicates"] = AuthorizationPolicies.CanModifyLibrary,
         ["Watcher"] = AuthorizationPolicies.CanModifyLibrary,
         ["Email"] = AuthorizationPolicies.CanModifyLibrary,
         ["Suwayomi"] = AuthorizationPolicies.CanModifyLibrary,

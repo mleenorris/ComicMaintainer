@@ -1876,7 +1876,8 @@
         let removePagesCurrent = null;
 
         async function openRemovePagesModal(filePath) {
-            const current = { filePath, name: filePath.split('/').pop(), pages: [], selected: new Set() };
+            if (removePagesCurrent) releaseRemovePagesImages(removePagesCurrent);
+            const current = { filePath, name: filePath.split('/').pop(), pages: [], selected: new Set(), urls: [], observer: null };
             removePagesCurrent = current;
             const grid = document.getElementById('removePagesGrid');
             document.getElementById('removePagesModalTitle').textContent = `Remove pages from "${current.name}"`;
@@ -1907,11 +1908,55 @@
             const version = info && typeof info.version === 'string' && info.version ? `&v=${encodeURIComponent(info.version)}` : '';
             renderHtml(grid, current.pages.map((name, index) => html`
                 <label class="replace-cover-option remove-pages-option" data-page-index="${index}" title="${name}">
-                    <img data-protected-image="/api/comicreader/page?filePath=${encodeURIComponent(filePath)}&page=${index + 1}${version}" alt="Page ${index + 1}" loading="lazy" decoding="async">
+                    <img data-page-url="/api/comicreader/page?filePath=${encodeURIComponent(filePath)}&page=${index + 1}${version}" alt="Page ${index + 1}" decoding="async">
                     <span><input type="checkbox" onchange="toggleRemovePage(${index}, this.checked)"> Page ${index + 1}</span>
                 </label>
             `));
-            hydrateProtectedImages(grid);
+            loadRemovePagesImages(current, grid);
+        }
+
+        // The pages are full-size images: each is loaded when it nears the view, into a blob
+        // URL of the dialog's own, all released when it closes. They stay out of the library's
+        // cover cache, which they would push the covers out of.
+        function loadRemovePagesImages(current, grid) {
+            const load = async image => {
+                const path = image.dataset.pageUrl;
+                if (!path || image.dataset.pageLoaded) return;
+                image.dataset.pageLoaded = '1';
+                try {
+                    const response = await apiFetch(path, { json: false });
+                    if (!response.ok || removePagesCurrent !== current) return;
+                    const url = URL.createObjectURL(await response.blob());
+                    if (removePagesCurrent !== current) {
+                        URL.revokeObjectURL(url);
+                        return;
+                    }
+                    current.urls.push(url);
+                    image.src = url;
+                } catch (error) {
+                    // The tile keeps its page number; the page can still be ticked.
+                }
+            };
+            const images = Array.from(grid.querySelectorAll('img[data-page-url]'));
+            if (typeof IntersectionObserver === 'function') {
+                current.observer = new IntersectionObserver(entries => {
+                    for (const entry of entries) {
+                        if (!entry.isIntersecting) continue;
+                        current.observer.unobserve(entry.target);
+                        load(entry.target);
+                    }
+                }, { root: grid, rootMargin: '400px' });
+                images.forEach(image => current.observer.observe(image));
+            } else {
+                images.forEach(load);
+            }
+        }
+
+        function releaseRemovePagesImages(current) {
+            if (current.observer) current.observer.disconnect();
+            current.observer = null;
+            current.urls.forEach(url => URL.revokeObjectURL(url));
+            current.urls = [];
         }
 
         function toggleRemovePage(index, checked) {
@@ -1938,6 +1983,7 @@
 
         function closeRemovePagesModal() {
             document.getElementById('removePagesModal').classList.remove('active');
+            if (removePagesCurrent) releaseRemovePagesImages(removePagesCurrent);
             removePagesCurrent = null;
         }
 
@@ -1959,10 +2005,17 @@
             } catch (error) {
                 if (error.authHandled) return;
                 showMessage('Failed to remove the pages: ' + error.message, 'error');
+                if (removePagesCurrent !== current) return;
+                // The archive changed since its pages were listed: list them again.
+                if (/reload its pages/.test(error.message || '')) {
+                    openRemovePagesModal(current.filePath);
+                    return;
+                }
                 updateRemovePagesSelection();
                 return;
             }
-            closeRemovePagesModal();
+            // Another issue's dialog may be open by now; it is left as it is.
+            if (removePagesCurrent === current) closeRemovePagesModal();
             showMessage(`Removed ${data.removed} page${data.removed === 1 ? '' : 's'}; ${data.pages_left} left`, 'success');
             // Page 1 may have gone: the issue's cover is drawn again.
             await refreshFileCover(current.filePath);

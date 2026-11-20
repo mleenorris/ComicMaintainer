@@ -215,8 +215,9 @@ To take pages out of an issue, such as scan credits, ads or a cover that appears
 series page and choose **Remove Pages…**. The dialog shows every page; tick the ones to remove and choose **Remove
 Pages**, then confirm. The CBZ is written again without them, which cannot be undone. Every other page is kept, and so
 are the page types in its ComicInfo.xml (`<Pages>` follows the pages it describes, and `<PageCount>` is updated). A comic
-keeps at least one page. Only a CBZ can be changed this way; convert a CBR to CBZ first. Reading progress is kept by page
-number, so a reader part-way through the issue may land a page or two further on.
+keeps at least one page. Only a CBZ can be changed this way; convert a CBR to CBZ first. Every reader's saved page moves
+down past the pages removed before it. A copy downloaded for offline reading keeps the old pages until it is downloaded
+again.
 
 A file renamed before this version may have lost its volume from its name. If its `<Title>` still holds the old file
 name, the volume and cover year are read from there, and the title is then replaced by the generated `Chapter 10`, which

@@ -1,11 +1,16 @@
 using System.IO.Compression;
 using System.Text;
 using System.Xml.Linq;
+using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Notifications;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Tests.Helpers;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -22,15 +27,30 @@ public sealed class ComicPageRemoverTests : IDisposable
     private readonly Mock<IFileCoverCacheService> _coverCache = new();
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<INotificationPublisher> _notifications = new();
+    private readonly SqliteConnection _connection = new("DataSource=:memory:");
+    private readonly ServiceProvider _provider;
+    private readonly IDbContextFactory<ComicMaintainerDbContext> _db;
 
     public ComicPageRemoverTests()
     {
         Directory.CreateDirectory(_root);
         _fileStore.Setup(f => f.GetFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string path, CancellationToken _) => new ComicFile { FilePath = path });
+        _connection.Open();
+        var services = new ServiceCollection();
+        services.AddDbContextFactory<ComicMaintainerDbContext>(o => o.UseSqlite(_connection));
+        _provider = services.BuildServiceProvider();
+        _db = _provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        using var db = _db.CreateDbContext();
+        db.Database.EnsureCreated();
     }
 
-    public void Dispose() => TestIO.TryDeleteDirectory(_root);
+    public void Dispose()
+    {
+        _provider.Dispose();
+        _connection.Dispose();
+        TestIO.TryDeleteDirectory(_root);
+    }
 
     private ComicPageRemover CreateRemover() => new(
         new FileOperationLock(),
@@ -38,6 +58,8 @@ public sealed class ComicPageRemoverTests : IDisposable
         _coverCache.Object,
         _fileStore.Object,
         _notifications.Object,
+        new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _root, DuplicateDirectory = Path.Join(_root, "duplicates") }),
+        _db,
         NullLogger<ComicPageRemover>.Instance);
 
     private const string ComicInfo =
@@ -88,6 +110,69 @@ public sealed class ComicPageRemoverTests : IDisposable
         _coverCache.Verify(c => c.InvalidateAsync(path, It.IsAny<CancellationToken>()), Times.Once);
         _fileStore.Verify(f => f.RefreshFileStatsAsync(It.Is<IEnumerable<string>>(p => p.Single() == path), It.IsAny<CancellationToken>()), Times.Once);
         _notifications.Verify(n => n.LibraryChanged(), Times.Once);
+    }
+
+    [Fact]
+    public async Task RemovePages_MovesEveryReadersSavedPageDownPastTheRemovedOnes()
+    {
+        var path = WriteCbz("Saga 001.cbz");
+        await using (var seed = await _db.CreateDbContextAsync())
+        {
+            seed.ReadingProgresses.Add(new ReadingProgressEntity { UserId = "a", ContentId = path, CurrentPage = 4, TotalPages = 4, PercentComplete = 100 });
+            seed.ReadingProgresses.Add(new ReadingProgressEntity { UserId = "b", ContentId = path, CurrentPage = 1, TotalPages = 4, PercentComplete = 25 });
+            seed.UserFileReadStatuses.Add(new UserFileReadStatusEntity { UserId = "a", FilePath = path, CurrentPage = 3 });
+            await seed.SaveChangesAsync();
+        }
+
+        // Pages 1 and 3 go: page 4 becomes page 2, and page 3 (gone) gives way to the next kept, page 2.
+        await CreateRemover().RemovePagesAsync(path, ["p01.jpg", "p03.jpg"]);
+
+        await using var db = await _db.CreateDbContextAsync();
+        var progress = db.ReadingProgresses.OrderBy(p => p.UserId).Select(p => new { p.CurrentPage, p.TotalPages, p.PercentComplete }).ToList();
+        Assert.Equal((2, 2, 100.0), (progress[0].CurrentPage, progress[0].TotalPages, progress[0].PercentComplete));
+        Assert.Equal((1, 2, 50.0), (progress[1].CurrentPage, progress[1].TotalPages, progress[1].PercentComplete));
+        Assert.Equal(2, db.UserFileReadStatuses.Single().CurrentPage);
+    }
+
+    [Theory]
+    [InlineData(5, new[] { 0, 2 }, 3, 3)]
+    [InlineData(3, new[] { 0, 2 }, 3, 2)]
+    [InlineData(1, new[] { 0 }, 3, 1)]
+    [InlineData(4, new[] { 3 }, 3, 3)]
+    [InlineData(0, new int[0], 3, 1)]
+    public void PageAfterRemoval_MovesDownWithinThePagesLeft(int page, int[] removed, int left, int expected)
+        => Assert.Equal(expected, ComicPageRemover.PageAfterRemoval(page, removed, left));
+
+    [Fact]
+    public async Task RemovePages_NamedByTwoEntries_IsRefused()
+    {
+        var path = WriteCbz("Saga 001.cbz", comicInfo: null, "p01.jpg", "a/p02.jpg", "b/p02.jpg");
+        using (var zip = ZipFile.Open(path, ZipArchiveMode.Update))
+        {
+            using var writer = new StreamWriter(zip.CreateEntry("p01.jpg").Open());
+            writer.Write("a second p01");
+        }
+
+        var result = await CreateRemover().RemovePagesAsync(path, ["p01.jpg"]);
+
+        Assert.Equal(PageRemovalResult.Refused("2 pages are named p01.jpg; they cannot be told apart to remove one"), result);
+    }
+
+    [Fact]
+    public async Task RemovePages_OfAPathOutsideTheLibrary_IsRefusedEvenWhenTracked()
+    {
+        var outside = Path.Join(Path.GetTempPath(), "cm-pages-outside-" + Guid.NewGuid().ToString("N") + ".cbz");
+        File.WriteAllBytes(outside, File.ReadAllBytes(WriteCbz("Saga 001.cbz")));
+        try
+        {
+            var result = await CreateRemover().RemovePagesAsync(outside, ["p01.jpg"]);
+
+            Assert.Equal("The file is not in the library", result.Error);
+        }
+        finally
+        {
+            File.Delete(outside);
+        }
     }
 
     [Fact]

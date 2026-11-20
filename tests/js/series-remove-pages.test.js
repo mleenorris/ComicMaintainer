@@ -14,7 +14,7 @@ const PAGES = ['p01.jpg', 'p02.jpg', 'p03.jpg'];
 const routes = (extra = {}) => ({
     'GET /api/comicreader/info': { fileName: 'Batman 001.cbz', filePath: FILE, pageCount: 3, version: 'v1' },
     'GET /api/comicreader/pages': { pages: PAGES, count: 3 },
-    'GET /api/comicreader/page': new Response('img', { headers: { 'Content-Type': 'image/jpeg' } }),
+    'GET /api/comicreader/page': () => new Response('img', { headers: { 'Content-Type': 'image/jpeg' } }),
     ...extra
 });
 
@@ -44,7 +44,7 @@ test('the dialog shows every page, with the file version in its address, and cou
     assert.equal(page.$('#removePagesModal').classList.contains('active'), true);
     assert.equal(page.$('#removePagesModalTitle').textContent, 'Remove pages from "Batman 001.cbz"');
     assert.deepEqual(tiles(page).map(tile => tile.textContent.trim()), ['Page 1', 'Page 2', 'Page 3']);
-    assert.equal(tiles(page)[1].querySelector('img').dataset.protectedImage,
+    assert.equal(tiles(page)[1].querySelector('img').dataset.pageUrl,
         `/api/comicreader/page?filePath=${encodeURIComponent(FILE)}&page=2&v=v1`);
     assert.equal(applyButton(page).disabled, true);
 
@@ -116,4 +116,46 @@ test('pages that cannot be read, or none at all, are said so', async (t) => {
     const empty = await h.bootSeriesDetail(t, { routes: routes({ 'GET /api/comicreader/pages': { pages: [], count: 0 } }) });
     await open(empty);
     assert.equal(empty.$('#removePagesGrid').textContent, 'The archive has no pages.');
+});
+
+test("the pages load into the dialog's own images, released when it closes", async (t) => {
+    const page = await h.bootSeriesDetail(t, { routes: routes() });
+    const made = [];
+    const released = [];
+    page.window.URL.createObjectURL = () => { made.push(`blob:page-${made.length + 1}`); return made.at(-1); };
+    page.window.URL.revokeObjectURL = url => released.push(url);
+    // Without an IntersectionObserver every page loads at once.
+    page.window.IntersectionObserver = undefined;
+
+    await open(page);
+
+    assert.deepEqual(tiles(page).map(tile => tile.querySelector('img').getAttribute('src')), ['blob:page-1', 'blob:page-2', 'blob:page-3']);
+    assert.equal(h.requests(page, 'GET', '/api/comicreader/page').length, 3);
+    page.run('closeRemovePagesModal()');
+    assert.deepEqual(released.sort(), ['blob:page-1', 'blob:page-2', 'blob:page-3']);
+});
+
+test('with an IntersectionObserver a page loads as it nears the view', async (t) => {
+    const page = await h.bootSeriesDetail(t, { routes: routes() });
+    let observed = [];
+    let callback = null;
+    page.window.URL.createObjectURL = () => 'blob:page';
+    page.window.URL.revokeObjectURL = () => {};
+    page.window.IntersectionObserver = class {
+        constructor(cb) { callback = cb; }
+        observe(target) { observed.push(target); }
+        unobserve(target) { observed = observed.filter(item => item !== target); }
+        disconnect() { observed = []; }
+    };
+
+    await open(page);
+    assert.equal(h.requests(page, 'GET', '/api/comicreader/page').length, 0, 'nothing loads before it is seen');
+
+    callback([{ isIntersecting: false, target: observed[1] }, { isIntersecting: true, target: observed[0] }]);
+    await page.settle();
+    assert.equal(h.requests(page, 'GET', '/api/comicreader/page').length, 1);
+    assert.equal(observed.length, 2, 'the page seen is no longer watched');
+
+    page.run('closeRemovePagesModal()');
+    assert.equal(observed.length, 0);
 });

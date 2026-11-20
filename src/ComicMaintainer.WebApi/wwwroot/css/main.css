@@ -1703,6 +1703,15 @@
             border-color: var(--accent-primary);
         }
 
+        /* Remove Pages: a ticked page is marked for removal. */
+        .remove-pages-option.selected {
+            border-color: var(--danger);
+        }
+
+        .remove-pages-option.selected img {
+            opacity: 0.45;
+        }
+
         .series-detail-chip--status {
             border-color: var(--accent-primary);
             color: var(--accent-text);

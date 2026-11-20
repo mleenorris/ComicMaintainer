@@ -949,6 +949,15 @@ with status `503`. The text is fixed wording built from the provider name and th
 
 **`POST /api/covers/replace`** takes `{"filePath","comicVineIssueId"}`, an issue the candidates listed. The server downloads that issue's stored cover, never an address from the request, with the same checks as provider images, and makes it page 1 of the CBZ. The page keeps its name with the image's extension, and every other entry is kept. It answers `{"replaced":true}`, `{"replaced":false}` when page 1 already was that image, or `400 {"error"}`: not a CBZ, no pages, no cover for that issue, or a failed download.
 
+
+## Pages
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| `POST` | `/api/pages/remove` | Library write | Remove pages from an issue's CBZ |
+
+**`POST /api/pages/remove`** takes `{"filePath","pages":[...]}`, where `pages` are entry names as `GET /api/comicreader/pages` lists them (at most 2000), and writes the CBZ again without them, the way every archive write is done (a flushed sibling temp file renamed over the original, under the file's lock). ComicInfo.xml's `<Pages>` entries of the removed pages go, the later ones are numbered down to their new positions, and `<PageCount>` follows. It answers `{"removed","pages_left"}`, or `400` with `{"error"}` and nothing written when the file is not in the library, is not a CBZ (convert it first), a name is not a page of the archive (it changed: reload its pages), or every page would go.
+
 ## Series images
 
 | Method | Path | Access | Purpose |

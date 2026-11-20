@@ -209,6 +209,15 @@ other page is kept. Only a CBZ can be changed this way; convert a CBR to CBZ fir
 The issue is matched to ComicVine as for issue details: through its series and its volume's start year or number.
 Annuals, Specials, Giant-Size issues and One-Shots are not matched yet. This needs a ComicVine API key.
 
+### Removing pages
+
+To take pages out of an issue, such as scan credits, ads or a cover that appears twice, open the issue's menu on the
+series page and choose **Remove Pages…**. The dialog shows every page; tick the ones to remove and choose **Remove
+Pages**, then confirm. The CBZ is written again without them, which cannot be undone. Every other page is kept, and so
+are the page types in its ComicInfo.xml (`<Pages>` follows the pages it describes, and `<PageCount>` is updated). A comic
+keeps at least one page. Only a CBZ can be changed this way; convert a CBR to CBZ first. Reading progress is kept by page
+number, so a reader part-way through the issue may land a page or two further on.
+
 A file renamed before this version may have lost its volume from its name. If its `<Title>` still holds the old file
 name, the volume and cover year are read from there, and the title is then replaced by the generated `Chapter 10`, which
 **Fetch Issue Details** replaces in turn with ComicVine's title. An old file name may start with the series, as in

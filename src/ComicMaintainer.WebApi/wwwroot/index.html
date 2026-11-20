@@ -2394,6 +2394,28 @@
          </div>
      </div>
 
+     <!-- Remove Pages Modal -->
+     <div class="modal" id="removePagesModal" role="dialog" aria-modal="true" aria-labelledby="removePagesModalTitle" aria-hidden="true">
+         <div class="modal-content" style="max-width: 960px;">
+             <div class="modal-header">
+                 <h2 id="removePagesModalTitle">Remove Pages</h2>
+                 <button class="close-btn" onclick="closeRemovePagesModal()">&times;</button>
+             </div>
+             <div class="modal-body">
+                 <p class="combine-folders-meta">
+                     Tick the pages to take out of the issue's CBZ, such as scan credits, ads or a duplicated cover. The other pages,
+                     and the page types in its ComicInfo.xml, are kept.
+                 </p>
+                 <div id="removePagesGrid" class="replace-cover-grid"></div>
+                 <p class="combine-folders-meta" id="removePagesSummary"></p>
+             </div>
+             <div class="modal-footer">
+                 <button class="btn btn-danger" id="removePagesApplyBtn" onclick="applyRemovePages()" data-requires-write disabled>Remove Pages</button>
+                 <button class="btn" onclick="closeRemovePagesModal()">Cancel</button>
+             </div>
+         </div>
+     </div>
+
      <div class="modal" id="chooseVolumeModal" role="dialog" aria-modal="true" aria-labelledby="chooseVolumeModalTitle" aria-hidden="true">
          <div class="modal-content" style="max-width: 760px;">
              <div class="modal-header">

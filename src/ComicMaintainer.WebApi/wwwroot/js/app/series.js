@@ -1222,6 +1222,9 @@
                                             <button class="dropdown-item" data-requires-write onclick="openReplaceCoverModal('${escapeJs(issue.file_path)}'); closeAllDropdowns();" title="Replace this issue's cover with its cover from ComicVine">
                                                 ${uiIcon('image')} Replace Cover…
                                             </button>
+                                            <button class="dropdown-item" data-requires-write onclick="openRemovePagesModal('${escapeJs(issue.file_path)}'); closeAllDropdowns();" title="Remove pages such as scan credits or ads from this issue's CBZ">
+                                                ${uiIcon('eraser')} Remove Pages…
+                                            </button>
                                             <div class="dropdown-divider" data-requires-write></div>
                                             <button class="dropdown-item" data-requires-write onclick="deleteSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
                                                 ${uiIcon('trash')} Delete
@@ -1865,6 +1868,105 @@
                 option.setAttribute('aria-pressed', String(chosen));
             }
             document.getElementById('replaceCoverApplyBtn').disabled = false;
+        }
+
+        // ── Remove pages ─────────────────────────────────────────────────────
+        // "Remove Pages…" shows every page of the issue; the ticked ones are
+        // taken out of its CBZ (POST /api/pages/remove).
+        let removePagesCurrent = null;
+
+        async function openRemovePagesModal(filePath) {
+            const current = { filePath, name: filePath.split('/').pop(), pages: [], selected: new Set() };
+            removePagesCurrent = current;
+            const grid = document.getElementById('removePagesGrid');
+            document.getElementById('removePagesModalTitle').textContent = `Remove pages from "${current.name}"`;
+            renderHtml(grid, html`<div class="loading"><div class="spinner"></div><p>Loading pages...</p></div>`);
+            updateRemovePagesSelection();
+            document.getElementById('removePagesModal').classList.add('active');
+
+            let info;
+            let list;
+            try {
+                const query = `filePath=${encodeURIComponent(filePath)}`;
+                [info, list] = await Promise.all([
+                    apiFetch(`/api/comicreader/info?${query}`),
+                    apiFetch(`/api/comicreader/pages?${query}`)
+                ]);
+            } catch (error) {
+                if (error.authHandled || removePagesCurrent !== current) return;
+                grid.textContent = `The pages could not be read: ${error.message}`;
+                return;
+            }
+            if (removePagesCurrent !== current) return;
+            current.pages = Array.isArray(list && list.pages) ? list.pages : [];
+            if (!current.pages.length) {
+                grid.textContent = 'The archive has no pages.';
+                return;
+            }
+            // The file's version keeps a cached page of an earlier file of that name out.
+            const version = info && typeof info.version === 'string' && info.version ? `&v=${encodeURIComponent(info.version)}` : '';
+            renderHtml(grid, current.pages.map((name, index) => html`
+                <label class="replace-cover-option remove-pages-option" data-page-index="${index}" title="${name}">
+                    <img data-protected-image="/api/comicreader/page?filePath=${encodeURIComponent(filePath)}&page=${index + 1}${version}" alt="Page ${index + 1}" loading="lazy" decoding="async">
+                    <span><input type="checkbox" onchange="toggleRemovePage(${index}, this.checked)"> Page ${index + 1}</span>
+                </label>
+            `));
+            hydrateProtectedImages(grid);
+        }
+
+        function toggleRemovePage(index, checked) {
+            const current = removePagesCurrent;
+            if (!current) return;
+            if (checked) current.selected.add(index); else current.selected.delete(index);
+            const option = document.querySelector(`#removePagesGrid [data-page-index="${index}"]`);
+            if (option) option.classList.toggle('selected', checked);
+            updateRemovePagesSelection();
+        }
+
+        function updateRemovePagesSelection() {
+            const current = removePagesCurrent;
+            const count = current ? current.selected.size : 0;
+            const apply = document.getElementById('removePagesApplyBtn');
+            const summary = document.getElementById('removePagesSummary');
+            // Every page cannot go: a comic keeps at least one.
+            apply.disabled = count === 0 || (current && count >= current.pages.length);
+            apply.textContent = count ? `Remove ${count} Page${count === 1 ? '' : 's'}` : 'Remove Pages';
+            summary.textContent = current && current.pages.length && count >= current.pages.length
+                ? 'A comic must keep at least one page.'
+                : '';
+        }
+
+        function closeRemovePagesModal() {
+            document.getElementById('removePagesModal').classList.remove('active');
+            removePagesCurrent = null;
+        }
+
+        async function applyRemovePages() {
+            const current = removePagesCurrent;
+            if (!current || !current.selected.size) return;
+            const indexes = [...current.selected].sort((a, b) => a - b);
+            const count = indexes.length;
+            if (!confirm(`Remove ${count} page${count === 1 ? '' : 's'} (${indexes.map(index => index + 1).join(', ')}) from "${current.name}"?\n\nThe archive is written again without them. This cannot be undone.`)) return;
+            const apply = document.getElementById('removePagesApplyBtn');
+            apply.disabled = true;
+            let data;
+            try {
+                data = await apiFetch('/api/pages/remove', {
+                    method: 'POST',
+                    body: { FilePath: current.filePath, Pages: indexes.map(index => current.pages[index]) },
+                    errorMessage: 'Failed to remove the pages'
+                });
+            } catch (error) {
+                if (error.authHandled) return;
+                showMessage('Failed to remove the pages: ' + error.message, 'error');
+                updateRemovePagesSelection();
+                return;
+            }
+            closeRemovePagesModal();
+            showMessage(`Removed ${data.removed} page${data.removed === 1 ? '' : 's'}; ${data.pages_left} left`, 'success');
+            // Page 1 may have gone: the issue's cover is drawn again.
+            await refreshFileCover(current.filePath);
+            if (currentSeriesDetailId) loadSeriesIssues(currentSeriesDetailId, true, { immediate: true });
         }
 
         function closeReplaceCoverModal() {

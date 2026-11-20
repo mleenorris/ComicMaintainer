@@ -1,4 +1,4 @@
-using ComicMaintainer.Core.Configuration;
+﻿using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
@@ -522,6 +522,50 @@ public class SeriesLibraryServiceTests
         Assert.NotNull(byLegacyId);
         Assert.Equal("Revenge of the Iron-Blooded Sword Hound", byLegacyId!.Title);
         Assert.Equal(1, byLegacyId.IssueCount);
+    }
+
+    [Fact]
+    public async Task GetSeriesIssuesAsync_TheIdOfAFormerName_FindsTheSeries()
+    {
+        // Processing tagged the files of "Green Lantern (2023)" with ComicVine's title, so the
+        // series' id became "green-lantern"; a page opened before asks for "green-lantern-2023".
+        var files = Enumerable.Range(1, 2).Select(n => new ComicFile
+        {
+            FilePath = $"/library/Green Lantern (2023)/Green Lantern - Chapter 000{n}.cbz",
+            FileName = $"Green Lantern - Chapter 000{n}.cbz",
+            Directory = "/library/Green Lantern (2023)",
+            FileSize = 100,
+            LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            Metadata = new ComicMetadata { Series = "Green Lantern", Issue = n.ToString(System.Globalization.CultureInfo.InvariantCulture) }
+        }).ToList();
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(files);
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "green-lantern",
+                    CanonicalTitle = "Green Lantern",
+                    Aliases = new List<string> { "Green Lantern (2023)" },
+                    UserAliases = new List<string>()
+                }
+            });
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var current = await service.GetSeriesIssuesAsync("green-lantern");
+        var former = await service.GetSeriesIssuesAsync("green-lantern-2023");
+
+        Assert.Equal("green-lantern", current!.Id);
+        Assert.Equal("green-lantern", former!.Id);
+        Assert.Equal(2, former.IssueCount);
+
+        // A name no series goes by, or one too vague to be an id, finds nothing.
+        Assert.Null(await service.GetSeriesIssuesAsync("green-lantern-1990"));
+        Assert.Null(await service.GetSeriesIssuesAsync("unknown-series"));
+
+        // With a filter the former id is found among every series, then shown filtered.
+        var filtered = await service.GetSeriesIssuesAsync("green-lantern-2023", filter: "processed");
+        Assert.Equal("green-lantern", filtered!.Id);
     }
 
     [Fact]

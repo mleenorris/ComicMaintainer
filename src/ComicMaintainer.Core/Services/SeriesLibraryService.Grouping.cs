@@ -657,6 +657,43 @@ public partial class SeriesLibraryService
     }
 
     /// <summary>
+    /// The one group going by a name whose series key is <paramref name="seriesId"/>, for an id no
+    /// group has (see <see cref="TryResolveGroup"/>, tried first on every group). A series' id
+    /// follows its files: once processing tags them with the series' ComicVine title ("Green
+    /// Lantern (2023)" becomes "Green Lantern"), its id changes with it, and a page or link opened
+    /// before still asks for the former one. The former title stays one of the group's names.
+    /// Only reading a series' issues uses it, whose answer names the current id; writes and jobs
+    /// act on an exact id only. False when no group, or more than one, goes by such a name.
+    /// </summary>
+    private static bool TryResolveFormerId(
+        Dictionary<string, SeriesAccumulator> groups,
+        string seriesId,
+        out SeriesAccumulator accumulator)
+    {
+        accumulator = null!;
+        if (IsAmbiguousNormalizedKey(seriesId))
+        {
+            return false;
+        }
+
+        var named = groups.Values
+            .Where(candidate => NamesOf(candidate).Any(name =>
+                string.Equals(SeriesKey.TryNormalize(name), seriesId, StringComparison.OrdinalIgnoreCase)))
+            .Take(2)
+            .ToList();
+        if (named.Count != 1)
+        {
+            return false;
+        }
+
+        accumulator = named[0];
+        return true;
+    }
+
+    private static IEnumerable<string?> NamesOf(SeriesAccumulator group)
+        => new[] { group.DisplayTitle, group.CanonicalTitle }.Concat(group.Aliases);
+
+    /// <summary>
     /// Returns true if a normalized series key carries no real identifying
     /// signal and therefore must not be used to bridge two different cache
     /// records. A key is ambiguous when it is empty, "unknown-series", shorter

@@ -225,4 +225,28 @@ public class IssueNumberParserTests
         Assert.True(IssueNumberParser.ContainsIssueNumber("All-New X-Men Vol. 2 - Chapter 0001.MU", "1.MU"));
         Assert.False(IssueNumberParser.ContainsIssueNumber("All-New X-Men Vol. 2 - Chapter 0001", "1.MU"));
     }
+
+    [Theory]
+    [InlineData("Vol. 2 004 (2023)", "2|4")]
+    [InlineData("I Hate Fairyland v02 - 004", "2|4")]
+    [InlineData("Series Volume 3 - Chapter 012.5", "3|12.5")]
+    [InlineData("Series Vol.1 Ch.12", "1|12")]
+    [InlineData("Series Vol 3 #5", "3|5")]
+    [InlineData("Series v2 #1 (of 6)", "2|1")]
+    [InlineData("Series Vol. 1.5 3", "1.5|3")]
+    [InlineData("Series Vol. 2 Chapter 2016", "2|2016")]
+    [InlineData("Batman Vol. 2 001-006", null)]
+    [InlineData("Batman Vol. 2 001 - 006", null)]
+    [InlineData("Batman Vol. 2 2016", null)]
+    [InlineData("Star Wars v2 1977", null)]
+    [InlineData("100 Bullets Vol. 1 (2000)", null)]
+    [InlineData("Saga Vol. 1 - Chapters 1-6", null)]
+    [InlineData("Spider-Man 2099 Vol. 2", null)]
+    [InlineData("Series Vol. 2 004th", null)]
+    [InlineData("Series (Vol. 9 004)", null)]
+    [InlineData("Series 004 (2023)", null)]
+    [InlineData("  ", null)]
+    [InlineData(null, null)]
+    public void ParseVolumeAndIssue_ReadsOnlyAnIssueRightAfterTheVolume(string? name, string? expected)
+        => Assert.Equal(expected, IssueNumberParser.ParseVolumeAndIssue(name) is { } found ? $"{found.Volume}|{found.Issue}" : null);
 }

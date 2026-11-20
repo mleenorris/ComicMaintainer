@@ -585,3 +585,73 @@ test('a loaded series remapped to a cached list unselects what a fresh reload of
     assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
     assert.equal(text(page.$('#selectInfo')), '1 file selected');
 });
+
+test('issues answered under another id move the page to it', async () => {
+    // Processing tagged the files with their ComicVine title, so the series'
+    // id changed; the server finds the former id by the series' former name
+    // and answers under the current one.
+    const moved = seriesCard({ id: 'saga-2', aliases: ['Saga (2012)'] });
+    const page = await bootSeries({ routes: { [`GET ${ISSUES}`]: issuesBody(moved, [issue(1), issue(2)]) } });
+    await page.settle();
+
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'saga-2');
+    assert.equal(page.evaluate('window.location.hash'), '#/series/saga-2');
+    assert.equal(issueCards(page).length, 2, 'the list just read is shown');
+    assert.deepEqual(callsTo(page, issuesPath('saga-2')), [], 'and not fetched again');
+    assert.equal(page.evaluate("seriesIssuesCache.has('saga')"), false);
+    // The library list, answered after the issues, still has the former id:
+    // the page is not remapped back to it.
+    assert.deepEqual(page.evaluate('seriesLibrary.map(s => s.id)'), ['saga']);
+    assert.deepEqual(page.errors, []);
+});
+
+test('a filtered answer under another id does not move the page', async () => {
+    // A filter can shift the id of what it shows; only an unfiltered answer
+    // says the series moved.
+    const page = await bootSeries();
+    await page.settle();
+    page.route(`GET ${ISSUES}`, issuesBody(seriesCard({ id: 'saga-unread' }), [issue(1)]));
+
+    page.evaluate("filterMode = 'unread'");
+    await page.evaluate("loadSeriesIssues('saga', true)");
+    await page.settle();
+
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'saga');
+    assert.equal(page.evaluate('window.location.hash'), '#/series/saga');
+});
+
+test('a refresh queued before a move reloads the list under the new id', async () => {
+    const moved = seriesCard({ id: 'saga-2' });
+    const gate = deferred();
+    const page = await bootSeries();
+    await page.settle();
+    // The refresh in flight answers under the new id; the one queued behind it must follow.
+    page.route(`GET ${ISSUES}`, () => gate.promise.then(() => issuesBody(moved, [issue(1)])));
+    page.route(`GET ${issuesPath('saga-2')}`, issuesBody(moved, [issue(1), issue(2)]));
+
+    const first = page.evaluate("loadSeriesIssues('saga', true, { immediate: true })");
+    const queued = page.evaluate("loadSeriesIssues('saga', true, { immediate: true })");
+    gate.resolve();
+    await first;
+    await queued;
+    await page.settle();
+
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'saga-2');
+    assert.equal(callsTo(page, issuesPath('saga-2')).length, 1, 'the queued refresh asks for the new id');
+    assert.equal(issueCards(page).length, 2);
+    assert.equal(page.evaluate("seriesIssuesCache.has('saga')"), false, 'and leaves nothing under the former one');
+});
+
+test('a move replaces an older list of the new id', async () => {
+    const moved = seriesCard({ id: 'saga-2' });
+    const page = await bootSeries();
+    await page.settle();
+    page.evaluate("seriesIssuesCache.set('saga-2', { issues: [], loaded: true, loading: false, error: false, filter: 'all' })");
+    page.route(`GET ${ISSUES}`, issuesBody(moved, [issue(1), issue(2)]));
+
+    await page.evaluate("loadSeriesIssues('saga', true, { immediate: true })");
+    await page.settle();
+
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'saga-2');
+    assert.equal(issueCards(page).length, 2);
+});

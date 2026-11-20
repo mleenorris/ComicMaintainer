@@ -467,6 +467,69 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     }
 
     [Fact]
+    public async Task Normalize_TheVolumeNumberTaggedAsTheIssue_IsCorrectedFromTheFileName()
+    {
+        // A tagger wrote every issue of "Vol. 2" as Number 2: the file name's issue wins.
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("I Hate Fairyland", "Vol. 2 004 (2023).cbz",
+            "<ComicInfo><Series>I Hate Fairyland</Series><Number>2</Number><Volume>2</Volume><Title>Chapter 2</Title><Year>2023</Year></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var info = ReadComicInfo(path);
+        Assert.Equal(("4", "Chapter 4", "2"), (info.Element("Number")?.Value, info.Element("Title")?.Value, info.Element("Volume")?.Value));
+    }
+
+    [Fact]
+    public async Task PreviewProcessing_TheVolumeNumberTaggedAsTheIssue_ShowsTheCorrection()
+    {
+        // Otherwise normalized, so only the mistake makes it one to rewrite.
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("I Hate Fairyland", "Vol. 2 004 (2023).cbz",
+            "<ComicInfo><Series>I Hate Fairyland</Series><Number>2</Number><Volume>2</Volume><Title>Chapter 2</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        Assert.Equal("4", ReadComicInfo(path).Element("Number")?.Value);
+    }
+
+    [Theory]
+    [InlineData("Vol. 2 002 (2022).cbz", "2")] // the second issue of Vol. 2: right as it is
+    [InlineData("Vol. 3 004 (2023).cbz", "2")] // the file name names another volume than the tags
+    [InlineData("004 (2023).cbz", "2")] // no volume in the file name to show the mistake
+    [InlineData("Vol. 2 (2023).cbz", "2")] // no issue in the file name
+    [InlineData("I Hate Fairyland 2 Vol. 2 (2023).cbz", "2")] // a collected edition: no issue after the volume
+    [InlineData("Saga Vol. 2 - Chapters 7-12.cbz", "2")] // ...nor a number from its title
+    public async Task Normalize_AnIssueThatRepeatsTheVolume_IsKept_WithoutTheFileNameShowingTheMistake(string fileName, string expected)
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("I Hate Fairyland", fileName,
+            "<ComicInfo><Series>I Hate Fairyland</Series><Number>2</Number><Volume>2</Volume><Title>Chapter 2</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        Assert.Equal(expected, ReadComicInfo(path).Element("Number")?.Value);
+    }
+
+    [Fact]
+    public async Task Normalize_ALockedIssueThatRepeatsTheVolume_IsKept()
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("I Hate Fairyland", "Vol. 2 004 (2023).cbz",
+            "<ComicInfo><Series>I Hate Fairyland</Series><Number>2</Number><Volume>2</Volume><Title>Chapter 2</Title></ComicInfo>");
+        _fileStore.Setup(f => f.GetFileAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(new ComicFile
+        {
+            FilePath = path,
+            Metadata = new ComicMetadata { Issue = "2", IsUserEdited = true, UserLockedFieldsMask = (long)ComicMetadataFieldFlags.Issue }
+        });
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        Assert.Equal("2", ReadComicInfo(path).Element("Number")?.Value);
+    }
+
+    [Fact]
     public async Task Normalize_ALockedOldFileNameTitle_IsKept()
     {
         _settings.WatcherEnableRename = false;

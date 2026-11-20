@@ -49,6 +49,8 @@ public class JobsControllerBatchTests
             .Callback<IEnumerable<string>, CancellationToken>((f, t) => Capture(f, null, t)).ReturnsAsync(_jobId);
         _processor.Setup(p => p.UpdateMetadataAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<ComicMetadata>(), It.IsAny<ComicMetadataFieldFlags>(), It.IsAny<CancellationToken>()))
             .Callback<IEnumerable<string>, ComicMetadata, ComicMetadataFieldFlags, CancellationToken>((f, _, _, t) => Capture(f, null, t)).ReturnsAsync(_jobId);
+        _processor.Setup(p => p.ShiftIssueNumbersAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<string>, int, CancellationToken>((f, _, t) => Capture(f, null, t)).ReturnsAsync(_jobId);
     }
 
     private JobsController CreateController(AppSettings settings) => new(
@@ -83,6 +85,8 @@ public class JobsControllerBatchTests
     [InlineData("delete", "unmarked")]
     [InlineData("update-metadata", "all")]
     [InlineData("update-metadata", "unmarked")]
+    [InlineData("shift-issues", "all")]
+    [InlineData("shift-issues", "unmarked")]
     [InlineData("remove-metadata", "unmarked")]
     [InlineData("bogus", "all")]
     [InlineData("process", "bogus")]
@@ -369,6 +373,57 @@ public class JobsControllerBatchTests
     }
 
     // ---- update-metadata ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task ShiftIssues_StartsTheShiftOfTheSelectedFiles()
+    {
+        var result = await _controller.StartBatchJob("shift-issues", "selected", new JobsController.BatchJobRequest
+        {
+            Files = new() { "/c/a.cbz", "/c/b.cbz" },
+            IssueOffset = -2
+        });
+
+        Assert.Equal(2, Response(result).TotalItems);
+        _processor.Verify(p => p.ShiftIssueNumbersAsync(
+            It.Is<IEnumerable<string>>(files => files.SequenceEqual(new[] { "/c/a.cbz", "/c/b.cbz" })),
+            -2,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ShiftIssues_ThatCannotAllMove_IsRefusedWithTheReasons()
+    {
+        _processor.Setup(p => p.ShiftIssueNumbersAsync(It.IsAny<IEnumerable<string>>(), -2, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new IssueShiftRefusedException(new[] { "a.cbz: #1 would fall below 0", "b.cbz: it has no issue number" }));
+
+        var result = await _controller.StartBatchJob("shift-issues", "selected", new JobsController.BatchJobRequest
+        {
+            Files = new() { "/c/a.cbz", "/c/b.cbz" },
+            IssueOffset = -2
+        });
+
+        Assert.Equal("a.cbz: #1 would fall below 0 (and 1 more)", ErrorOf(result));
+        var body = Assert.IsType<BadRequestObjectResult>(result.Result).Value!;
+        Assert.Equal(new[] { "a.cbz: #1 would fall below 0", "b.cbz: it has no issue number" },
+            (IReadOnlyList<string>)body.GetType().GetProperty("problems")!.GetValue(body)!);
+    }
+
+    [Theory]
+    [InlineData(null, "No issue number shift specified")]
+    [InlineData(0, "No issue number shift specified")]
+    [InlineData(10001, "The issue number shift must be between -10000 and 10000")]
+    [InlineData(-10001, "The issue number shift must be between -10000 and 10000")]
+    public async Task ShiftIssues_WithoutAUsableShift_IsRefused(int? offset, string expected)
+    {
+        var result = await _controller.StartBatchJob("shift-issues", "selected", new JobsController.BatchJobRequest
+        {
+            Files = new() { "/c/a.cbz" },
+            IssueOffset = offset
+        });
+
+        Assert.Equal(expected, ErrorOf(result));
+        VerifyNothingQueued();
+    }
 
     [Fact]
     public async Task UpdateMetadata_WithoutAFieldList_AppliesTheFieldsThatCarryAValue()

@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
@@ -37,6 +38,10 @@ public class JobsController : ControllerBase
                 BatchScope.Selected,
                 batch => batch.Processor.UpdateMetadataAsync(batch.Files, batch.Request.Metadata!, MetadataFields(batch.Request)),
                 ValidateMetadataEdit),
+            ["shift-issues"] = new(
+                BatchScope.Selected,
+                batch => batch.Processor.ShiftIssueNumbersAsync(batch.Files, batch.Request.IssueOffset!.Value),
+                ValidateIssueShift),
             ["delete"] = new(BatchScope.Selected, batch => batch.Processor.DeleteFilesAsync(batch.Files), ActsOnEntry: true),
             ["recheck-duplicates"] = new(
                 BatchScope.Selected | BatchScope.All,
@@ -176,7 +181,7 @@ public class JobsController : ControllerBase
     /// selects. The routes this serves are the operation and scope joined by a hyphen, such as
     /// <c>POST /api/jobs/process-all</c> or <c>POST /api/jobs/remove-metadata-selected</c>.
     /// </summary>
-    /// <param name="operation">What to do: process, rename, normalize, remove-metadata, update-metadata or delete.</param>
+    /// <param name="operation">What to do: process, rename, normalize, remove-metadata, update-metadata, shift-issues or delete.</param>
     /// <param name="scope">Which files: selected, all or unmarked.</param>
     /// <param name="request">The selected files and options. Not needed for the all and unmarked scopes.</param>
     /// <param name="forceReprocess">Reprocess files already marked as done; the body can say the same.</param>
@@ -216,7 +221,16 @@ public class JobsController : ControllerBase
             return Ok(new BatchJobResponse(Guid.Empty.ToString(), 0));
         }
 
-        var jobId = await batchOperation.Start(new BatchInvocation(_processor, files, request, forceReprocess || request.ForceReprocess));
+        Guid jobId;
+        try
+        {
+            jobId = await batchOperation.Start(new BatchInvocation(_processor, files, request, forceReprocess || request.ForceReprocess));
+        }
+        catch (IssueShiftRefusedException refused)
+        {
+            // Checked before anything is written: the files cannot all be shifted.
+            return BadRequest(new { error = refused.Message, problems = refused.Problems });
+        }
 
         _logger.LogInformation(
             LoggingHelper.WithWebsitePrefix("Batch {Operation}-{Scope}: job {JobId} started for {TotalFiles} file(s)"),
@@ -335,6 +349,14 @@ public class JobsController : ControllerBase
         };
         return parsed != BatchScope.None;
     }
+
+    private static string? ValidateIssueShift(BatchJobRequest request) => request.IssueOffset switch
+    {
+        null or 0 => "No issue number shift specified",
+        > ComicProcessorService.MaxIssueNumberShift or < -ComicProcessorService.MaxIssueNumberShift
+            => $"The issue number shift must be between -{ComicProcessorService.MaxIssueNumberShift} and {ComicProcessorService.MaxIssueNumberShift}",
+        _ => null,
+    };
 
     private static string? ValidateMetadataEdit(BatchJobRequest request)
     {
@@ -512,6 +534,12 @@ public class JobsController : ControllerBase
         /// every field that carries a value is applied and nothing is removed.
         /// </summary>
         public List<string>? Fields { get; set; }
+
+        /// <summary>
+        /// How far to move each file's issue number, for shift-issues: -2 makes issue 3 issue 1.
+        /// Not 0, at most <see cref="ComicProcessorService.MaxIssueNumberShift"/> either way.
+        /// </summary>
+        public int? IssueOffset { get; set; }
     }
 
     /// <summary>

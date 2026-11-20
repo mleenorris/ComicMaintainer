@@ -1393,6 +1393,98 @@
             return words[number - 1] || `${number}th`;
         }
 
+        // ── Shift issue numbers ──────────────────────────────────────────────
+        // The selected issues of the open series, with what the shift would make of each.
+        let shiftIssuesCurrent = null;
+
+        function openShiftIssuesModal() {
+            const files = Array.from(selectedFiles);
+            if (!files.length) {
+                showMessage('Select the issues to shift first.', 'error');
+                return;
+            }
+            const cached = currentSeriesDetailId ? seriesIssuesCache.get(currentSeriesDetailId) : null;
+            const byPath = new Map((cached && Array.isArray(cached.issues) ? cached.issues : []).map(issue => [issue.file_path, issue]));
+            shiftIssuesCurrent = { files, byPath };
+            const input = document.getElementById('shiftIssuesOffset');
+            input.value = '';
+            renderShiftIssuesPreview();
+            document.getElementById('shiftIssuesModal').classList.add('active');
+            input.focus();
+        }
+
+        // The shift typed in: a whole number other than 0, or null.
+        function shiftIssuesOffset() {
+            const text = document.getElementById('shiftIssuesOffset').value.trim();
+            if (!/^[+-]?\d{1,5}$/.test(text)) return null;
+            const offset = Number(text);
+            return offset !== 0 && Math.abs(offset) <= 10000 ? offset : null;
+        }
+
+        // What the shift makes of one issue number: the new number, or null when it is not a
+        // plain number or would fall below 0 (that issue is left out of the shift).
+        function shiftedIssueNumber(issue, offset) {
+            const text = typeof issue === 'string' ? issue.trim() : (typeof issue === 'number' ? String(issue) : '');
+            if (!/^(\d+\.?\d*|\.\d+)$/.test(text)) return null;
+            const decimals = (text.split('.')[1] || '').length;
+            const shifted = Number((Number(text) + offset).toFixed(decimals));
+            return shifted < 0 ? null : String(shifted);
+        }
+
+        function renderShiftIssuesPreview() {
+            const current = shiftIssuesCurrent;
+            const list = document.getElementById('shiftIssuesPreview');
+            const apply = document.getElementById('shiftIssuesApply');
+            if (!current || !list || !apply) return;
+            const offset = shiftIssuesOffset();
+            const rows = current.files.map(path => {
+                const issue = current.byPath.get(path);
+                const name = path.split('/').pop();
+                const number = issue ? issue.issue : null;
+                const shifted = offset === null || !issue ? null : shiftedIssueNumber(number, offset);
+                return { path, name, number, shifted };
+            }).sort((a, b) => (parseFloat(a.number) || 0) - (parseFloat(b.number) || 0));
+            // Only the issues of this series the shift moves are sent: one picked elsewhere,
+            // or whose number cannot move, is left as it is.
+            current.shifting = offset === null ? [] : rows.filter(row => row.shifted !== null).map(row => row.path);
+            apply.disabled = current.shifting.length === 0;
+            renderHtml(list, rows.map(row => html`
+                <div class="shift-issues-row">
+                    <span class="shift-issues-name">${row.name}</span>
+                    <span class="shift-issues-change">${offset === null
+                        ? `#${row.number ?? '?'}`
+                        : row.shifted === null ? `#${row.number ?? '?'}: left as it is` : `#${row.number} → #${row.shifted}`}</span>
+                </div>
+            `));
+        }
+
+        function closeShiftIssuesModal() {
+            document.getElementById('shiftIssuesModal').classList.remove('active');
+            shiftIssuesCurrent = null;
+        }
+
+        async function applyShiftIssues() {
+            const current = shiftIssuesCurrent;
+            const offset = shiftIssuesOffset();
+            if (!current || offset === null || !current.shifting || !current.shifting.length) return;
+            if (!jobProgress.canStartJob()) return;
+            closeShiftIssuesModal();
+            showProgressModal('Shifting issue numbers...');
+            try {
+                const data = await apiFetch('/api/jobs/shift-issues-selected', {
+                    method: 'POST',
+                    body: { Files: current.shifting, IssueOffset: offset },
+                    errorMessage: 'Failed to start shifting issue numbers'
+                });
+                showMessage(`Started shifting the issue numbers of ${data.total_items} issue(s)`, 'info');
+                await trackJobStatus(data.job_id, 'Shifting Issue Numbers...');
+            } catch (error) {
+                if (error.authHandled) return;
+                showMessage('Failed to start shifting issue numbers: ' + error.message, 'error');
+                closeProgressModal();
+            }
+        }
+
         function closeVolumeNumbersModal() {
             document.getElementById('volumeNumbersModal').classList.remove('active');
             volumeNumbersCurrent = null;
@@ -2083,6 +2175,7 @@
                             </label>
                             <span class="series-detail-selection-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} in this series</span>
                             <button type="button" class="btn btn-small" data-requires-write onclick="openEmailSendModalForSelected()">${uiIcon('mail')} Email Selected</button>
+                            <button type="button" class="btn btn-small" data-requires-write onclick="openShiftIssuesModal()" title="Move the issue numbers of the selected issues, when a downloader numbered them from the wrong start">${uiIcon('list')} Shift Issue Numbers</button>
                         </div>
                         ${rawHtml(renderMissingIssuesBanner(issues, series))}
                     ` : ''}

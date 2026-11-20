@@ -2437,6 +2437,32 @@
          </div>
      </div>
 
+     <!-- Shift Issue Numbers Modal -->
+     <div class="modal" id="shiftIssuesModal" role="dialog" aria-modal="true" aria-labelledby="shiftIssuesModalTitle" aria-hidden="true">
+         <div class="modal-content" style="max-width: 640px;">
+             <div class="modal-header">
+                 <h2 id="shiftIssuesModalTitle">Shift Issue Numbers</h2>
+                 <button class="close-btn" onclick="closeShiftIssuesModal()">&times;</button>
+             </div>
+             <div class="modal-body">
+                 <p class="combine-folders-meta">
+                     For issues a downloader numbered from the wrong start. Each selected issue's number moves by the amount you enter
+                     (-2 makes issue 3 issue 1), is locked so processing keeps it, and the files are renamed to match, one at a time.
+                     Nothing changes unless every issue can move: none may end on a number another issue of the volume keeps.
+                 </p>
+                 <div class="form-group">
+                     <label for="shiftIssuesOffset">Shift by</label>
+                     <input type="number" id="shiftIssuesOffset" step="1" min="-10000" max="10000" placeholder="-2" oninput="renderShiftIssuesPreview()">
+                 </div>
+                 <div id="shiftIssuesPreview" class="combine-folders-list"></div>
+             </div>
+             <div class="modal-footer">
+                 <button class="btn" onclick="closeShiftIssuesModal()">Cancel</button>
+                 <button class="btn btn-primary" id="shiftIssuesApply" onclick="applyShiftIssues()" disabled>Shift</button>
+             </div>
+         </div>
+     </div>
+
      <!-- Volume Numbers Modal -->
      <div class="modal" id="volumeNumbersModal" role="dialog" aria-modal="true" aria-labelledby="volumeNumbersModalTitle" aria-hidden="true">
          <div class="modal-content" style="max-width: 720px;">

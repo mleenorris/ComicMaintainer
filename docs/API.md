@@ -555,6 +555,7 @@ So the concrete routes are:
 - `POST /api/jobs/normalize-selected`, `POST /api/jobs/normalize-all`, `POST /api/jobs/normalize-unmarked`
 - `POST /api/jobs/remove-metadata-selected`, `POST /api/jobs/remove-metadata-all`
 - `POST /api/jobs/update-metadata-selected`
+- `POST /api/jobs/shift-issues-selected`: body `{"Files":[...],"IssueOffset":-2}`. Moves each file's issue number by the offset (not 0, at most 10000 either way). It is checked first: every file needs a plain number that stays at or above 0, no two may end on one number of one volume in a folder, and no file left out may already hold one of the new numbers there. Otherwise it answers `400` with `{"error","problems":[...]}` and writes nothing. The job then shifts the files one at a time in the order that frees each name before it is taken: the number is written and locked, and the file renamed unless renaming is off. After a failure the remaining files are skipped.
 - `POST /api/jobs/delete-selected`
 - `POST /api/jobs/recheck-duplicates-selected`, `POST /api/jobs/recheck-duplicates-all`
 

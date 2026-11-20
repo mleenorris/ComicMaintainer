@@ -225,4 +225,15 @@ public class IssueNumberParserTests
         Assert.True(IssueNumberParser.ContainsIssueNumber("All-New X-Men Vol. 2 - Chapter 0001.MU", "1.MU"));
         Assert.False(IssueNumberParser.ContainsIssueNumber("All-New X-Men Vol. 2 - Chapter 0001", "1.MU"));
     }
+
+    [Theory]
+    [InlineData("Vol. 2 004 (2023)", "2")]
+    [InlineData("I Hate Fairyland v02 004", "2")]
+    [InlineData("Series Volume 3 - Chapter 012", "3")]
+    [InlineData("Series (Vol. 9) 004", null)]
+    [InlineData("Series 004 (2023)", null)]
+    [InlineData("  ", null)]
+    [InlineData(null, null)]
+    public void ParseVolume_ReadsTheVolumeToken_OutsideBrackets(string? name, string? expected)
+        => Assert.Equal(expected, IssueNumberParser.ParseVolume(name));
 }

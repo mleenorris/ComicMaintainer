@@ -197,6 +197,12 @@ public partial class ComicProcessorService
             return false;
         }
 
+        // A volume number a tagger put in <Number> is corrected from the file name (see IssueMistakenForVolumeAsync).
+        if (await IssueMistakenForVolumeAsync(metadata, filePath, cancellationToken) is not null)
+        {
+            return false;
+        }
+
         // A missing <Number> is not normalized when the filename holds the issue
         // number: normalize recovers it into the metadata (see NormalizeMetadataAsync).
         var expectedIssue = metadata.Issue;
@@ -315,9 +321,38 @@ public partial class ComicProcessorService
     /// True when the user locked the file's title by editing it. The lock is kept in the database,
     /// not in the archive, so it is read from the stored record.
     /// </summary>
-    private async Task<bool> IsTitleLockedAsync(string filePath, CancellationToken cancellationToken)
+    private Task<bool> IsTitleLockedAsync(string filePath, CancellationToken cancellationToken)
+        => IsFieldLockedAsync(filePath, ComicMetadataFieldFlags.Title, cancellationToken);
+
+    private async Task<bool> IsFieldLockedAsync(string filePath, ComicMetadataFieldFlags field, CancellationToken cancellationToken)
         => await GetTrackedFileAsync(filePath, cancellationToken) is { Metadata: { } stored }
-           && ((ComicMetadataFieldFlags)stored.UserLockedFieldsMask).HasFlag(ComicMetadataFieldFlags.Title);
+           && ((ComicMetadataFieldFlags)stored.UserLockedFieldsMask).HasFlag(field);
+
+    /// <summary>
+    /// The file name's issue number when the tags hold the volume's number as the issue: some
+    /// taggers write <c>Vol. 2 004 (2023)</c> as Number 2, Volume 2, so every issue of the volume
+    /// becomes #2 and all but one are left as duplicates. It is taken as that mistake only when
+    /// <c>&lt;Number&gt;</c> equals <c>&lt;Volume&gt;</c>, the file name's volume token names the
+    /// same volume, and the file name gives another issue number; and never when the user locked
+    /// the issue. Null otherwise: the tags are trusted over the file name.
+    /// </summary>
+    private async Task<string?> IssueMistakenForVolumeAsync(ComicMetadata metadata, string filePath, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(metadata.Issue) || !IssueNumberParser.AreEquivalent(metadata.Issue.Trim(), metadata.Volume?.Trim()))
+        {
+            return null;
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(filePath);
+        if (!IssueNumberParser.AreEquivalent(IssueNumberParser.ParseVolume(stem), metadata.Volume!.Trim())
+            || IssueNumberParser.Parse(stem) is not { } fromFileName
+            || IssueNumberParser.AreEquivalent(fromFileName, metadata.Issue.Trim()))
+        {
+            return null;
+        }
+
+        return await IsFieldLockedAsync(filePath, ComicMetadataFieldFlags.Issue, cancellationToken) ? null : fromFileName;
+    }
 
     /// <summary>
     /// The history note for a write that succeeded without rewriting the archive, or null.
@@ -494,6 +529,14 @@ public partial class ComicProcessorService
         if (AnnualIssue.IsAnnualIssueText(normalizedMetadata.Issue))
         {
             normalizedMetadata.Issue = AnnualIssue.IssueNumber(normalizedMetadata.Issue);
+        }
+
+        if (await IssueMistakenForVolumeAsync(metadata, filePath, cancellationToken) is { } fromFileName)
+        {
+            _logger.LogDebug("Replacing an issue number that repeats the volume with the file name's: {Before} -> {After}",
+                LoggingHelper.SanitizeForLog(normalizedMetadata.Issue),
+                LoggingHelper.SanitizeForLog(fromFileName));
+            normalizedMetadata.Issue = fromFileName;
         }
 
         // If the ComicInfo metadata is missing the issue/chapter number, fall back

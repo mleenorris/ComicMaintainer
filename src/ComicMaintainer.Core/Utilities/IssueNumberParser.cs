@@ -68,7 +68,7 @@ public static class IssueNumberParser
 
     /// <summary>Volume tokens such as "Vol.1", "Vol 2", "Volume 3" or "v01".</summary>
     private static readonly Regex VolumePattern = new(
-        @"(?<!\p{L})v(?:ol(?:ume)?)?\.?[\s._-]*\d+(?:\.\d+)?",
+        @"(?<!\p{L})v(?:ol(?:ume)?)?\.?[\s._-]*(?<volume>\d+(?:\.\d+)?)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
         MatchTimeout);
 
@@ -162,6 +162,24 @@ public static class IssueNumberParser
     /// numerically ("0005" holds "5"). Used to check that a generated file name kept the chapter.
     /// </summary>
     public static bool ContainsIssueNumber(string? fileNameStem, string? issue)
+        => ContainsNumber(fileNameStem, issue);
+
+    /// <summary>
+    /// The volume number of the first volume token in a file name outside brackets ("Vol. 2 004
+    /// (2023)" gives "2", "v01 012" gives "1"), with its zero padding removed; null when it has none.
+    /// </summary>
+    public static string? ParseVolume(string? fileNameStem)
+    {
+        if (string.IsNullOrWhiteSpace(fileNameStem))
+        {
+            return null;
+        }
+
+        var match = VolumePattern.Match(RemoveBracketedQualifiers(fileNameStem));
+        return match.Success ? StripLeadingZeros(match.Groups["volume"].Value) : null;
+    }
+
+    private static bool ContainsNumber(string? fileNameStem, string? issue)
     {
         if (string.IsNullOrWhiteSpace(fileNameStem) || string.IsNullOrWhiteSpace(issue))
         {

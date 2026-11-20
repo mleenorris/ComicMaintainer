@@ -652,9 +652,30 @@ public partial class SeriesLibraryService
             }
         }
 
+        // A series' id follows its files: once processing tags them with the series' ComicVine
+        // title ("Green Lantern (2023)" becomes "Green Lantern"), the group's id changes with it,
+        // and a page or link opened before still asks for the former one. The former title stays
+        // one of the group's names, so the id is found through them, when exactly one group has it.
+        if (!IsAmbiguousNormalizedKey(seriesId))
+        {
+            var named = groups.Values
+                .Where(candidate => NamesOf(candidate).Any(name =>
+                    string.Equals(SeriesKey.TryNormalize(name), seriesId, StringComparison.OrdinalIgnoreCase)))
+                .Take(2)
+                .ToList();
+            if (named.Count == 1)
+            {
+                accumulator = named[0];
+                return true;
+            }
+        }
+
         accumulator = null!;
         return false;
     }
+
+    private static IEnumerable<string?> NamesOf(SeriesAccumulator group)
+        => new[] { group.DisplayTitle, group.CanonicalTitle }.Concat(group.Aliases);
 
     /// <summary>
     /// Returns true if a normalized series key carries no real identifying

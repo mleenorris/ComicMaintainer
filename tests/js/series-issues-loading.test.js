@@ -585,3 +585,19 @@ test('a loaded series remapped to a cached list unselects what a fresh reload of
     assert.deepEqual(page.evaluate('[...selectedFiles]'), ['/comics/Saga/Saga 002.cbz']);
     assert.equal(text(page.$('#selectInfo')), '1 file selected');
 });
+
+test('issues answered under another id move the page to it', async () => {
+    // Processing tagged the files with their ComicVine title, so the series'
+    // id changed; the server finds the former id by the series' former name
+    // and answers under the current one.
+    const moved = seriesCard({ id: 'saga-2', aliases: ['Saga (2012)'] });
+    const page = await bootSeries({ routes: { [`GET ${ISSUES}`]: issuesBody(moved, [issue(1), issue(2)]) } });
+    await page.settle();
+
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'saga-2');
+    assert.equal(page.evaluate('window.location.hash'), '#/series/saga-2');
+    assert.equal(issueCards(page).length, 2, 'the list just read is shown');
+    assert.deepEqual(callsTo(page, issuesPath('saga-2')), [], 'and not fetched again');
+    assert.equal(page.evaluate("seriesIssuesCache.has('saga')"), false);
+    assert.deepEqual(page.errors, []);
+});

@@ -226,6 +226,11 @@ whose `<Number>` is 2 names another issue, so the number stays 2, the title stil
 volume, and that title's year is not read either. A volume runs across its issues, so such a title still fills an empty
 `<Volume>`.
 
+One tagger mistake is corrected from the file name: the volume's number written as the issue. When `<Number>` equals
+`<Volume>`, the file name has the same volume, and the file name gives another issue, the file name's issue is used:
+`Vol. 2 004 (2023).cbz` tagged Number 2, Volume 2 becomes issue 4 (and its generated title `Chapter 4`), instead of every
+issue of the volume becoming #2 and all but one being left as duplicates. An issue number you locked is kept.
+
 Annuals keep "Annual" in their series, the way ComicVine names them. That means `<Series>Green Lantern Annual</Series>`
 with `<Number>1</Number>`, and an issue written as `Annual 1` becomes number `1`. A file is an Annual when its series
 ends in "Annual", its number is written as one, its file name has "Annual" before the issue number (`Green Lantern

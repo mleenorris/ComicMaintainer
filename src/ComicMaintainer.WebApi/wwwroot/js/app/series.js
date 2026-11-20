@@ -84,10 +84,17 @@
         // remap currentSeriesDetailId by matching the previously-captured
         // title/alias keys against the freshly-loaded library. Returns the
         // remapped series object, or null when no match is found.
+        // Series ids the server answered under a newer id (former id → current
+        // id), as the issues of a former id are (see fetchSeriesIssues).
+        const movedSeriesIds = new Map();
+
         function remapCurrentSeriesDetailId() {
             if (!currentSeriesDetailId) return null;
             const remapped = findSeriesByTitleKeys(currentSeriesDetailTitleKeys);
             if (!remapped || remapped.id === currentSeriesDetailId) return null;
+            // The server said the listed id moved to the open one (see
+            // fetchSeriesIssues): the list is older than that answer.
+            if (movedSeriesIds.get(remapped.id) === currentSeriesDetailId) return null;
             // Migrate cached issues to the new id so we don't refetch when
             // the underlying content hasn't changed. Drop the old key. Never
             // migrate error entries — a 404/failure cached under the stale id
@@ -285,6 +292,7 @@
             entry.settled = new Promise(resolve => { settle = resolve; });
 
             let seriesMissing = false;
+            let movedTo = null;
             try {
                 let path = `/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}`;
                 if (filterMode !== 'all') {
@@ -310,6 +318,9 @@
                     entry.loaded = true;
                     entry.allLoaded = true;
                     entry.error = false;
+                    if (typeof data.id === 'string' && data.id && data.id !== seriesId) {
+                        movedTo = data.id;
+                    }
                     entry.titles = {
                         title: data.title,
                         canonical_title: data.canonical_title,
@@ -357,6 +368,25 @@
             // the newer list decides which selected issues are gone: this one
             // passes the issues it had to confirm on to it.
             const selectionPruned = entry.stale ? false : pruneSeriesIssueSelection(entry);
+
+            // The series answered under another id: processing renamed and
+            // regrouped its files (tagged with their ComicVine title), and the
+            // server found it by its former name. Open it under its id now, so
+            // the address and every later request use it; the list just read
+            // is kept for it (as remapCurrentSeriesDetailId moves a list).
+            if (movedTo && currentSeriesDetailId === seriesId && seriesIssuesCache.get(seriesId) === entry
+                && !seriesIssuesCache.has(movedTo)) {
+                transferSeriesIssuePaths(seriesId, movedTo);
+                // A library list read before the move still has the series
+                // under its former id: it must not be remapped back to it.
+                movedSeriesIds.set(seriesId, movedTo);
+                seriesIssuesCache.set(movedTo, entry);
+                entry.seriesId = movedTo;
+                seriesIssuesCache.delete(seriesId);
+                currentSeriesDetailId = movedTo;
+                history.replaceState(history.state, '', '#/series/' + encodeURIComponent(movedTo));
+                seriesId = movedTo;
+            }
 
             // Re-render only if the user is still on this series and this
             // answer has not been superseded (e.g. by a filter change).

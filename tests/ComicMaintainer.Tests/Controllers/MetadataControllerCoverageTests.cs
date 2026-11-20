@@ -29,9 +29,12 @@ public sealed class MetadataControllerCoverageTests : IDisposable
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<ISeriesLanguagePreferenceRetagService> _retag = new();
     private readonly CancellationTokenSource _cts = new();
+    private readonly Mock<IMetronClient> _metron = new();
+    private readonly ProviderHealth _metronHealth = new() { Name = "Metron", StatusMessage = "Disabled in settings" };
 
     public MetadataControllerCoverageTests()
     {
+        _metron.Setup(m => m.CheckHealthAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_metronHealth);
         // Case-, whitespace- and punctuation-insensitive, like the production key normaliser.
         _cache.Setup(c => c.NormalizeKey(It.IsAny<string?>()))
             .Returns<string?>(s => new string((s ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant());
@@ -54,6 +57,7 @@ public sealed class MetadataControllerCoverageTests : IDisposable
             _retag.Object,
             Mock.Of<IComicVineVolumeSearch>(),
             Mock.Of<IComicVineIssueDetailsService>(),
+            _metron.Object,
             lifetime)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
@@ -452,7 +456,22 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         var result = await CreateController(external: composite).GetProviders(_cts.Token);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
-        return Assert.IsType<List<ProviderHealth>>(ok.Value!.GetType().GetProperty("providers")!.GetValue(ok.Value));
+        var all = Assert.IsType<List<ProviderHealth>>(ok.Value!.GetType().GetProperty("providers")!.GetValue(ok.Value));
+
+        // Metron's own entry always comes last; the series providers are what these tests look at.
+        Assert.Same(_metronHealth, all[^1]);
+        return all.Take(all.Count - 1).ToList();
+    }
+
+    [Fact]
+    public async Task GetProviders_MetronCheckFailure_Escapes_AfterTheSeriesChecks()
+    {
+        _external.Setup(e => e.CheckHealthAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new ProviderHealth { Name = "ComicVine" });
+        _metron.Setup(m => m.CheckHealthAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("metron"));
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController().GetProviders(CancellationToken.None));
+
+        Assert.Equal("metron", thrown.Message);
     }
 
     [Fact]

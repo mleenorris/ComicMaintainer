@@ -28,8 +28,11 @@ public class MetadataControllerTests
             Mock.Of<IFileStoreService>(),
             Mock.Of<ISeriesLanguagePreferenceRetagService>(),
             Mock.Of<IComicVineVolumeSearch>(),
-            Mock.Of<IComicVineIssueDetailsService>());
+            Mock.Of<IComicVineIssueDetailsService>(),
+            _metron.Object);
     }
+
+    private readonly Mock<IMetronClient> _metron = new();
 
     [Fact]
     public async Task RefreshAll_QueuesJobForEveryLibrarySeries()
@@ -192,7 +195,8 @@ public class MetadataControllerTests
             Mock.Of<IFileStoreService>(),
             retag.Object,
             Mock.Of<IComicVineVolumeSearch>(),
-            Mock.Of<IComicVineIssueDetailsService>());
+            Mock.Of<IComicVineIssueDetailsService>(),
+            Mock.Of<IMetronClient>());
 
         var result = await controller.SetPreferredLanguage(
             "Batman",
@@ -284,15 +288,17 @@ public class MetadataControllerTests
                 Reachable = true,
                 StatusMessage = "Reachable"
             });
+        _metron.Setup(m => m.CheckHealthAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProviderHealth { Name = "Metron", StatusMessage = "Disabled in settings" });
 
         var result = await _controller.GetProviders(CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var providersProp = ok.Value!.GetType().GetProperty("providers")!.GetValue(ok.Value);
-        var providers = Assert.IsAssignableFrom<IEnumerable<ProviderHealth>>(providersProp!);
-        var single = Assert.Single(providers);
-        Assert.Equal("ComicVine", single.Name);
-        Assert.True(single.Reachable);
+        var providers = Assert.IsAssignableFrom<IEnumerable<ProviderHealth>>(providersProp!).ToList();
+        // The series provider, then Metron's own entry.
+        Assert.Equal(new[] { "ComicVine", "Metron" }, providers.Select(p => p.Name));
+        Assert.True(providers[0].Reachable);
     }
 
     [Fact]
@@ -381,7 +387,8 @@ public class MetadataControllerTests
             fileStore.Object,
             Mock.Of<ISeriesLanguagePreferenceRetagService>(),
             Mock.Of<IComicVineVolumeSearch>(),
-            Mock.Of<IComicVineIssueDetailsService>());
+            Mock.Of<IComicVineIssueDetailsService>(),
+            Mock.Of<IMetronClient>());
 
         var result = await controller.ApplyMatch(
             "Batman",

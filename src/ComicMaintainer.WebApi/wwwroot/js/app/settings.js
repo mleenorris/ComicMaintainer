@@ -175,6 +175,7 @@ showMessage('Default preferred language updated', 'success');
             enable_external_series_metadata: ['enableExternalSeriesMetadata'],
             comicvine_api_key_set: ['comicVineApiKey', 'comicVineClearApiKeyCheckbox'],
             comicvine_base_url: ['comicVineBaseUrl'],
+            metron_api_token_set: ['metronApiToken', 'metronClearApiTokenCheckbox'],
             metron_username: ['metronUsername'],
             metron_password_set: ['metronPassword', 'metronClearPasswordCheckbox'],
             metron_base_url: ['metronBaseUrl'],
@@ -367,6 +368,12 @@ showMessage('Default preferred language updated', 'success');
                     : 'Leave blank to disable ComicVine lookups. The key is stored in user settings on this instance.';
                 document.getElementById('comicVineClearApiKeyCheckbox').checked = false;
                 document.getElementById('comicVineBaseUrl').value = settingsData.comicvine_base_url || 'https://comicvine.gamespot.com/api';
+                // The token is never returned by the API; only whether one is stored.
+                document.getElementById('metronApiToken').value = '';
+                document.getElementById('metronApiTokenHint').textContent = settingsData.metron_api_token_set
+                    ? 'Leave blank to keep the stored token.'
+                    : 'Preferred to a username and password. The token is stored in user settings on this instance.';
+                document.getElementById('metronClearApiTokenCheckbox').checked = false;
                 document.getElementById('metronUsername').value = settingsData.metron_username || '';
                 // The password is never returned by the API; only whether one is stored.
                 document.getElementById('metronPassword').value = '';
@@ -1333,6 +1340,8 @@ errorEl.textContent = 'An error occurred. Please try again.';
             const comicVineApiKey = document.getElementById('comicVineApiKey').value.trim();
             const comicVineClearApiKey = document.getElementById('comicVineClearApiKeyCheckbox').checked;
             const comicVineBaseUrl = document.getElementById('comicVineBaseUrl').value.trim();
+            const metronApiToken = document.getElementById('metronApiToken').value.trim();
+            const metronClearApiToken = document.getElementById('metronClearApiTokenCheckbox').checked;
             const metronUsername = document.getElementById('metronUsername').value.trim();
             const metronPassword = document.getElementById('metronPassword').value;
             const metronClearPassword = document.getElementById('metronClearPasswordCheckbox').checked;
@@ -1451,6 +1460,7 @@ errorEl.textContent = 'An error occurred. Please try again.';
                     comicVineApiKey: unlessPinned('comicvine_api_key_set', comicVineClearApiKey ? '' : (comicVineApiKey || null)),
                     comicVineBaseUrl: unlessPinned('comicvine_base_url', comicVineBaseUrl || 'https://comicvine.gamespot.com/api'),
                     // '' clears the username; for the password, null keeps the stored one and '' clears it.
+                    metronApiToken: unlessPinned('metron_api_token_set', metronClearApiToken ? '' : (metronApiToken || null)),
                     metronUsername: unlessPinned('metron_username', metronUsername),
                     metronPassword: unlessPinned('metron_password_set', metronClearPassword ? '' : (metronPassword || null)),
                     metronBaseUrl: unlessPinned('metron_base_url', metronBaseUrl || 'https://metron.cloud/api'),

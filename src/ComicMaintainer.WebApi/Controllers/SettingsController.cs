@@ -96,6 +96,7 @@ public class SettingsController : ControllerBase
             metron_username = _appSettings.CurrentValue.MetronUsername,
             // The password is never returned; only whether one is stored.
             metron_password_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.MetronPassword),
+            metron_api_token_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.MetronApiToken),
             metron_base_url = _appSettings.CurrentValue.MetronBaseUrl,
             // Why Metron is left out now (a refused sign-in, a wrong address); null when it is fine.
             metron_problem = _metron.Problem,

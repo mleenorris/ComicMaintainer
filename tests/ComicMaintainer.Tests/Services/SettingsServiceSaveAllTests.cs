@@ -167,6 +167,12 @@ public sealed class SettingsServiceSaveAllTests : IDisposable
         Assert.Equal(("reader", " metron secret ", "https://metron.example/api"),
             (saved.GetProperty("MetronUsername").GetString(), saved.GetProperty("MetronPassword").GetString(), saved.GetProperty("MetronBaseUrl").GetString()));
 
+        // The API token is a secret too, kept as typed.
+        await _service.UpdateSettingsAsync(new SettingsUpdate { ExternalSeriesMetadata = new ExternalSeriesMetadataUpdate(MetronApiToken: "knox-token") });
+        Assert.Equal("knox-token", SavedSection().GetProperty("MetronApiToken").GetString());
+        await _service.UpdateSettingsAsync(new SettingsUpdate { ExternalSeriesMetadata = new ExternalSeriesMetadataUpdate(MetronApiToken: "") });
+        Assert.Equal(JsonValueKind.Null, SavedSection().GetProperty("MetronApiToken").ValueKind);
+
         // Null keeps the stored password and base URL; blank clears the password and username.
         await _service.UpdateSettingsAsync(new SettingsUpdate { ExternalSeriesMetadata = new ExternalSeriesMetadataUpdate(MetronUsername: "other") });
         Assert.Equal(" metron secret ", SavedSection().GetProperty("MetronPassword").GetString());

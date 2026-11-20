@@ -31,6 +31,7 @@ function settingsResponse(overrides = {}) {
         enable_external_series_metadata: true,
         comicvine_api_key_set: true,
         comicvine_base_url: 'https://comicvine.example/api',
+        metron_api_token_set: true,
         metron_username: 'reader',
         metron_password_set: true,
         metron_base_url: 'https://metron.example/api',

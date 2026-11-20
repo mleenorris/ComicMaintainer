@@ -43,6 +43,7 @@ public static class ErrorReportRedactor
         "SmtpPassword",
         "ComicVineApiKey",
         "MetronPassword",
+        "MetronApiToken",
         "GitHubToken",
         "ErrorReportingGitHubToken",
         "password",

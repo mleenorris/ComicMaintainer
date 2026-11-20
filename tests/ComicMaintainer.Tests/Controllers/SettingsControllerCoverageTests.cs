@@ -106,6 +106,7 @@ public class SettingsControllerCoverageTests
         _settings.ComicVineApiKey = "cv-key-do-not-echo";
         _settings.MetronUsername = "reader";
         _settings.MetronPassword = "metron-pw-do-not-echo";
+        _settings.MetronApiToken = "metron-token-do-not-echo";
 
         var result = await CreateController().GetAllSettings();
 
@@ -115,6 +116,7 @@ public class SettingsControllerCoverageTests
         Assert.True(json.GetProperty("error_reporting_github_token_set").GetBoolean());
         Assert.True(json.GetProperty("comicvine_api_key_set").GetBoolean());
         Assert.True(json.GetProperty("metron_password_set").GetBoolean());
+        Assert.True(json.GetProperty("metron_api_token_set").GetBoolean());
         Assert.Equal("reader", json.GetProperty("metron_username").GetString());
         Assert.Equal("https://metron.cloud/api", json.GetProperty("metron_base_url").GetString());
         Assert.Equal(JsonValueKind.Null, json.GetProperty("metron_problem").ValueKind);
@@ -129,6 +131,7 @@ public class SettingsControllerCoverageTests
         Assert.DoesNotContain("ghp_token_do_not_echo", raw);
         Assert.DoesNotContain("cv-key-do-not-echo", raw);
         Assert.DoesNotContain("metron-pw-do-not-echo", raw);
+        Assert.DoesNotContain("metron-token-do-not-echo", raw);
     }
 
     [Theory]
@@ -141,6 +144,7 @@ public class SettingsControllerCoverageTests
         _settings.ErrorReportingGitHubToken = secret;
         _settings.ComicVineApiKey = secret;
         _settings.MetronPassword = secret;
+        _settings.MetronApiToken = secret;
 
         var json = OkJson(await CreateController().GetAllSettings());
 
@@ -149,6 +153,7 @@ public class SettingsControllerCoverageTests
         Assert.False(json.GetProperty("error_reporting_github_token_set").GetBoolean());
         Assert.False(json.GetProperty("comicvine_api_key_set").GetBoolean());
         Assert.False(json.GetProperty("metron_password_set").GetBoolean());
+        Assert.False(json.GetProperty("metron_api_token_set").GetBoolean());
     }
 
     [Fact]

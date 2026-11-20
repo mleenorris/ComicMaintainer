@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Services;
@@ -67,6 +67,89 @@ public sealed class MetronClientTests
         _time.Advance(TimeSpan.FromDays(8));
         await client.SeriesOfComicVineVolumeAsync(91273);
         Assert.Equal(2, _requests.Count);
+    }
+
+    [Fact]
+    public async Task SeriesOfComicVineVolumeAsync_AnApiToken_IsSentAsABearerToken_InsteadOfThePassword()
+    {
+        var client = CreateClient(new AppSettings
+        {
+            EnableExternalSeriesMetadata = true,
+            MetronApiToken = " knox-token ",
+            MetronUsername = "reader",
+            MetronPassword = "secret",
+            MetronBaseUrl = "https://metron.example/api",
+        });
+
+        Assert.True(client.IsConfigured);
+        Assert.True((await client.SeriesOfComicVineVolumeAsync(91273)).Available);
+
+        var request = Assert.Single(_requests);
+        Assert.Equal(("Bearer", "knox-token"), (request.Headers.Authorization!.Scheme, request.Headers.Authorization.Parameter));
+
+        // A token alone is enough.
+        Assert.True(CreateClient(new AppSettings { EnableExternalSeriesMetadata = true, MetronApiToken = "t" }).IsConfigured);
+    }
+
+    [Fact]
+    public async Task SeriesOfComicVineVolumeAsync_ARefusedToken_SaysSo()
+    {
+        _answer = _ => Json("{}", HttpStatusCode.Unauthorized);
+        var client = CreateClient(new AppSettings { EnableExternalSeriesMetadata = true, MetronApiToken = "old", MetronBaseUrl = "https://metron.example/api" });
+
+        await client.SeriesOfComicVineVolumeAsync(1);
+
+        Assert.Equal("Metron refused the API token: check it under Settings", client.Problem);
+    }
+
+    [Theory]
+    [InlineData(false, "secret", "Disabled in settings")]
+    [InlineData(true, null, "Missing API token (or username and password)")]
+    public async Task CheckHealthAsync_NotSetUp_SaysWhy_AndAsksNothing(bool enabled, string? password, string message)
+    {
+        var client = CreateClient(new AppSettings { EnableExternalSeriesMetadata = enabled, MetronUsername = "reader", MetronPassword = password });
+
+        var health = await client.CheckHealthAsync();
+
+        Assert.Equal(("Metron", enabled, false, null, message), (health.Name, health.Enabled, health.Configured, health.Reachable, health.StatusMessage));
+        Assert.Empty(_requests);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ProbesAtMostEveryTenMinutes_AndCountsTheRequests()
+    {
+        var client = CreateClient();
+
+        var health = await client.CheckHealthAsync();
+
+        Assert.Equal((true, true, (bool?)true, "Reachable", 1L, 0L), (health.Enabled, health.Configured, health.Reachable, health.StatusMessage, health.SuccessCount, health.FailureCount));
+        Assert.Equal($"https://metron.example/api/series/?cv_id={MetronClient.ProbeVolumeId}", Assert.Single(_requests).RequestUri!.AbsoluteUri);
+        Assert.NotNull(health.LastSuccessUtc);
+
+        Assert.True((await client.CheckHealthAsync()).Reachable);
+        Assert.Single(_requests);
+
+        // Ten minutes on, Metron fails: the screen says how.
+        _time.Advance(TimeSpan.FromMinutes(11));
+        _answer = _ => Json("{}", HttpStatusCode.ServiceUnavailable);
+        health = await client.CheckHealthAsync();
+        Assert.Equal(((bool?)false, "Metron answered 503", "Metron answered 503", 1L, 1L),
+            (health.Reachable, health.StatusMessage, health.LastError, health.SuccessCount, health.FailureCount));
+        Assert.NotNull(health.LastFailureUtc);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ARefusedSignIn_ShowsAsNotReachable_WithoutAskingAgain()
+    {
+        _answer = _ => Json("{}", HttpStatusCode.Unauthorized);
+        var client = CreateClient();
+        await client.SeriesOfComicVineVolumeAsync(1);
+        _time.Advance(TimeSpan.FromMinutes(11));
+
+        var health = await client.CheckHealthAsync();
+
+        Assert.Equal(((bool?)false, "Metron refused the username and password: check them under Settings"), (health.Reachable, health.StatusMessage));
+        Assert.Single(_requests);
     }
 
     [Fact]
@@ -254,6 +337,259 @@ public sealed class MetronClientTests
         Assert.False((await client.SeriesOfComicVineVolumeAsync(1)).Available);
         Assert.False((await CreateClient().SeriesOfComicVineVolumeAsync(0)).Available);
         Assert.Empty(_requests);
+    }
+
+    private static AppSettings WithToken(string? token, string? password = "secret")
+    {
+        var settings = Account(password ?? "secret");
+        settings.MetronApiToken = token;
+        if (password is null)
+        {
+            settings.MetronUsername = null;
+            settings.MetronPassword = null;
+        }
+
+        return settings;
+    }
+
+    [Theory]
+    [InlineData(" abc ", "abc")]
+    [InlineData("Bearer abc", "abc")]
+    [InlineData("token  abc", "abc")]
+    [InlineData(" Bearer  abc ", "abc")]
+    [InlineData("  ", null)]
+    [InlineData(null, null)]
+    public void CleanToken_TakesOffAPastedPrefix(string? token, string? expected)
+        => Assert.Equal(expected, MetronClient.CleanToken(token));
+
+    [Fact]
+    public async Task SeriesOfComicVineVolumeAsync_ARefusedToken_FallsBackToThePassword_FromThenOn()
+    {
+        _answer = r => r.Headers.Authorization!.Scheme == "Bearer" ? Json("{}", HttpStatusCode.Unauthorized) : Json("{\"results\":[]}");
+        var client = CreateClient(WithToken("old-token"));
+
+        Assert.True((await client.SeriesOfComicVineVolumeAsync(1)).Available);
+        Assert.True((await client.SeriesOfComicVineVolumeAsync(2)).Available);
+
+        Assert.Equal(new[] { "Bearer", "Basic", "Basic" }, _requests.Select(r => r.Headers.Authorization!.Scheme));
+        Assert.Equal("Metron refused the API token: signing in with the username and password instead", client.Problem);
+
+        // A new token is tried again.
+        _options.Set(WithToken("new-token"));
+        await client.SeriesOfComicVineVolumeAsync(3);
+        Assert.Equal("Bearer", _requests[3].Headers.Authorization!.Scheme);
+    }
+
+    [Fact]
+    public async Task SeriesOfComicVineVolumeAsync_ClearingARefusedToken_SignsInWithThePassword()
+    {
+        _answer = r => r.Headers.Authorization!.Scheme == "Bearer" ? Json("{}", HttpStatusCode.Unauthorized) : Json("{\"results\":[]}");
+        var client = CreateClient(WithToken("old-token", password: null));
+        Assert.False((await client.SeriesOfComicVineVolumeAsync(1)).Available);
+
+        _options.Set(Account());
+        Assert.True((await client.SeriesOfComicVineVolumeAsync(1)).Available);
+        Assert.Equal("Basic", _requests[^1].Headers.Authorization!.Scheme);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_FollowsTheLatestLookup_NotAnOldProbe()
+    {
+        var client = CreateClient();
+        Assert.True((await client.CheckHealthAsync()).Reachable);
+
+        // Two minutes on, a lookup fails: the entry says so at once, with when Metron is asked again.
+        _time.Advance(TimeSpan.FromMinutes(2));
+        _answer = _ => Json("{}", HttpStatusCode.ServiceUnavailable);
+        await client.SeriesOfComicVineVolumeAsync(5);
+        var health = await client.CheckHealthAsync();
+        Assert.Equal(((bool?)false, "Metron answered 503", true), (health.Reachable, health.StatusMessage, health.RateLimited));
+        Assert.Equal(_time.GetUtcNow().AddMinutes(10).UtcDateTime, health.RateLimitedUntilUtc);
+        Assert.Equal(2, _requests.Count);
+
+        // After the pause Metron answers again.
+        _time.Advance(TimeSpan.FromMinutes(10));
+        _answer = _ => Json("{\"results\":[]}");
+        health = await client.CheckHealthAsync();
+        Assert.Equal(((bool?)true, "Reachable", false, null), (health.Reachable, health.StatusMessage, health.RateLimited, health.RateLimitedUntilUtc));
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_OutOfRequests_IsNotCheckedNow_AndConcludesNothing()
+    {
+        var client = CreateClient();
+        for (var id = 1; id <= MetronClient.RequestsPerMinute; id++)
+        {
+            await client.SeriesOfComicVineVolumeAsync(id);
+        }
+
+        // The lookups already tell it is reachable.
+        var health = await client.CheckHealthAsync();
+        Assert.Equal(((bool?)true, "Reachable", true), (health.Reachable, health.StatusMessage, health.RateLimited));
+        Assert.Equal(MetronClient.RequestsPerMinute, _requests.Count);
+
+        // Nothing known of a new account: not checked, and checked as soon as a request is free.
+        _options.Set(Account(password: "another"));
+        health = await client.CheckHealthAsync();
+        Assert.Equal((null, "Request limit reached: not checked now", true), (health.Reachable, health.StatusMessage, health.RateLimited));
+
+        _time.Advance(TimeSpan.FromMinutes(1));
+        health = await client.CheckHealthAsync();
+        Assert.Equal(((bool?)true, false), (health.Reachable, health.RateLimited));
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ProbesOneAtATime()
+    {
+        var release = new TaskCompletionSource();
+        CreateClient();
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(f => f.CreateClient(MetronClient.HttpClientName)).Returns(() => new HttpClient(new SlowHandler(this, release.Task)));
+        var client = new MetronClient(factory.Object, _options, NullLogger<MetronClient>.Instance, _time);
+
+        var first = client.CheckHealthAsync();
+        var second = client.CheckHealthAsync();
+        release.SetResult();
+
+        Assert.True((await first).Reachable);
+        Assert.True((await second).Reachable);
+        Assert.Single(_requests);
+    }
+
+    private sealed class SlowHandler(MetronClientTests owner, Task gate, bool onlyFirst = false) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            owner._requests.Add(request);
+            if (!onlyFirst || owner._requests.Count == 1)
+            {
+                await gate;
+            }
+
+            return owner._answer(request);
+        }
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ACancelledProbe_IsNotCheckedYet_UntilTheNextOne()
+    {
+        using var source = new CancellationTokenSource();
+        _answer = _ =>
+        {
+            source.Cancel();
+            throw new TaskCanceledException();
+        };
+        var client = CreateClient();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.CheckHealthAsync(source.Token));
+
+        var health = await client.CheckHealthAsync();
+
+        Assert.Equal((null, "Not checked yet"), (health.Reachable, health.StatusMessage));
+        Assert.Single(_requests);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_SwitchingBackToARefusedAccount_StillSaysWhy()
+    {
+        _answer = r => r.Headers.Authorization!.Parameter == "bad" ? Json("{}", HttpStatusCode.Unauthorized) : Json("{\"results\":[]}");
+        var client = CreateClient(WithToken("bad", password: null));
+        await client.SeriesOfComicVineVolumeAsync(1);
+        _options.Set(WithToken("good", password: null));
+        Assert.True((await client.CheckHealthAsync()).Reachable);
+
+        _options.Set(WithToken("bad", password: null));
+        var health = await client.CheckHealthAsync();
+
+        Assert.Equal(((bool?)false, "Metron refused the API token: check it under Settings"), (health.Reachable, health.StatusMessage));
+        Assert.Equal(2, _requests.Count);
+    }
+
+    [Fact]
+    public async Task SeriesOfComicVineVolumeAsync_TokenAndPasswordBothRefused_SaysSo_AndStops()
+    {
+        _answer = _ => Json("{}", HttpStatusCode.Unauthorized);
+        var client = CreateClient(WithToken("t"));
+
+        Assert.False((await client.SeriesOfComicVineVolumeAsync(1)).Available);
+        Assert.False((await client.SeriesOfComicVineVolumeAsync(2)).Available);
+
+        Assert.Equal(new[] { "Bearer", "Basic" }, _requests.Select(r => r.Headers.Authorization!.Scheme));
+        Assert.Equal("Metron refused the API token and the username and password: check them under Settings", client.Problem);
+    }
+
+    [Fact]
+    public async Task SeriesOfComicVineVolumeAsync_TheFallback_TakesAPermit()
+    {
+        _answer = r => r.Headers.Authorization!.Scheme == "Bearer" ? Json("{}", HttpStatusCode.Unauthorized) : Json("{\"results\":[]}");
+        var client = CreateClient();
+        for (var id = 1; id < MetronClient.RequestsPerMinute; id++)
+        {
+            await client.SeriesOfComicVineVolumeAsync(id);
+        }
+
+        // The token takes the last permit of the minute; the password waits for the next one.
+        _options.Set(WithToken("old-token"));
+        Assert.False((await client.SeriesOfComicVineVolumeAsync(100)).Available);
+        Assert.Equal(MetronClient.RequestsPerMinute, _requests.Count);
+
+        _time.Advance(TimeSpan.FromMinutes(1));
+        Assert.True((await client.SeriesOfComicVineVolumeAsync(100)).Available);
+        Assert.Equal("Basic", _requests[^1].Headers.Authorization!.Scheme);
+    }
+
+    [Fact]
+    public async Task ARequestFinishingAfterTheSettingsChanged_LeavesTheNewAccountAlone()
+    {
+        var release = new TaskCompletionSource();
+        _answer = r => r.RequestUri!.Query.Contains("cv_id=1&", StringComparison.Ordinal) || r.RequestUri.Query.EndsWith("cv_id=1", StringComparison.Ordinal)
+            ? Json("{}", HttpStatusCode.ServiceUnavailable)
+            : Json("{\"results\":[]}");
+        CreateClient();
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(f => f.CreateClient(MetronClient.HttpClientName)).Returns(() => new HttpClient(new SlowHandler(this, release.Task, onlyFirst: true)));
+        var client = new MetronClient(factory.Object, _options, NullLogger<MetronClient>.Instance, _time);
+
+        var old = client.SeriesOfComicVineVolumeAsync(1);
+        _options.Set(Account(password: "new"));
+        Assert.True((await client.CheckHealthAsync()).Reachable);
+        release.SetResult();
+        Assert.False((await old).Available);
+
+        // The old account's failure neither pauses the new one nor shows as its problem.
+        var health = await client.CheckHealthAsync();
+        Assert.Equal(((bool?)true, "Reachable", null, false), (health.Reachable, health.StatusMessage, health.LastError, health.RateLimited));
+        Assert.True((await client.SeriesOfComicVineVolumeAsync(2)).Available);
+        Assert.Equal(3, _requests.Count);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_WhilePaused_IsNotProbed_AndSaysUntilWhen()
+    {
+        _answer = _ => Json("{}", HttpStatusCode.ServiceUnavailable);
+        var client = CreateClient();
+        await client.SeriesOfComicVineVolumeAsync(1);
+        var resumes = _time.GetUtcNow().AddMinutes(10).UtcDateTime;
+        _time.Advance(TimeSpan.FromMinutes(1));
+
+        var health = await client.CheckHealthAsync();
+
+        Assert.Equal(((bool?)false, "Metron answered 503", true, resumes), (health.Reachable, health.StatusMessage, health.RateLimited, health.RateLimitedUntilUtc));
+        Assert.Single(_requests);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_Disabled_ShowsNoOldError()
+    {
+        _answer = _ => Json("{}", HttpStatusCode.ServiceUnavailable);
+        var client = CreateClient();
+        await client.SeriesOfComicVineVolumeAsync(1);
+
+        var settings = Account();
+        settings.EnableExternalSeriesMetadata = false;
+        _options.Set(settings);
+        var health = await client.CheckHealthAsync();
+
+        Assert.Equal(("Disabled in settings", null, null, 1L), (health.StatusMessage, health.LastError, health.Reachable, health.FailureCount));
     }
 
     [Fact]

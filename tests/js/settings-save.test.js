@@ -116,6 +116,7 @@ test('saving sends every group in one request with the edited values', async () 
             enabled: true,
             comicVineApiKey: 'new-key',
             comicVineBaseUrl: 'https://comicvine.example/api',
+            metronApiToken: null,
             metronUsername: 'reader',
             metronPassword: null,
             metronBaseUrl: 'https://metron.example/api',
@@ -281,6 +282,7 @@ test('the stored ComicVine API key is kept unless a new key is typed or "clear" 
         enabled: true,
         comicVineApiKey: null,
         comicVineBaseUrl: 'https://comicvine.example/api',
+        metronApiToken: null,
         metronUsername: 'reader',
         metronPassword: null,
         metronBaseUrl: 'https://metron.example/api',
@@ -332,6 +334,30 @@ test('the stored Metron password is kept unless a new one is typed or "clear" is
     page.input('#metronClearPasswordCheckbox', true);
     since = await save(page);
     assert.equal(saveBody(page, since).externalSeriesMetadata.metronPassword, '');
+});
+
+test('the stored Metron API token is kept unless a new one is typed or "clear" is ticked', async () => {
+    const page = await bootSettings();
+    routeSave(page);
+    assert.equal(page.$('#metronApiToken').value, '');
+    assert.equal(page.$('#metronApiTokenHint').textContent.trim(), 'Leave blank to keep the stored token.');
+
+    let since = await save(page);
+    assert.equal(saveBody(page, since).externalSeriesMetadata.metronApiToken, null);
+
+    page.input('#metronApiToken', ' knox-token ');
+    since = await save(page);
+    assert.equal(saveBody(page, since).externalSeriesMetadata.metronApiToken, 'knox-token');
+
+    page.input('#metronApiToken', 'typed but cleared');
+    page.input('#metronClearApiTokenCheckbox', true);
+    since = await save(page);
+    assert.equal(saveBody(page, since).externalSeriesMetadata.metronApiToken, '');
+});
+
+test('without a stored Metron API token the hint recommends one', async () => {
+    const page = await bootSettings({ settings: { metron_api_token_set: false } });
+    assert.equal(page.$('#metronApiTokenHint').textContent.trim(), 'Preferred to a username and password. The token is stored in user settings on this instance.');
 });
 
 test('why Metron is left out is shown under its password', async () => {

@@ -17,13 +17,13 @@ public sealed record MetronAnswer(bool Available, MetronSeries? Series)
 }
 
 /// <summary>
-/// Metron's API, asked about ComicVine volumes. Optional: it needs a Metron account (username and
-/// password in the settings). It never throws for Metron's failures; it answers
+/// Metron's API, asked about ComicVine volumes. Optional: it needs a Metron API token, or the
+/// account's username and password, in the settings. It never throws for Metron's failures; it answers
 /// <see cref="MetronAnswer.Unavailable"/>, so matching goes on without it.
 /// </summary>
 public interface IMetronClient
 {
-    /// <summary>True when a Metron username and password are set and external metadata is on.</summary>
+    /// <summary>True when a Metron API token, or a username and password, is set and external metadata is on.</summary>
     bool IsConfigured { get; }
 
     /// <summary>
@@ -38,4 +38,10 @@ public interface IMetronClient
     /// waits for it rather than being skipped.
     /// </summary>
     Task<MetronAnswer> SeriesOfComicVineVolumeAsync(int comicVineVolumeId, bool waitForPermit = false, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Metron's entry on the provider status screen: whether it is enabled and set up, reachable
+    /// (probed at most every 10 minutes), why it is left out, and how its requests went.
+    /// </summary>
+    Task<Models.ProviderHealth> CheckHealthAsync(CancellationToken cancellationToken = default);
 }

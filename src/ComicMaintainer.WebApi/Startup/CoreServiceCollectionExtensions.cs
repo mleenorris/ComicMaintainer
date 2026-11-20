@@ -322,6 +322,7 @@ internal static class CoreServiceCollectionExtensions
         services.AddSingleton<ICoverFingerprintService, CoverFingerprintService>();
         services.AddSingleton<IComicVineIssueDetailsService, ComicVineIssueDetailsService>();
         services.AddSingleton<IIssueCoverWriter, IssueCoverWriter>();
+        services.AddSingleton<IComicPageRemover, ComicPageRemover>();
         services.AddSingleton<IIssueCoverService, IssueCoverService>();
         services.AddSingleton<MangaDexSeriesMetadataService>();
         services.AddSingleton<AniListManhwaSeriesMetadataService>();

@@ -60,7 +60,7 @@ test('renders the series header, synopsis and one card per issue', async () => {
     assert.equal(first.querySelector('.series-issue-read-corner').title, 'Read');
     assert.equal(first.querySelector('.dropdown-menu').childElementCount, 0, 'a menu is only built when it is opened');
     assert.match(menuText(page, first), /Mark Unread/);
-    assert.equal(first.querySelector('.dropdown-menu').querySelectorAll('.dropdown-item').length, 11);
+    assert.equal(first.querySelector('.dropdown-menu').querySelectorAll('.dropdown-item').length, 12);
     // Opening it again keeps what was built.
     const built = first.querySelector('.dropdown-menu .dropdown-item');
     assert.match(menuText(page, first), /Mark Unread/);
@@ -440,7 +440,7 @@ test('read-only users are offered only the read actions of an issue and no Serie
     const admin = await boot({});
     assert.deepEqual((await issueMenus(admin))[0], [
         'Info', 'View/Edit', 'Read Comic', 'Email to Ereader…', '—', 'Mark Read',
-        '—', 'Process', 'Rename', 'Normalize', 'Remove Metadata', 'Replace Cover…', '—', 'Delete'
+        '—', 'Process', 'Rename', 'Normalize', 'Remove Metadata', 'Replace Cover…', 'Remove Pages…', '—', 'Delete'
     ]);
     assert.ok(isDisplayed(seriesActions(admin)));
     assert.deepEqual(seriesActionItems(admin).filter(isDisplayed).map(text), [

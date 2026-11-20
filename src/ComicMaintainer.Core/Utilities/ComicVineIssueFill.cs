@@ -10,7 +10,7 @@ namespace ComicMaintainer.Core.Utilities;
 /// What a ComicVine issue adds to a file's tags. It only ever fills in: a title that is a
 /// placeholder (<c>Chapter 8</c>, <c>#8</c>, an old file name), a missing cover year (or the
 /// 1970 some downloaders write when they do not know it), a missing summary or one that is only
-/// the series' synopsis, missing writers, and empty Story Arc, Month and Web elements. It also
+/// the series' synopsis, missing writers, and empty Story Arc, Month, Publisher and Web elements. It also
 /// records the issue's id (<c>[CVDB12345]</c> in Notes, its page in Web), so the file names its
 /// ComicVine issue from then on (see <see cref="ComicVineTagId"/>). A field the user has locked
 /// by editing it is never changed.
@@ -44,6 +44,7 @@ public static partial class ComicVineIssueFill
     /// name another issue that is kept, neither its id nor a page is written, so they do not end
     /// up naming two issues. <paramref name="matchedByName"/> marks the id written as this
     /// application's own match (see <see cref="ComicVineTagId.NameMatchMarker"/>).
+    /// <paramref name="publisher"/> is the publisher ComicVine lists for the issue's volume.
     /// </remarks>
     public static Plan For(
         ComicMetadata current,
@@ -51,7 +52,8 @@ public static partial class ComicVineIssueFill
         string? seriesSynopsis,
         ComicVineIssueEntity? previous = null,
         bool replacesTaggedIssue = false,
-        bool matchedByName = false)
+        bool matchedByName = false,
+        string? publisher = null)
     {
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(issue);
@@ -109,7 +111,8 @@ public static partial class ComicVineIssueFill
             Month: month,
             ComicVineIssueId: keepsAnotherTag ? null : issue.Id,
             ReplacesComicVineIssueId: replacesTaggedIssue,
-            ComicVineIssueMatchedByName: matchedByName && !keepsAnotherTag);
+            ComicVineIssueMatchedByName: matchedByName && !keepsAnotherTag,
+            Publisher: locked.HasFlag(ComicMetadataFieldFlags.Publisher) ? null : ProviderMetadataText.Publisher(publisher));
         return new Plan(update, fields, fill);
     }
 

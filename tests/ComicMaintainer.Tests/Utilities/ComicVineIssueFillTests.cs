@@ -161,4 +161,14 @@ public class ComicVineIssueFillTests
         Assert.Null(ComicInfoXml.FillEmptyFields(null, new ProviderComicInfoFields(Month: 13)).Root!.Element("Month"));
         Assert.Equal("House of M", ComicInfoXml.FillEmptyFields(null, new ProviderComicInfoFields(StoryArc: "House of M")).Root!.Element("StoryArc")?.Value);
     }
+
+    [Fact]
+    public void For_FillsThePublisherOfTheIssuesVolume_UnlessLocked()
+    {
+        var issue = Issue();
+
+        Assert.Equal("Image", ComicVineIssueFill.For(Tags(), issue, null, publisher: "  Image ").Fill.Publisher);
+        Assert.Null(ComicVineIssueFill.For(Tags(), issue, null).Fill.Publisher);
+        Assert.Null(ComicVineIssueFill.For(Tags(locked: (long)ComicMetadataFieldFlags.Publisher), issue, null, publisher: "Image").Fill.Publisher);
+    }
 }

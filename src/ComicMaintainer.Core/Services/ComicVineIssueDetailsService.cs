@@ -912,9 +912,18 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                 _gate.Release();
             }
 
-            // Written again only when the file has not had this issue's details yet.
+            // The publisher ComicVine lists for the issue's volume, for a Publisher that is empty and
+            // not locked. It is the volume's own, unlike the series' match, which several volumes
+            // of one name (Star Wars at Marvel and at Dark Horse) share.
+            var publisher = string.IsNullOrWhiteSpace(metadata.Publisher)
+                            && !((ComicMetadataFieldFlags)metadata.UserLockedFieldsMask).HasFlag(ComicMetadataFieldFlags.Publisher)
+                ? await VolumePublisherAsync(issue.VolumeId, cancellationToken)
+                : null;
+
+            // Written again only when the file has not had this issue's details yet, or now has a
+            // publisher to fill (a file filled before publishers were, or before its volume's was known).
             var newest = issue.DetailsUtc is { } details && details > issue.ListedUtc ? details : issue.ListedUtc;
-            if (state is not null && state.IssueId == issue.Id && state.AppliedUtc >= newest)
+            if (state is not null && state.IssueId == issue.Id && state.AppliedUtc >= newest && publisher is null)
             {
                 return (Outcome.Unchanged, null);
             }
@@ -924,7 +933,9 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             var previous = state is not null && state.IssueId != issue.Id
                 ? await StoredIssueAsync(state.IssueId, cancellationToken)
                 : null;
-            var plan = ComicVineIssueFill.For(metadata, issue, synopsis, previous, replacesTag && metadata.ComicVineIssueId != issue.Id, matchedByName: !fromTag);
+            var plan = ComicVineIssueFill.For(
+                metadata, issue, synopsis, previous, replacesTag && metadata.ComicVineIssueId != issue.Id, matchedByName: !fromTag,
+                publisher: publisher);
             var outcome = Outcome.Unchanged;
             if (!plan.IsEmpty)
             {
@@ -1714,6 +1725,20 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
             }
 
             return VolumeEvidence.Order(weighed.Concat(ranked.Skip(3)));
+        }
+
+        /// <summary>
+        /// The publisher ComicVine lists for a volume, as stored with a series' link to it (an issue
+        /// its tags name is in a volume some series links to once it is matched); null when none is.
+        /// </summary>
+        private async Task<string?> VolumePublisherAsync(int volumeId, CancellationToken cancellationToken)
+        {
+            await using var db = await owner._dbContextFactory.CreateDbContextAsync(cancellationToken);
+            return await db.ComicVineVolumeLinks.AsNoTracking()
+                .Where(link => link.VolumeId == volumeId && link.Publisher != null && link.Publisher != "")
+                .OrderByDescending(link => link.LinkedUtc)
+                .Select(link => link.Publisher)
+                .FirstOrDefaultAsync(cancellationToken);
         }
 
         private async Task<ComicVineIssueEntity?> StoredIssueAsync(int issueId, CancellationToken cancellationToken)

@@ -87,7 +87,10 @@ ComicVine knows each issue's title, cover date, summary, writers and story arcs.
 - a title that only names the issue, such as `Chapter 8`, `#8` or an old file name. A real title is kept;
 - a missing cover year, or the `1970` some downloaders write when they do not know it, and the cover month;
 - a missing summary, or one that is only the series' synopsis;
-- missing writers, and an empty Story Arc and Web link.
+- missing writers, and an empty Story Arc and Web link;
+- an empty publisher, with the one ComicVine lists for the issue's volume (once a series is linked to that volume). A
+  file filled before is filled again for it. The publisher is never taken from the series' match: several volumes of one
+  name share it, and may have different publishers (Star Wars at Marvel and at Dark Horse). A locked publisher is kept.
 
 It also records which ComicVine issue the file was filled from: `[CVDB12345]` is added to `<Notes>`, the way ComicTagger
 writes it, and the issue's ComicVine page goes into `<Web>` when that is empty or still holds the series' ComicVine page.

@@ -131,6 +131,29 @@ public sealed class FileStoreServiceDeliveryPathsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UpdateFilePathAsync_NeitherStoreKnowsTheOldPath_StillRepointsReadStateAndProgress()
+    {
+        // The watcher saw the rename as a delete and a create and dropped the row first; each
+        // user's read state and reading progress still name the old path.
+        var oldPath = Path.Join(_library, "Issue #5.cbz");
+        var newPath = Path.Join(_library, "Green Lantern - New Guardians - Chapter 0005.cbz");
+        File.WriteAllText(newPath, "comic");
+        await using (var seed = await _factory.CreateDbContextAsync())
+        {
+            seed.UserFileReadStatuses.Add(new UserFileReadStatusEntity { UserId = "reader", FilePath = oldPath, IsRead = true, CurrentPage = 22 });
+            seed.ReadingProgresses.Add(new ReadingProgressEntity { UserId = "reader", ContentId = oldPath, CurrentPage = 7, TotalPages = 22, PercentComplete = 0.3 });
+            await seed.SaveChangesAsync();
+        }
+
+        await Service().UpdateFilePathAsync(oldPath, newPath);
+
+        await using var db = await _factory.CreateDbContextAsync();
+        Assert.Equal(newPath, (await db.UserFileReadStatuses.SingleAsync()).FilePath);
+        var progress = await db.ReadingProgresses.SingleAsync();
+        Assert.Equal((newPath, 7), (progress.ContentId, progress.CurrentPage));
+    }
+
+    [Fact]
     public async Task UpdateFilePathAsync_ComparesACondensedMemberExactly()
     {
         var (oldPath, newPath) = await TrackedMoveAsync("Saga 001.cbz", "Saga - Chapter 0001.cbz");

@@ -27,14 +27,19 @@ function pageImage(call) {
     return new Response(`${call.query.filePath}#${call.query.page}`, { headers: { 'Content-Type': 'image/jpeg' } });
 }
 
+/** The version the server gives a file (its last-write time and length): here, its name's. */
+function fileVersion(filePath) {
+    return `v-${baseName(filePath)}`;
+}
+
 /** GET /api/ComicReader/info body (ComicInfoResponse). */
 function comicInfo(filePath, pageCount) {
-    return { fileName: baseName(filePath), filePath, pageCount };
+    return { fileName: baseName(filePath), filePath, pageCount, version: fileVersion(filePath) };
 }
 
 function adjacentInfo(filePath) {
     return filePath
-        ? { hasAdjacent: true, filePath, fileName: baseName(filePath) }
+        ? { hasAdjacent: true, filePath, fileName: baseName(filePath), version: fileVersion(filePath) }
         : { hasAdjacent: false, filePath: null, fileName: null };
 }
 

@@ -599,5 +599,23 @@ test('issues answered under another id move the page to it', async () => {
     assert.equal(issueCards(page).length, 2, 'the list just read is shown');
     assert.deepEqual(callsTo(page, issuesPath('saga-2')), [], 'and not fetched again');
     assert.equal(page.evaluate("seriesIssuesCache.has('saga')"), false);
+    // The library list, answered after the issues, still has the former id:
+    // the page is not remapped back to it.
+    assert.deepEqual(page.evaluate('seriesLibrary.map(s => s.id)'), ['saga']);
     assert.deepEqual(page.errors, []);
+});
+
+test('a filtered answer under another id does not move the page', async () => {
+    // A filter can shift the id of what it shows; only an unfiltered answer
+    // says the series moved.
+    const page = await bootSeries();
+    await page.settle();
+    page.route(`GET ${ISSUES}`, issuesBody(seriesCard({ id: 'saga-unread' }), [issue(1)]));
+
+    page.evaluate("filterMode = 'unread'");
+    await page.evaluate("loadSeriesIssues('saga', true)");
+    await page.settle();
+
+    assert.equal(page.evaluate('currentSeriesDetailId'), 'saga');
+    assert.equal(page.evaluate('window.location.hash'), '#/series/saga');
 });

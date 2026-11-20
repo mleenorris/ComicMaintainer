@@ -562,6 +562,10 @@ public class SeriesLibraryServiceTests
         // A name no series goes by, or one too vague to be an id, finds nothing.
         Assert.Null(await service.GetSeriesIssuesAsync("green-lantern-1990"));
         Assert.Null(await service.GetSeriesIssuesAsync("unknown-series"));
+
+        // With a filter the former id is found among every series, then shown filtered.
+        var filtered = await service.GetSeriesIssuesAsync("green-lantern-2023", filter: "processed");
+        Assert.Equal("green-lantern", filtered!.Id);
     }
 
     [Fact]

@@ -112,18 +112,18 @@ public partial class SeriesLibraryService
             // canonical title / aliases (id-drift); otherwise synthesize an
             // empty accumulator that preserves the series metadata so the
             // detail view stays open with an empty issues list.
-            if (string.IsNullOrWhiteSpace(fileFilter))
+            //
+            // An id no group has at all may be a former one, from before processing renamed the
+            // series' files (see TryResolveFormerId); only then is it looked up by name.
+            var unfiltered = string.IsNullOrWhiteSpace(fileFilter);
+            var unfilteredGroups = unfiltered ? groups : await BuildGroupsAsync(filter: null, cancellationToken);
+            if (!TryResolveGroup(unfilteredGroups, seriesId, out var unfilteredAccumulator)
+                && !TryResolveFormerId(unfilteredGroups, seriesId, out unfilteredAccumulator))
             {
                 return null;
             }
 
-            var unfilteredGroups = await BuildGroupsAsync(filter: null, cancellationToken);
-            if (!TryResolveGroup(unfilteredGroups, seriesId, out var unfilteredAccumulator))
-            {
-                return null;
-            }
-
-            accumulator = FindMatchingFilteredGroup(groups, unfilteredAccumulator)
+            accumulator = unfiltered ? unfilteredAccumulator : FindMatchingFilteredGroup(groups, unfilteredAccumulator)
                 ?? new SeriesAccumulator
                 {
                     Id = unfilteredAccumulator.Id,

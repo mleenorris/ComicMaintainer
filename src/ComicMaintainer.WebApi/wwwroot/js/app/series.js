@@ -318,7 +318,9 @@
                     entry.loaded = true;
                     entry.allLoaded = true;
                     entry.error = false;
-                    if (typeof data.id === 'string' && data.id && data.id !== seriesId) {
+                    // A filter can shift the id of what it shows (fewer files, another
+                    // representative): only an unfiltered answer says the series moved.
+                    if (filterMode === 'all' && typeof data.id === 'string' && data.id && data.id !== seriesId) {
                         movedTo = data.id;
                     }
                     entry.titles = {

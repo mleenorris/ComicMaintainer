@@ -332,9 +332,11 @@ public partial class ComicProcessorService
     /// The file name's issue number when the tags hold the volume's number as the issue: some
     /// taggers write <c>Vol. 2 004 (2023)</c> as Number 2, Volume 2, so every issue of the volume
     /// becomes #2 and all but one are left as duplicates. It is taken as that mistake only when
-    /// <c>&lt;Number&gt;</c> equals <c>&lt;Volume&gt;</c>, the file name's volume token names the
-    /// same volume, and the file name gives another issue number; and never when the user locked
-    /// the issue. Null otherwise: the tags are trusted over the file name.
+    /// <c>&lt;Number&gt;</c> equals <c>&lt;Volume&gt;</c> and the file name gives another issue
+    /// right after a volume token naming the same volume (see
+    /// <see cref="IssueNumberParser.ParseVolumeAndIssue"/>), so a collected edition tagged Number 1,
+    /// Volume 1 ("100 Bullets Vol. 1 (2000)") is left alone; and never when the user locked the
+    /// issue. Null otherwise: the tags are trusted over the file name.
     /// </summary>
     private async Task<string?> IssueMistakenForVolumeAsync(ComicMetadata metadata, string filePath, CancellationToken cancellationToken)
     {
@@ -343,15 +345,14 @@ public partial class ComicProcessorService
             return null;
         }
 
-        var stem = Path.GetFileNameWithoutExtension(filePath);
-        if (!IssueNumberParser.AreEquivalent(IssueNumberParser.ParseVolume(stem), metadata.Volume!.Trim())
-            || IssueNumberParser.Parse(stem) is not { } fromFileName
-            || IssueNumberParser.AreEquivalent(fromFileName, metadata.Issue.Trim()))
+        if (IssueNumberParser.ParseVolumeAndIssue(Path.GetFileNameWithoutExtension(filePath)) is not { } named
+            || !IssueNumberParser.AreEquivalent(named.Volume, metadata.Volume!.Trim())
+            || IssueNumberParser.AreEquivalent(named.Issue, metadata.Issue.Trim()))
         {
             return null;
         }
 
-        return await IsFieldLockedAsync(filePath, ComicMetadataFieldFlags.Issue, cancellationToken) ? null : fromFileName;
+        return await IsFieldLockedAsync(filePath, ComicMetadataFieldFlags.Issue, cancellationToken) ? null : named.Issue;
     }
 
     /// <summary>

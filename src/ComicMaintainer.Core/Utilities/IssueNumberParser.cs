@@ -68,7 +68,17 @@ public static class IssueNumberParser
 
     /// <summary>Volume tokens such as "Vol.1", "Vol 2", "Volume 3" or "v01".</summary>
     private static readonly Regex VolumePattern = new(
-        @"(?<!\p{L})v(?:ol(?:ume)?)?\.?[\s._-]*(?<volume>\d+(?:\.\d+)?)",
+        @"(?<!\p{L})v(?:ol(?:ume)?)?\.?[\s._-]*\d+(?:\.\d+)?",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+        MatchTimeout);
+
+    /// <summary>
+    /// A volume token directly followed by an issue number, which may be marked ("Vol. 2 004",
+    /// "v01 - 012", "Vol.1 Ch.12", "Vol 3 #5"), with nothing glued after the number.
+    /// </summary>
+    private static readonly Regex VolumeAndIssuePattern = new(
+        @"(?<!\p{L})v(?:ol(?:ume)?)?\.?[\s._-]*(?<volume>\d+(?:\.\d+)?)[\s._–—-]+" +
+        @"(?:(?:ch(?:ap(?:ter)?)?|issue)[\s._#-]*|#\s*)?(?<issue>\d+" + Fraction + @")(?![\p{L}\p{N}])",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
         MatchTimeout);
 
@@ -164,19 +174,25 @@ public static class IssueNumberParser
     public static bool ContainsIssueNumber(string? fileNameStem, string? issue)
         => ContainsNumber(fileNameStem, issue);
 
+
     /// <summary>
-    /// The volume number of the first volume token in a file name outside brackets ("Vol. 2 004
-    /// (2023)" gives "2", "v01 012" gives "1"), with its zero padding removed; null when it has none.
+    /// The volume and issue numbers of a file name that gives the issue right after its volume
+    /// token, outside brackets: "Vol. 2 004 (2023)" gives (2, 4), "v01 - 012" (1, 12) and "Vol.1
+    /// Ch.12" (1, 12). Null for any other name, such as a collected edition's "100 Bullets Vol. 1
+    /// (2000)" or "Saga Vol. 1 - Chapters 1-6": a number elsewhere in it is not that volume's issue.
+    /// Zero padding is removed.
     /// </summary>
-    public static string? ParseVolume(string? fileNameStem)
+    public static (string Volume, string Issue)? ParseVolumeAndIssue(string? fileNameStem)
     {
         if (string.IsNullOrWhiteSpace(fileNameStem))
         {
             return null;
         }
 
-        var match = VolumePattern.Match(RemoveBracketedQualifiers(fileNameStem));
-        return match.Success ? StripLeadingZeros(match.Groups["volume"].Value) : null;
+        var match = VolumeAndIssuePattern.Match(RemoveBracketedQualifiers(fileNameStem));
+        return match.Success
+            ? (StripLeadingZeros(match.Groups["volume"].Value), StripLeadingZeros(match.Groups["issue"].Value))
+            : null;
     }
 
     private static bool ContainsNumber(string? fileNameStem, string? issue)

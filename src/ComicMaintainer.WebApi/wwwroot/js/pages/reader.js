@@ -60,6 +60,20 @@
         }
         let isLoadingNext = false;
         let nextComicInfo = null;
+        // The version (last-write time and length) of each comic file the server described, by
+        // path. Page addresses carry it: the browser and the service worker reuse a cached
+        // page for an hour, and a renamed file can take a path another file had.
+        const comicVersions = new Map();
+
+        function rememberComicVersion(filePath, version) {
+            if (filePath && typeof version === 'string' && version) comicVersions.set(filePath, version);
+        }
+
+        function comicPageUrl(filePath, pageNum) {
+            const version = comicVersions.get(filePath);
+            return `/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`
+                + (version ? `&v=${encodeURIComponent(version)}` : '');
+        }
         // The comic currently sitting at the end of the stitched webcomic
         // stream. New issues are appended after this one, which is not
         // necessarily the issue on screen: stitching deliberately runs ahead of
@@ -195,6 +209,7 @@
                 }
 
                 const data = await response.json();
+                rememberComicVersion(comicFilePath, data.version);
                 totalPages = data.pageCount;
                 currentComicName = data.fileName;
 
@@ -452,7 +467,7 @@
 
         // Fetch page `pageNum` of `filePath` as a blob.
         async function fetchWebcomicPageBlob(filePath, pageNum) {
-            const response = await readerApiFetch(`/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`, { json: false });
+            const response = await readerApiFetch(comicPageUrl(filePath, pageNum), { json: false });
             if (!response.ok) {
                 throw new Error(await refusalMessage(response, 'Failed to load page'));
             }
@@ -1045,6 +1060,7 @@
 
             const data = await response.json();
             if (!container.isConnected) return false;
+            rememberComicVersion(nextPath, data.version);
 
             const tailMeta = comicMeta.get(tailPath);
             const leavingComicName = tailMeta ? tailMeta.name : currentComicName;
@@ -1176,6 +1192,7 @@
                 if (response.ok) {
                     info = await response.json();
                     failed = false;
+                    if (info && info.hasAdjacent) rememberComicVersion(info.filePath, info.version);
                 }
             } catch (error) {
                 console.error('Error prefetching next comic:', error);
@@ -1287,7 +1304,7 @@
 
         async function requestMangaPageUrl(pageNum) {
             try {
-                const response = await readerApiFetch(`/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`, { json: false });
+                const response = await readerApiFetch(comicPageUrl(comicFilePath, pageNum), { json: false });
                 if (!response.ok) {
                     if (response.status === 422) {
                         mangaPageRefusals.set(pageNum, await refusalMessage(response, 'Failed to load page'));
@@ -1364,7 +1381,7 @@
             preloadedNextComicPath = nextPath;
             for (let p = 1; p <= NEXT_COMIC_PRELOAD_PAGES; p++) {
                 try {
-                    const response = await readerApiFetch(`/api/ComicReader/page?filePath=${encodeURIComponent(nextPath)}&page=${p}`, { json: false });
+                    const response = await readerApiFetch(comicPageUrl(nextPath, p), { json: false });
                     if (!response.ok) break; // out of pages or an error; stop early
                     // Drain the body so the response is fully received and stored.
                     await response.blob();

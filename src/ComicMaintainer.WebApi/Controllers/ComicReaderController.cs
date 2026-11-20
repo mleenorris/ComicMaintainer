@@ -119,7 +119,8 @@ public class ComicReaderController : ControllerBase
             {
                 fileName,
                 filePath,
-                pageCount
+                pageCount,
+                version = FileVersion(resolvedPath)
             });
         }
         catch (ArchiveLimitExceededException ex)
@@ -363,8 +364,25 @@ public class ComicReaderController : ControllerBase
         {
             hasAdjacent = true,
             filePath = adjacent.FilePath,
-            fileName = adjacent.FileName
+            fileName = adjacent.FileName,
+            version = adjacent.FilePath is { } next && TryResolveSafePath(next, out var resolvedNext) ? FileVersion(resolvedNext) : null
         });
+    }
+
+    /// <summary>
+    /// Which version of the file at a path this is: its last-write time and length. The reader
+    /// adds it to page addresses, which the browser and the service worker cache for an hour
+    /// without asking again: a rename gives a path to another file (<c>Chapter 0006.cbz</c> was
+    /// <c>Issue #5</c>, then <c>Issue #6</c>), whose pages must not be the previous file's.
+    /// Null when there is no file.
+    /// </summary>
+    [NonAction]
+    public static string? FileVersion(string resolvedPath)
+    {
+        var info = new FileInfo(resolvedPath);
+        return info.Exists
+            ? info.LastWriteTimeUtc.Ticks.ToString("x", CultureInfo.InvariantCulture) + "-" + info.Length.ToString("x", CultureInfo.InvariantCulture)
+            : null;
     }
 
     /// <summary>

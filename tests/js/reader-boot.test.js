@@ -331,3 +331,24 @@ test('the reader still works when optional chrome is missing from the markup', a
     assert.equal(page.fetchCalls.some(call => call.path === '/api/auth/user'), false);
     assert.deepEqual(page.errors, []);
 });
+
+test('page addresses carry the version of the file, so a renamed-over path never shows the previous file', async () => {
+    // The browser and the service worker reuse a cached page for an hour; a rename can give
+    // the path to another file. Pages of the next comic carry its version too.
+    const page = await openReader({ series: { [FILE]: 3, [NEXT_FILE]: 3 }, progress: 3 });
+
+    const requests = page.fetchCalls.filter(call => call.path === '/api/ComicReader/page');
+    assert.ok(requests.length > 0);
+    for (const call of requests) {
+        assert.equal(call.query.v, `v-${call.query.filePath.split('/').pop()}`);
+    }
+    assert.ok(requests.some(call => call.query.filePath === NEXT_FILE), 'the next comic was preloaded');
+});
+
+test('a page address without a version from the server still loads', async () => {
+    const page = await openReader({ routes: { 'GET /api/ComicReader/info': call => ({ fileName: 'x', filePath: call.query.filePath, pageCount: 10 }) } });
+
+    const requests = page.fetchCalls.filter(call => call.path === '/api/ComicReader/page');
+    assert.ok(requests.length > 0);
+    assert.ok(requests.every(call => !('v' in call.query)));
+});

@@ -802,11 +802,11 @@ They return `{"cleared","requested"}`, plus `seriesId` and `seriesTitle` for a s
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
-| `GET` | `/api/comicreader/info` | Signed in | `{"fileName","filePath","pageCount"}` |
+| `GET` | `/api/comicreader/info` | Signed in | `{"fileName","filePath","pageCount","version"}`. `version` (last-write time and length) changes with the file; the reader adds it to page addresses as `v`, so a cached page of a file that had the path before is never shown |
 | `GET` | `/api/comicreader/pages` | Signed in | `{"pages":[...],"count"}`: page names |
 | `GET` | `/api/comicreader/page` | Signed in | One page as an image; `page` starts at 1 |
 | `GET` | `/api/comicreader/cover` | Signed in | The cover thumbnail |
-| `GET` | `/api/comicreader/adjacent` | Signed in | Next or previous issue in the series |
+| `GET` | `/api/comicreader/adjacent` | Signed in | Next or previous issue in the series: `{"hasAdjacent","filePath","fileName","version"}` |
 | `GET` | `/api/comicreader/progress` | Signed in | `{"currentPage"}` |
 | `POST` | `/api/comicreader/progress` | Signed in | Save the page: `?filePath=&page=` |
 | `POST` | `/api/comicreader/mark-read` | Signed in | Mark as read: `?filePath=` |

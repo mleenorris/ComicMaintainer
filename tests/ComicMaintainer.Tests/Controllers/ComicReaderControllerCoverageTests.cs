@@ -293,6 +293,33 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
         Assert.Equal("Saga 001.cbz", json["fileName"]!.ToString());
         Assert.Equal(_file, json["filePath"]!.ToString());
         Assert.Equal(24, json["pageCount"]!.Value<int>());
+        Assert.Equal(ComicReaderController.FileVersion(_file), json["version"]!.ToString());
+    }
+
+    [Fact]
+    public void FileVersion_ChangesWithTheFile_AndIsNullWithoutOne()
+    {
+        var before = ComicReaderController.FileVersion(_file);
+        File.AppendAllText(_file, "more");
+        File.SetLastWriteTimeUtc(_file, new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc));
+
+        Assert.NotNull(before);
+        Assert.NotEqual(before, ComicReaderController.FileVersion(_file));
+        Assert.Null(ComicReaderController.FileVersion(Path.Join(_watchDir, "missing.cbz")));
+    }
+
+    [Fact]
+    public async Task GetAdjacentFile_GivesTheNextFilesVersion()
+    {
+        var next = Path.Join(_watchDir, "Saga 002.cbz");
+        File.WriteAllText(next, "next");
+        _library.Setup(l => l.GetAdjacentIssueAsync(_file, "next", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AdjacentIssueResult { Found = true, HasAdjacent = true, FilePath = next, FileName = "Saga 002.cbz" });
+
+        var result = await CreateController().GetAdjacentFile(_file, "next");
+
+        var json = JObject.FromObject(Assert.IsType<OkObjectResult>(result.Result).Value!);
+        Assert.Equal(ComicReaderController.FileVersion(next), json["version"]!.ToString());
     }
 
     [Fact]

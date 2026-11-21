@@ -106,7 +106,8 @@ public partial class ComicProcessorService
                 }
 
                 _logger.LogDebug("RenameFileAsync: Generating new filename for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                var (decision, target) = DecideRename(metadata, resolvedPath, originalSeries);
+                var (decision, target) = DecideRename(
+                    metadata, resolvedPath, originalSeries, await AnnualKeepsNoNumberAsync(metadata, filePath, cancellationToken));
                 if (decision == RenameDecision.NameFailed)
                 {
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
@@ -608,9 +609,13 @@ public partial class ComicProcessorService
     /// Processing, renaming and the processing preview all decide here, so a preview names the
     /// same target as the real run.
     /// </summary>
-    private (RenameDecision Decision, string? Target) DecideRename(ComicMetadata metadata, string resolvedPath, string? originalSeries)
+    /// <param name="keepsNoNumber">
+    /// True for an Annual that goes without an issue number (see <see cref="AnnualKeepsNoNumberAsync"/>):
+    /// the number in its old name is not carried into the new one.
+    /// </param>
+    private (RenameDecision Decision, string? Target) DecideRename(ComicMetadata metadata, string resolvedPath, string? originalSeries, bool keepsNoNumber = false)
     {
-        var target = GenerateFileName(metadata, resolvedPath, originalSeries);
+        var target = GenerateFileName(metadata, resolvedPath, originalSeries, keepsNoNumber);
         if (target is null)
         {
             return (RenameDecision.NameFailed, null);
@@ -621,7 +626,14 @@ public partial class ComicProcessorService
             return (RenameDecision.AlreadyNamed, target);
         }
 
-        return (TargetFileExists(target, resolvedPath) ? RenameDecision.TargetTaken : RenameDecision.Rename, target);
+        if (!TargetFileExists(target, resolvedPath))
+        {
+            return (RenameDecision.Rename, target);
+        }
+
+        // An Annual without a number is named by its title, which another may share ("Annual
+        // 2026"): it keeps its name rather than being flagged as the other's duplicate.
+        return keepsNoNumber ? (RenameDecision.AlreadyNamed, resolvedPath) : (RenameDecision.TargetTaken, target);
     }
 
     /// <summary>
@@ -636,7 +648,7 @@ public partial class ComicProcessorService
     /// order, normalize fills <c>&lt;Volume&gt;</c> from (see VolumeFromNames), so the name and
     /// the tag agree.
     /// </param>
-    private string? GenerateFileName(ComicMetadata metadata, string originalPath, string? originalSeries = null)
+    private string? GenerateFileName(ComicMetadata metadata, string originalPath, string? originalSeries = null, bool keepsNoNumber = false)
     {
         try
         {
@@ -696,7 +708,10 @@ public partial class ComicProcessorService
             // One-shots / volume-only files (no chapter in metadata and no
             // explicit "Ch/Chapter" keyword in the original filename) are
             // intentionally left untouched.
-            filename = EnsureChapterNumberPreserved(filename, issue, originalPath);
+            if (!keepsNoNumber)
+            {
+                filename = EnsureChapterNumberPreserved(filename, issue, originalPath);
+            }
 
             filename = ComicFileProcessor.SanitizeFileName(filename);
             

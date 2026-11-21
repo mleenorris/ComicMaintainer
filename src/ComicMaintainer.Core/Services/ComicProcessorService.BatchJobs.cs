@@ -83,7 +83,7 @@ public partial class ComicProcessorService
             "updating metadata for",
             async (file, token) =>
             {
-                var result = await UpdateMetadataCoreAsync(file, metadata, fields, token, userEdit: true);
+                var result = await ApplyUserEditCoreAsync(file, metadata, fields, token);
                 return new BatchItemResult(result.Succeeded, result.FailureReason);
             },
             "Update metadata failed",

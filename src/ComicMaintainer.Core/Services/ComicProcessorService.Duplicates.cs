@@ -167,8 +167,8 @@ public partial class ComicProcessorService
                 return Unknown(NoSeriesMessage(filePath, "No metadata or series information"));
             }
 
-            RecoverMarkedChapter(filePath, metadata);
-            if (GenerateFileName(metadata, resolvedPath, originalSeries) is not { } generated)
+            await RecoverMarkedChapterAsync(filePath, metadata, cancellationToken);
+            if (GenerateFileName(metadata, resolvedPath, originalSeries, await AnnualKeepsNoNumberAsync(metadata, filePath, cancellationToken)) is not { } generated)
             {
                 return Unknown(FilenameGenerationFailedMessage);
             }

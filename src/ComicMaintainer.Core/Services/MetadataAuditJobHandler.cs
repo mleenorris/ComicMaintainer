@@ -2,6 +2,7 @@ using System.Text.Json;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -91,8 +92,9 @@ public class MetadataAuditJobHandler : IScheduledJobFindingsHandler
                 continue;
             }
 
-            // Check 1: Issue / chapter number must be set.
-            if (string.IsNullOrWhiteSpace(metadata.Issue))
+            // Check 1: Issue / chapter number must be set. An Annual may have none ("Annual 2026").
+            if (string.IsNullOrWhiteSpace(metadata.Issue)
+                && IssueFormat.Of(metadata.Format, metadata.Series, metadata.Issue, Path.GetFileName(file.FilePath), metadata.Title) != IssueFormat.Annual)
             {
                 missingChapter++;
                 findings.Add(new MetadataAuditFindingEntity

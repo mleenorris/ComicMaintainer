@@ -571,6 +571,23 @@ public class SeriesLibraryServiceTests
     }
 
     [Fact]
+    public async Task GetSeriesIssuesAsync_AnAnnualNamedByItsYear_IsListedWithoutANumber()
+    {
+        // "2026" is the Annual's year: listed as #2026, every number before it would be "missing".
+        var files = new List<ComicFile>
+        {
+            new() { FilePath = "/library/Saga/Saga - Chapter 0001.cbz", FileName = "Saga - Chapter 0001.cbz", Directory = "/library/Saga", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Saga" } },
+            new() { FilePath = "/library/Saga/Saga Annual - 2026.cbz", FileName = "Saga Annual - 2026.cbz", Directory = "/library/Saga", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Saga", Format = "Annual" } },
+        };
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(files);
+        var service = TestServices.CreateSeriesLibrary(_fileStore.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var result = await service.GetSeriesIssuesAsync("saga");
+
+        Assert.Equal(new[] { ("1", false), ((string?)null, true) }, result!.Issues.Select(i => (i.Issue, i.Annual)).OrderBy(i => i.Annual));
+    }
+
+    [Fact]
     public async Task GetSeriesIssuesAsync_ReturnsNullForUnknownId()
     {
         _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))

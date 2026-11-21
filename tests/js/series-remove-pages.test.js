@@ -159,3 +159,43 @@ test('with an IntersectionObserver a page loads as it nears the view', async (t)
     page.run('closeRemovePagesModal()');
     assert.equal(observed.length, 0);
 });
+
+test('a page that will not load stays a tile to tick, and one that arrives after the dialog closed is released', async (t) => {
+    const { deferred } = require('./support/app');
+    const late = deferred();
+    const answers = [() => respond(500, 'boom'), () => late.promise, () => new Response('img', { headers: { 'Content-Type': 'image/jpeg' } })];
+    let call = 0;
+    const page = await h.bootSeriesDetail(t, { routes: routes({ 'GET /api/comicreader/page': () => answers[call++]() }) });
+    const made = [];
+    const released = [];
+    page.window.URL.createObjectURL = () => { made.push(`blob:${made.length + 1}`); return made.at(-1); };
+    page.window.URL.revokeObjectURL = url => released.push(url);
+    page.window.IntersectionObserver = undefined;
+
+    page.run(`openRemovePagesModal(${JSON.stringify(FILE)})`);
+    await page.settle();
+    assert.equal(tiles(page)[0].querySelector('img').getAttribute('src'), null, 'the page that failed has no image');
+    assert.equal(tiles(page).length, 3);
+
+    // The second page answers after the dialog closed: its image is released at once.
+    page.run('closeRemovePagesModal()');
+    late.resolve(new Response('img', { headers: { 'Content-Type': 'image/jpeg' } }));
+    await page.settle();
+    assert.ok(made.every(url => released.includes(url)), 'every image made is released');
+});
+
+test('pages that changed since they were listed are listed again', async (t) => {
+    const page = await h.bootSeriesDetail(t, {
+        routes: routes({ 'POST /api/pages/remove': respond(400, { error: 'Those pages are not in the archive any more; reload its pages' }) })
+    });
+    await open(page);
+    tick(page, 0);
+    h.answerConfirms(page, true);
+
+    page.click(applyButton(page));
+    await page.settle();
+
+    assert.equal(h.requests(page, 'GET', '/api/comicreader/pages').length, 2, 'the pages are read again');
+    assert.equal(page.$('#removePagesModal').classList.contains('active'), true);
+    assert.equal(applyButton(page).disabled, true, 'nothing is ticked in the new list');
+});

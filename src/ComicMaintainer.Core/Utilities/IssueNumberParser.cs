@@ -177,6 +177,12 @@ public static class IssueNumberParser
     public static bool ContainsIssueNumber(string? fileNameStem, string? issue)
         => ContainsNumber(fileNameStem, issue);
 
+    /// <summary>
+    /// True for a number that reads as a year (1900 to 2099), as an Annual named by its year
+    /// carries (<c>#Annual 2026</c>): not an issue number of the Annual.
+    /// </summary>
+    public static bool IsYear(string? number) =>
+        number is { Length: 4 } && number.All(char.IsAsciiDigit) && number[..2] is "19" or "20";
 
     /// <summary>
     /// The volume and issue numbers of a file name that gives the issue right after its volume

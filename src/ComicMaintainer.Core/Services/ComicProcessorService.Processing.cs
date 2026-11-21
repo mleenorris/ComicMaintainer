@@ -244,7 +244,8 @@ public partial class ComicProcessorService
                 FollowMovedFile(preservedPath, ref filePath, ref resolvedPath);
 
                 _logger.LogDebug("ProcessFileAsync: Attempting to rename file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                var (renameDecision, newResolvedPath) = DecideRename(metadata, resolvedPath, originalSeries);
+                var (renameDecision, newResolvedPath) = DecideRename(
+                    metadata, resolvedPath, originalSeries, await AnnualKeepsNoNumberAsync(metadata, filePath, cancellationToken));
                 if (newResolvedPath != null)
                 {
                     _logger.LogInformation(

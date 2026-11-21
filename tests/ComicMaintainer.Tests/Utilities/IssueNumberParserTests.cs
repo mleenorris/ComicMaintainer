@@ -227,6 +227,18 @@ public class IssueNumberParserTests
     }
 
     [Theory]
+    [InlineData("2026", true)]
+    [InlineData("1900", true)]
+    [InlineData("2099", true)]
+    [InlineData("2100", false)]
+    [InlineData("1899", false)]
+    [InlineData("026", false)]
+    [InlineData("20a6", false)]
+    [InlineData(null, false)]
+    public void IsYear_KnowsAYearFromAnIssueNumber(string? number, bool expected)
+        => Assert.Equal(expected, IssueNumberParser.IsYear(number));
+
+    [Theory]
     [InlineData("Vol. 2 004 (2023)", "2|4")]
     [InlineData("I Hate Fairyland v02 - 004", "2|4")]
     [InlineData("Series Volume 3 - Chapter 012.5", "3|12.5")]

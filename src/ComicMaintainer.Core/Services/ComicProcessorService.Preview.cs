@@ -69,7 +69,7 @@ public partial class ComicProcessorService
 
             // The chapter recovered from the file name before the rename is written too while
             // normalize is on (EnsureChapterMetadataPreservedAsync); both writes end in this one.
-            if (renaming && RecoverMarkedChapter(filePath, working) && settings.WatcherEnableNormalize)
+            if (renaming && await RecoverMarkedChapterAsync(filePath, working, cancellationToken) && settings.WatcherEnableNormalize)
             {
                 fields |= ComicMetadataFieldFlags.Issue | ComicMetadataFieldFlags.Title;
             }
@@ -126,7 +126,8 @@ public partial class ComicProcessorService
             string? error = null;
             if (renaming)
             {
-                var (decision, target) = DecideRename(working, afterWritePath, originalSeries);
+                var (decision, target) = DecideRename(
+                    working, afterWritePath, originalSeries, await AnnualKeepsNoNumberAsync(working, filePath, cancellationToken));
                 switch (decision)
                 {
                     case RenameDecision.NameFailed:

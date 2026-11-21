@@ -238,8 +238,23 @@ public partial class ComicProcessorService
         ArgumentNullException.ThrowIfNull(metadata);
         return RunExclusiveAsync(
             filePath,
-            token => UpdateMetadataCoreAsync(filePath, metadata, fields, token, userEdit: true),
+            token => ApplyUserEditCoreAsync(filePath, metadata, fields, token),
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Writes a user's edit of <paramref name="fields"/>, locking the issue number when it is one
+    /// of them, so processing keeps the number the user set or cleared (an Annual's cleared number
+    /// stays cleared, see <c>AnnualKeepsNoNumberAsync</c>). Other fields stay unlocked, free to
+    /// follow later provider matches and series renames.
+    /// </summary>
+    private Task<MetadataWriteResult> ApplyUserEditCoreAsync(
+        string filePath,
+        ComicMetadata metadata,
+        ComicMetadataFieldFlags fields,
+        CancellationToken cancellationToken)
+    {
+        return UpdateMetadataCoreAsync(filePath, metadata, fields, cancellationToken, userEdit: true, lockFields: fields & ComicMetadataFieldFlags.Issue);
     }
 
     public Task<MetadataWriteResult> WriteMetadataAsync(
@@ -280,7 +295,8 @@ public partial class ComicProcessorService
         ComicMetadataFieldFlags fields,
         CancellationToken cancellationToken,
         bool userEdit = false,
-        ProviderComicInfoFields? providerFill = null)
+        ProviderComicInfoFields? providerFill = null,
+        ComicMetadataFieldFlags lockFields = ComicMetadataFieldFlags.None)
     {
         try
         {
@@ -343,6 +359,13 @@ public partial class ComicProcessorService
                 _logger.LogDebug(
                     "ComicInfo.xml already holds these values, leaving the archive unchanged: {FilePath}",
                     LoggingHelper.SanitizePathForLog(filePath));
+
+                // The user set these values, even if the archive held them already.
+                if (lockFields != ComicMetadataFieldFlags.None)
+                {
+                    await LockUserEditAsync(filePath, metadata, lockFields);
+                }
+
                 return new MetadataWriteResult(MetadataWriteOutcome.Unchanged, filePath);
             }
 
@@ -350,7 +373,11 @@ public partial class ComicProcessorService
             var result = await RewriteArchiveAsync(filePath, physicalPath, ComicInfoXml.ToUtf8Bytes(updated), cancellationToken);
             if (pending is not null)
             {
-                await CompletePendingDatabaseEditAsync(result.FilePath, pending, metadata, userEdit ? fields : ComicMetadataFieldFlags.None);
+                await CompletePendingDatabaseEditAsync(result.FilePath, pending, metadata, userEdit ? fields : ComicMetadataFieldFlags.None, lockFields);
+            }
+            else if (lockFields != ComicMetadataFieldFlags.None)
+            {
+                await LockUserEditAsync(result.FilePath, metadata, lockFields);
             }
 
             // Cache everything the archive now holds, not only the fields just written, so series
@@ -497,6 +524,22 @@ public partial class ComicProcessorService
     }
 
     /// <summary>
+    /// Locks the <paramref name="fields"/> a user's edit wrote, so processing keeps them. Best
+    /// effort: the archive is already written.
+    /// </summary>
+    private async Task LockUserEditAsync(string filePath, ComicMetadata metadata, ComicMetadataFieldFlags fields)
+    {
+        try
+        {
+            await _fileStore.RecordUserMetadataEditAsync(filePath, metadata, fields, pendingWrite: false, CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogWarning(ex, "Wrote the metadata edit of {FilePath} but could not lock its fields", LoggingHelper.SanitizePathForLog(filePath));
+        }
+    }
+
+    /// <summary>
     /// After edits held only in the database were written into the archive now at
     /// <paramref name="filePath"/>, brings the stored record in line with what was written
     /// (the <paramref name="userFields"/> a user edit set on top of them) and marks it written.
@@ -506,14 +549,16 @@ public partial class ComicProcessorService
         string filePath,
         ComicFile pending,
         ComicMetadata metadata,
-        ComicMetadataFieldFlags userFields)
+        ComicMetadataFieldFlags userFields,
+        ComicMetadataFieldFlags lockFields = ComicMetadataFieldFlags.None)
     {
         try
         {
             var locked = (ComicMetadataFieldFlags)(pending.Metadata?.UserLockedFieldsMask ?? 0L);
-            if ((userFields & locked) != ComicMetadataFieldFlags.None)
+            var relock = (userFields & locked) | (userFields & lockFields);
+            if (relock != ComicMetadataFieldFlags.None)
             {
-                await _fileStore.RecordUserMetadataEditAsync(filePath, metadata, userFields & locked, pendingWrite: false);
+                await _fileStore.RecordUserMetadataEditAsync(filePath, metadata, relock, pendingWrite: false);
             }
 
             await _fileStore.MarkFileBackfilledAsync(filePath, pending.MetadataVersion);

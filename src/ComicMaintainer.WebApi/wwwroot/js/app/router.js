@@ -300,7 +300,7 @@
 
         function renderOverviewCard(series, resume) {
             const cover = seriesCoverImage(series, 480);
-            const fallback = series.has_external_image && series.external_image_url ? series.cover_file_path : '';
+            const fallback = series.has_external_image && series.external_image_url ? seriesFileCoverPath(series) : '';
             const resumeBtn = (resume && series.resume_file_path)
                 ? `<button type="button" class="overview-resume-btn" onclick="event.stopPropagation(); readComic('${escapeJs(series.resume_file_path)}')">${uiIcon('play')} Resume</button>`
                 : '';

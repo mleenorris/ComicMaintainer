@@ -6,6 +6,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+// A cover's address, which carries the file's version when the list gives it.
+const coverOf = (path, version) => `/api/comicreader/cover?filePath=${encodeURIComponent(path)}${version ? `&v=${encodeURIComponent(version)}` : ''}`;
 const { deferred } = require('./support/app');
 const {
     PORTRAIT_QUERY,
@@ -40,7 +42,7 @@ test('the layout buttons switch between list, grid and compact and remember the 
     assert.equal(rows[0].querySelector('.series-list-meta').textContent, '3.0 MB');
     assert.equal(rows[0].querySelector('.series-list-count').getAttribute('aria-label'), '3 issues');
     const thumb = rows[0].querySelector('img.series-list-thumb');
-    assert.equal(thumb.dataset.protectedImage, 'Series 001/Series 001 #001.cbz');
+    assert.equal(thumb.dataset.protectedImage, coverOf('Series 001/Series 001 #001.cbz'));
     assert.ok(imageObserver(page).targets.has(thumb));
     assert.equal(page.window.localStorage.getItem('seriesLayout'), 'list');
     assert.deepEqual(activeLayoutButtons(page), ['seriesLayoutListBtn', 'seriesLayoutListBtnMobile']);
@@ -195,8 +197,8 @@ test('series with an external image use it as the cover and fall back to the fir
         const images = page.$$('#fileList img[data-protected-image]');
 
         assert.deepEqual(images.map(image => [image.dataset.protectedImage, image.dataset.protectedImageFallback]), [
-            [`/api/series-images/abc?w=${layout === 'list' ? 160 : 480}`, 'Series 001/Series 001 #001.cbz'],
-            ['Series 002/Series 002 #001.cbz', '']
+            [`/api/series-images/abc?w=${layout === 'list' ? 160 : 480}`, coverOf('Series 001/Series 001 #001.cbz')],
+            [coverOf('Series 002/Series 002 #001.cbz'), '']
         ], layout);
         assert.equal(images[0].alt, 'Series 001 cover');
         page.close();

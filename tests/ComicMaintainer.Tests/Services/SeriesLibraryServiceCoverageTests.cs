@@ -759,6 +759,7 @@ public class SeriesLibraryServiceCoverageTests
         Assert.Empty(result.Issues);
         Assert.Equal(0, result.IssueCount);
         Assert.Equal(string.Empty, result.CoverFilePath);
+        Assert.Null(result.CoverVersion);
         Assert.Equal(1, result.Page);
         Assert.Equal(0, result.TotalPages);
     }

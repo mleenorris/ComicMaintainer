@@ -6,6 +6,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+// A cover's address, which carries the file's version when the list gives it.
+const coverOf = (path, version) => `/api/comicreader/cover?filePath=${encodeURIComponent(path)}${version ? `&v=${encodeURIComponent(version)}` : ''}`;
 const { respond } = require('./support/dom');
 const { deferred } = require('./support/app');
 const {
@@ -36,7 +38,7 @@ test('the library opens on the first page of series, rendered as the compact gri
     assert.equal(cards[0].querySelector('.series-meta').textContent, '3.0 MB');
 
     const cover = cards[0].querySelector('img.series-cover');
-    assert.equal(cover.dataset.protectedImage, 'Series 001/Series 001 #001.cbz');
+    assert.equal(cover.dataset.protectedImage, coverOf('Series 001/Series 001 #001.cbz'));
     assert.equal(cover.dataset.protectedImageFallback, '');
     // Covers load lazily: they are only observed until they near the viewport.
     assert.ok(imageObserver(page).targets.has(cover));

@@ -242,6 +242,7 @@ public partial class SeriesLibraryService
             Aliases = NormalizeAliases(accumulator.Aliases),
             MetadataSource = accumulator.MetadataSource,
             CoverFilePath = sortedIssues.FirstOrDefault()?.FilePath ?? string.Empty,
+            CoverVersion = SeriesIssueDto.CoverVersionOf(sortedIssues.FirstOrDefault()),
             HasExternalImage = accumulator.HasExternalImage,
             ExternalImageUrl = BuildExternalImageUrl(accumulator),
             IssueCount = totalIssues,

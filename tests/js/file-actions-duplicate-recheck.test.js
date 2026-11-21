@@ -10,6 +10,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+// A cover's address, which carries the file's version when the list gives it.
+const coverOf = (path, version) => `/api/comicreader/cover?filePath=${encodeURIComponent(path)}${version ? `&v=${encodeURIComponent(version)}` : ''}`;
 const { respond } = require('./support/dom');
 const { deferred } = require('./support/app');
 const {
@@ -276,7 +278,7 @@ test('Compare shows the duplicate and the file that has its name side by side', 
         'Processing would name this file "Saga - Chapter 0001.cbz", and "Saga - Chapter 0001.cbz" already has that name.');
     const [duplicate, holder] = compared(page);
     assert.deepEqual({ ...duplicate, fields: undefined }, {
-        badge: 'Flagged as duplicate', name: 'Saga 1.cbz', path: A, cover: A, fields: undefined
+        badge: 'Flagged as duplicate', name: 'Saga 1.cbz', path: A, cover: coverOf(A, '2048-1579089600'), fields: undefined
     });
     assert.deepEqual(duplicate.fields, [
         ['Pages', '22', true],

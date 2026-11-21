@@ -261,6 +261,14 @@ the old file name `All New X-Men Annual 001 (2015)` or `#Annual 2021` that some 
 file has been renamed, the title is all that still marks it. Normalize writes `<Format>Annual</Format>` into an Annual
 whose `<Format>` is empty. Annuals stay in the Green Lantern series, in their own "Annual" section with their own missing issues.
 
+An Annual may have no issue number. One named by its year (`#Annual 2026.cbz`) is not given the year as its number, and
+when you clear an Annual's number in **View/Edit**, processing keeps it cleared instead of reading a number back from
+its file name (`… Chapter 0021.cbz`). Such an Annual is named without a number: its title stands in for it, and a missing
+or generated title becomes `Annual 2026` (its cover year), or `Annual` without one. An Annual whose name gives a number
+that is not a year, and whose number you did not clear, still takes that number (`Batman Annual 003.cbz` is #3).
+
+Editing a field in **View/Edit** or **Update** locks it, as it always has for a CBR: processing keeps what you set.
+
 Specials work the same way. Set **Format** to `Special` in **View/Edit**, or for many files at once in **Update**. A
 title can also mark one: "Special" right before the issue number (`Special 1`), or, for an issue with no number, "Special"
 alone or before a separator (`All New X-Men .Special – One Down`). Specials get their own "Special" section, after the

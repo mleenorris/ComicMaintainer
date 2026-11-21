@@ -817,6 +817,89 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessFileAsync_AnAnnualNamedByItsYear_KeepsNoIssueNumber()
+    {
+        // "#Annual 2026" names the 2026 Annual: 2026 is its year, not its issue number.
+        var path = WriteArchive("Absolute Wonder Woman", "#Annual 2026.cbz",
+            "<ComicInfo><Series>Absolute Wonder Woman Annual</Series><Title>#Annual 2026</Title><Year>2026</Year><Format>Annual</Format></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var renamed = Directory.GetFiles(Path.Join(_root, "Absolute Wonder Woman")).Single();
+        var info = ReadComicInfo(renamed);
+        Assert.Null(info.Element("Number"));
+        Assert.Equal("#Annual 2026", info.Element("Title")?.Value);
+        Assert.DoesNotContain("Chapter", Path.GetFileName(renamed));
+        Assert.Contains("Annual 2026", Path.GetFileName(renamed));
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AnAnnualWhoseNumberTheUserCleared_StaysWithoutOne()
+    {
+        // Renamed by its old number before the user cleared it; the name must not bring it back.
+        var path = WriteArchive("Absolute Wonder Woman", "Absolute Wonder Woman Annual - Chapter 0021.cbz",
+            "<ComicInfo><Series>Absolute Wonder Woman Annual</Series><Year>2026</Year><Format>Annual</Format></ComicInfo>");
+        _fileStore.Setup(f => f.GetFileAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(new ComicFile
+        {
+            FilePath = path,
+            Metadata = new ComicMetadata { Series = "Absolute Wonder Woman Annual", IsUserEdited = true, UserLockedFieldsMask = (long)ComicMetadataFieldFlags.Issue }
+        });
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        var renamed = Directory.GetFiles(Path.Join(_root, "Absolute Wonder Woman")).Single();
+        var info = ReadComicInfo(renamed);
+        Assert.Null(info.Element("Number"));
+        Assert.Equal("Annual 2026", info.Element("Title")?.Value);
+        Assert.DoesNotContain("0021", Path.GetFileName(renamed));
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AnAnnualWithoutANumberTheUserLeftAlone_TakesTheNumberItsNameGives()
+    {
+        var path = WriteArchive("Batman", "Batman Annual 003.cbz",
+            "<ComicInfo><Series>Batman Annual</Series><Format>Annual</Format></ComicInfo>");
+        _settings.WatcherEnableRename = false;
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        Assert.Equal("3", ReadComicInfo(path).Element("Number")?.Value);
+    }
+
+    [Fact]
+    public async Task Normalize_AnAnnualWithoutANumberOrYear_IsTitledAnnual_AndIsThenNormalized()
+    {
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("Saga", "Saga Annual.cbz",
+            "<ComicInfo><Series>Saga Annual</Series><Format>Annual</Format><Title>Chapter Unknown</Title></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+        var written = File.GetLastWriteTimeUtc(path);
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        var info = ReadComicInfo(path);
+        Assert.Equal(("Annual", (string?)null), (info.Element("Title")?.Value, info.Element("Number")?.Value));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(path));
+    }
+
+    [Fact]
+    public async Task ApplyMetadataEditAsync_LocksTheFieldsTheUserWrote()
+    {
+        var path = WriteArchive("Absolute Wonder Woman", "Absolute Wonder Woman Annual - Chapter 0021.cbz",
+            "<ComicInfo><Series>Absolute Wonder Woman Annual</Series><Number>21</Number><Format>Annual</Format></ComicInfo>");
+
+        var result = await _service.ApplyMetadataEditAsync(path, new ComicMetadata(), ComicMetadataFieldFlags.Issue);
+
+        Assert.True(result.Succeeded);
+        Assert.Null(ReadComicInfo(path).Element("Number"));
+        _fileStore.Verify(f => f.RecordUserMetadataEditAsync(path, It.IsAny<ComicMetadata>(), ComicMetadataFieldFlags.Issue, false, It.IsAny<CancellationToken>()), Times.Once);
+
+        // Saving what the archive already holds is the user's decision too.
+        await _service.ApplyMetadataEditAsync(path, new ComicMetadata(), ComicMetadataFieldFlags.Issue);
+        _fileStore.Verify(f => f.RecordUserMetadataEditAsync(path, It.IsAny<ComicMetadata>(), ComicMetadataFieldFlags.Issue, false, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
     public async Task ProcessFileAsync_AnnualOfAVolume_KeepsAnnualBeforeTheVolume()
     {
         var path = WriteArchive("Green Lantern (1990)", "Green Lantern (1990) Annual 003.cbz");

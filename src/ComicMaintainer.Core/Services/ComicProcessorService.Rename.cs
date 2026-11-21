@@ -626,7 +626,14 @@ public partial class ComicProcessorService
             return (RenameDecision.AlreadyNamed, target);
         }
 
-        return (TargetFileExists(target, resolvedPath) ? RenameDecision.TargetTaken : RenameDecision.Rename, target);
+        if (!TargetFileExists(target, resolvedPath))
+        {
+            return (RenameDecision.Rename, target);
+        }
+
+        // An Annual without a number is named by its title, which another may share ("Annual
+        // 2026"): it keeps its name rather than being flagged as the other's duplicate.
+        return keepsNoNumber ? (RenameDecision.AlreadyNamed, resolvedPath) : (RenameDecision.TargetTaken, target);
     }
 
     /// <summary>

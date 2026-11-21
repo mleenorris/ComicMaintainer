@@ -170,7 +170,7 @@ public class ComicFileProcessor
             template = IssuePlaceholderPrefixPattern.Replace(template, string.Empty);
             var standIn = template.Contains("{title}", StringComparison.Ordinal)
                 ? null
-                : TitleInPlaceOfNumber(tags.Title, tags.Series);
+                : WithoutRenderedKind(TitleInPlaceOfNumber(tags.Title, tags.Series), template, SeriesPlaceholders(tags, sourceFileName));
             issueFormatted = standIn ?? string.Empty;
             issueNoPad = issueFormatted;
         }
@@ -331,6 +331,39 @@ public class ComicFileProcessor
         var rest = KindLabelPattern.Replace(FileNameTitle.AfterSeries(title, series), string.Empty)
             .Trim(' ', '\t', '.', '#', '_', ':', '-', '–', '—', '~', ',');
         return rest.Any(char.IsLetterOrDigit) ? rest : null;
+    }
+
+    /// <summary>
+    /// <paramref name="standIn"/> without a leading kind word the template already renders
+    /// through <c>{format}</c> or <c>{annual}</c>, so an Annual titled "Annual 2026" is named
+    /// "Absolute Wonder Woman Annual - 2026", not "… Annual - Annual 2026". Unchanged when the
+    /// word is all it holds.
+    /// </summary>
+    private static string? WithoutRenderedKind(string? standIn, string template, IReadOnlyDictionary<string, string> placeholders)
+    {
+        if (string.IsNullOrWhiteSpace(standIn))
+        {
+            return standIn;
+        }
+
+        foreach (var placeholder in new[] { "format", "annual" })
+        {
+            if (!template.Contains("{" + placeholder + "}", StringComparison.Ordinal)
+                || !placeholders.TryGetValue(placeholder, out var kind)
+                || string.IsNullOrWhiteSpace(kind)
+                || !standIn.StartsWith(kind, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var rest = standIn[kind.Length..];
+            if (rest.Length > 0 && !char.IsLetterOrDigit(rest[0]) && rest.Any(char.IsLetterOrDigit))
+            {
+                return rest.Trim(' ', '\t', '.', '#', '_', ':', '-', '–', '—', '~', ',');
+            }
+        }
+
+        return standIn;
     }
 
     /// <summary>

@@ -131,6 +131,19 @@ public class MetadataAuditJobHandlerCoverageTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ExecuteAsync_AnAnnualWithoutANumber_IsNoMissingChapter()
+    {
+        const string annual = "/library/Absolute Wonder Woman/Absolute Wonder Woman Annual - 2026.cbz";
+        SetupTrackedFiles(annual);
+        SetupDiskMetadata(annual, new ComicMetadata { Series = "Absolute Wonder Woman Annual", Format = "Annual", Title = "#Annual 2026" });
+        SetupExpectedSeries(annual, "Absolute Wonder Woman Annual");
+
+        var summary = await CreateHandler().ExecuteAsync(null, CancellationToken.None);
+
+        Assert.Equal("Scanned 1: 0 series mismatch, 0 missing chapter, 0 unreadable.", summary);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ReplacesFindingsFromThePreviousRun()
     {
         await SeedFindingAsync("/library/Old/c001.cbz");

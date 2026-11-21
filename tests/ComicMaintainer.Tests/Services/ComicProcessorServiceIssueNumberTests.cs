@@ -829,8 +829,8 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
         var info = ReadComicInfo(renamed);
         Assert.Null(info.Element("Number"));
         Assert.Equal("#Annual 2026", info.Element("Title")?.Value);
-        Assert.DoesNotContain("Chapter", Path.GetFileName(renamed));
-        Assert.Contains("Annual 2026", Path.GetFileName(renamed));
+        // The title stands in for the number, without saying "Annual" twice.
+        Assert.Equal("Absolute Wonder Woman Annual - 2026.cbz", Path.GetFileName(renamed));
     }
 
     [Fact]
@@ -851,7 +851,70 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
         var info = ReadComicInfo(renamed);
         Assert.Null(info.Element("Number"));
         Assert.Equal("Annual 2026", info.Element("Title")?.Value);
-        Assert.DoesNotContain("0021", Path.GetFileName(renamed));
+        Assert.Equal("Absolute Wonder Woman Annual - 2026.cbz", Path.GetFileName(renamed));
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AnAnnualWhoseLockedNumberWentMissing_TakesItBackFromItsName()
+    {
+        // The user set #21 and it was locked; a tagger since dropped <Number>. That is not clearing it.
+        var path = WriteArchive("Absolute Wonder Woman", "Absolute Wonder Woman Annual - Chapter 0021.cbz",
+            "<ComicInfo><Series>Absolute Wonder Woman Annual</Series><Year>2026</Year><Format>Annual</Format></ComicInfo>");
+        _fileStore.Setup(f => f.GetFileAsync(path, It.IsAny<CancellationToken>())).ReturnsAsync(new ComicFile
+        {
+            FilePath = path,
+            Metadata = new ComicMetadata { Issue = "21", IsUserEdited = true, UserLockedFieldsMask = (long)ComicMetadataFieldFlags.Issue }
+        });
+        _settings.WatcherEnableRename = false;
+
+        Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
+
+        Assert.Equal("21", ReadComicInfo(path).Element("Number")?.Value);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_TwoAnnualsWithoutANumberOfOneName_KeepTheirNames_NotFlaggedAsDuplicates()
+    {
+        var first = WriteArchive("Saga", "Saga Annual (2026) a.cbz", "<ComicInfo><Series>Saga Annual</Series><Format>Annual</Format><Year>2026</Year></ComicInfo>");
+        var second = WriteArchive("Saga", "Saga Annual (2026) b.cbz", "<ComicInfo><Series>Saga Annual</Series><Format>Annual</Format><Year>2026</Year></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(first));
+        Assert.True(await _service.ProcessFileAsync(second));
+
+        Assert.Equal(new[] { "Saga Annual (2026) b.cbz", "Saga Annual - 2026.cbz" },
+            Directory.GetFiles(Path.Join(_root, "Saga")).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        _fileStore.Verify(f => f.MarkFileDuplicateAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Normalize_AnAnnualWithoutANumber_TakesNoCoverYearFromABracketedYear()
+    {
+        // With no issue number before it, "(2019)" may be the volume's start year: not its cover year.
+        _settings.WatcherEnableRename = false;
+        var path = WriteArchive("Saga", "Saga Annual (2019).cbz", "<ComicInfo><Series>Saga Annual</Series><Format>Annual</Format></ComicInfo>");
+
+        Assert.True(await _service.ProcessFileAsync(path));
+
+        var info = ReadComicInfo(path);
+        Assert.Equal(("Annual", (string?)null, (string?)null), (info.Element("Title")?.Value, info.Element("Year")?.Value, info.Element("Number")?.Value));
+    }
+
+    [Fact]
+    public async Task UpdateMetadataJob_LocksOnlyTheIssueNumberItWrites()
+    {
+        var path = WriteArchive("Saga", "Saga - Chapter 0001.cbz", "<ComicInfo><Series>Saga</Series><Number>1</Number></ComicInfo>");
+        var registry = TestServices.CreateBatchJobRegistry(new TestOptionsMonitor<AppSettings>(_settings), NullLogger<BatchJobRegistry>.Instance);
+        using var service = TestServices.CreateComicProcessor(
+            new TestOptionsMonitor<AppSettings>(_settings), NullLogger<ComicProcessorService>.Instance, _fileStore.Object,
+            Mock.Of<IProcessingHistoryService>(), jobRegistry: registry);
+
+        var jobId = await service.UpdateMetadataAsync(new[] { path }, new ComicMetadata { Series = "Saga Deluxe", Issue = "2" },
+            ComicMetadataFieldFlags.Series | ComicMetadataFieldFlags.Issue);
+        await registry.WaitForCompletionAsync(jobId);
+
+        Assert.Equal(("Saga Deluxe", "2"), (ReadComicInfo(path).Element("Series")?.Value, ReadComicInfo(path).Element("Number")?.Value));
+        _fileStore.Verify(f => f.RecordUserMetadataEditAsync(path, It.IsAny<ComicMetadata>(), ComicMetadataFieldFlags.Issue, false, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.RecordUserMetadataEditAsync(It.IsAny<string>(), It.IsAny<ComicMetadata>(), It.Is<ComicMetadataFieldFlags>(fl => fl.HasFlag(ComicMetadataFieldFlags.Series)), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -888,10 +951,11 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
         var path = WriteArchive("Absolute Wonder Woman", "Absolute Wonder Woman Annual - Chapter 0021.cbz",
             "<ComicInfo><Series>Absolute Wonder Woman Annual</Series><Number>21</Number><Format>Annual</Format></ComicInfo>");
 
-        var result = await _service.ApplyMetadataEditAsync(path, new ComicMetadata(), ComicMetadataFieldFlags.Issue);
+        var result = await _service.ApplyMetadataEditAsync(path, new ComicMetadata { Title = "The 2026 Annual" }, ComicMetadataFieldFlags.Issue | ComicMetadataFieldFlags.Title);
 
         Assert.True(result.Succeeded);
         Assert.Null(ReadComicInfo(path).Element("Number"));
+        // Only the issue number is locked: the title stays free to follow ComicVine.
         _fileStore.Verify(f => f.RecordUserMetadataEditAsync(path, It.IsAny<ComicMetadata>(), ComicMetadataFieldFlags.Issue, false, It.IsAny<CancellationToken>()), Times.Once);
 
         // Saving what the archive already holds is the user's decision too.

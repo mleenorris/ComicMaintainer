@@ -243,9 +243,10 @@ public partial class ComicProcessorService
     }
 
     /// <summary>
-    /// Writes a user's edit of <paramref name="fields"/> and locks them, so processing keeps what
-    /// the user set (an issue number cleared stays cleared), as an edit kept in the database is
-    /// locked (see <see cref="KeepMetadataEditInDatabaseAsync"/>).
+    /// Writes a user's edit of <paramref name="fields"/>, locking the issue number when it is one
+    /// of them, so processing keeps the number the user set or cleared (an Annual's cleared number
+    /// stays cleared, see <c>AnnualKeepsNoNumberAsync</c>). Other fields stay unlocked, free to
+    /// follow later provider matches and series renames.
     /// </summary>
     private Task<MetadataWriteResult> ApplyUserEditCoreAsync(
         string filePath,
@@ -253,7 +254,7 @@ public partial class ComicProcessorService
         ComicMetadataFieldFlags fields,
         CancellationToken cancellationToken)
     {
-        return UpdateMetadataCoreAsync(filePath, metadata, fields, cancellationToken, userEdit: true, lockFields: fields);
+        return UpdateMetadataCoreAsync(filePath, metadata, fields, cancellationToken, userEdit: true, lockFields: fields & ComicMetadataFieldFlags.Issue);
     }
 
     public Task<MetadataWriteResult> WriteMetadataAsync(

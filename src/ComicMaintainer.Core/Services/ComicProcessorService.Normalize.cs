@@ -241,7 +241,7 @@ public partial class ComicProcessorService
         // generated "Chapter <n>" one is rewritten, so a title alone never forces a rewrite.
         var expectedTitle = NormalizedTitleFor(
             metadata, expectedIssue, await IsTitleLockedAsync(filePath, cancellationToken), seriesNames,
-            annualWithoutNumber ? AnnualTitle(metadata.Year) : null);
+            annualWithoutNumber ? AnnualTitle(YearToFill(metadata, filePath, seriesNames) ?? metadata.Year) : null);
         _logger.LogDebug(
             "Checking title normalization for file: {FilePath}, Current metadata {title} Expected {expectedTitle}",
             LoggingHelper.SanitizePathForLog(filePath),
@@ -510,9 +510,10 @@ public partial class ComicProcessorService
 
     /// <summary>
     /// True for an Annual that goes without an issue number: one whose number the user cleared
-    /// (the issue is locked), or one named by its year (<c>#Annual 2026.cbz</c>), whose year is
-    /// not an issue number. No number is then taken from its file name: not the year, and not
-    /// the number of a name given before the user cleared it (<c>… Chapter 0021.cbz</c>).
+    /// (the issue is locked, and empty), or one named by its year (<c>#Annual 2026.cbz</c>),
+    /// whose year is not an issue number. No number is then taken from its file name: not the
+    /// year, and not the number of a name given before the user cleared it (<c>… Chapter 0021.cbz</c>).
+    /// A number the user set and locked that has since gone missing is recovered as before.
     /// </summary>
     private async Task<bool> AnnualKeepsNoNumberAsync(ComicMetadata metadata, string filePath, CancellationToken cancellationToken)
     {
@@ -522,16 +523,13 @@ public partial class ComicProcessorService
             return false;
         }
 
-        var stem = Path.GetFileNameWithoutExtension(filePath);
-        var fromName = IssueNumberParser.ParseMarked(stem) ?? IssueNumberParser.Parse(stem);
+        var fromName = IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(filePath));
         return fromName is null
-               || IsYear(fromName)
-               || await IsFieldLockedAsync(filePath, ComicMetadataFieldFlags.Issue, cancellationToken);
+               || IssueNumberParser.IsYear(fromName)
+               || (await GetTrackedFileAsync(filePath, cancellationToken) is { Metadata: { } stored }
+                   && ((ComicMetadataFieldFlags)stored.UserLockedFieldsMask).HasFlag(ComicMetadataFieldFlags.Issue)
+                   && string.IsNullOrWhiteSpace(stored.Issue));
     }
-
-    /// <summary>A number that reads as a year (1900 to 2099), as an Annual named by its year carries.</summary>
-    private static bool IsYear(string number) =>
-        number.Length == 4 && number.All(char.IsAsciiDigit) && number[..2] is "19" or "20";
 
     /// <summary>The title of an Annual without a number: "Annual 2026", or "Annual" without a year.</summary>
     private static string AnnualTitle(int? year) =>
@@ -672,7 +670,7 @@ public partial class ComicProcessorService
         // Keep a real chapter title; fill in a missing one and correct a stale generated one.
         var normalizedTitle = NormalizedTitleFor(
             normalizedMetadata, normalizedMetadata.Issue, await IsTitleLockedAsync(filePath, cancellationToken), seriesNames,
-            annualWithoutNumber ? AnnualTitle(normalizedMetadata.Year) : null);
+            annualWithoutNumber ? AnnualTitle(YearToFill(metadata, filePath, seriesNames) ?? normalizedMetadata.Year) : null);
         if (!string.Equals(normalizedTitle, normalizedMetadata.Title, StringComparison.Ordinal))
         {
             _logger.LogDebug("Setting title to standard format: {Title}", LoggingHelper.SanitizeForLog(normalizedTitle));

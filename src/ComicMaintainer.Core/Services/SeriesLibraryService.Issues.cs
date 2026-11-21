@@ -361,8 +361,14 @@ public partial class SeriesLibraryService
             return issue.Issue;
         }
 
-        return string.IsNullOrWhiteSpace(issue.FileName)
-            ? null
-            : IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(issue.FileName));
+        if (string.IsNullOrWhiteSpace(issue.FileName))
+        {
+            return null;
+        }
+
+        // An Annual named by its year ("Annual 2026") has no issue number: the year is not one,
+        // and would leave its run "missing" every number before it.
+        var parsed = IssueNumberParser.Parse(Path.GetFileNameWithoutExtension(issue.FileName));
+        return issue.Annual && IssueNumberParser.IsYear(parsed) ? null : parsed;
     }
 }

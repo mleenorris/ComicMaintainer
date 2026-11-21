@@ -628,9 +628,21 @@ Turning pages and scrolling leave them as they are. In webcomic mode the bar alo
 
 ### Offline reading
 
-Click **Save offline** in the reader to keep a comic for reading with no connection. You can also install the site as an
-app from your browser. A comic counts as saved only when the whole download has finished. An interrupted download shows
-**Resume N/M** and fetches only the missing pages. One not resumed within 7 days is removed.
+You can keep comics on a device for reading with no connection:
+
+- **One issue:** choose **Save Offline** in the issue's menu, or click **Save offline** in the reader.
+- **A series:** click **Save Offline** on the series page to save every issue.
+- **Several series:** select them in the library and click **Save Offline** in the selection bar.
+
+Saving more than one issue asks first, since the comics take storage space. They are saved one at a time, and a saved
+issue is marked **Offline** on its cover. A comic counts as saved only when the whole download has finished. An interrupted
+download shows **Offline N/M** (**Resume N/M** in the reader) and fetches only the missing pages when saved again. One not
+resumed within 7 days is removed.
+
+**Offline Comics** in the sidebar lists the comics saved on the device you are using, with the space they take, and lets
+you read, resume or remove each one. When the app is opened with no connection, it shows this list instead of the library,
+and starts normally once the connection returns. Saved comics stay on the device when you sign out, until you remove them.
+You can also install the site as an app from your browser.
 
 ## Suwayomi
 

@@ -227,8 +227,8 @@ class FakeMessageChannel {
                 if (typeof target().onmessage === 'function') target().onmessage({ data });
             });
         };
-        this.port1 = { onmessage: null, postMessage: deliver(() => this.port2) };
-        this.port2 = { onmessage: null, postMessage: deliver(() => this.port1) };
+        this.port1 = { onmessage: null, postMessage: deliver(() => this.port2), close() {} };
+        this.port2 = { onmessage: null, postMessage: deliver(() => this.port1), close() {} };
     }
 }
 

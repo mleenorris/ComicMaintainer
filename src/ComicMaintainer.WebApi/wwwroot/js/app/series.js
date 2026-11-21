@@ -1146,6 +1146,7 @@
                                         <img class="series-issue-cover" data-protected-image="${escapeHtml(fileCoverPath(issue))}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                         <div class="series-issue-cover-overlay"></div>
                                         ${issue.issue ? `<span class="series-issue-badge">#${escapeHtml(issue.issue)}</span>` : ''}
+                                        ${offlineMarkHtml(issue.file_path)}
                                     </button>
                                     <div class="series-issue-body">
                                         <h3 class="series-issue-title" title="${escapeHtml(issue.title || issue.file_name)}">${escapeHtml(issue.title || issue.file_name)}</h3>
@@ -1207,6 +1208,7 @@
                                                     ${uiIcon('check-circle')} Mark Read
                                                 </button>`
                                             }
+                                            ${offlineMenuItemHtml(issue.file_path)}
                                             <div class="dropdown-divider" data-requires-write></div>
                                             <button class="dropdown-item" data-requires-write onclick="processSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
                                                 ${uiIcon('play')} Process
@@ -2282,6 +2284,7 @@
                                 ${rawHtml(renderSeriesStoryArcs(series.id))}
                                 <div class="series-detail-actions">
                                     ${issues.length ? html`<button type="button" class="btn btn-small btn-primary" onclick="readComic('${jsArg(issues[0].file_path)}')">${uiIcon('book-open')} Read First Issue</button>` : ''}
+                                    ${issues.length ? html`<button type="button" class="btn btn-small" onclick="saveSeriesOffline('${jsArg(series.id)}')" title="Keep every issue of this series on this device for reading with no connection">${uiIcon('download')} Save Offline</button>` : ''}
                                     <div class="file-actions-dropdown series-actions-dropdown" data-requires-write>
                                         <button type="button" class="dropdown-toggle" onclick="toggleDropdown(event, '${jsArg(SERIES_ACTIONS_DROPDOWN_KEY)}')">
                                             ${uiIcon('settings')} Actions

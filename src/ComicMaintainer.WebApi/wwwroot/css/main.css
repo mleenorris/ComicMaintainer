@@ -2318,6 +2318,69 @@
             pointer-events: none;
         }
 
+        /* An issue saved on this device for offline reading (js/app/offline.js). */
+        .series-issue-offline {
+            position: absolute;
+            bottom: 6px;
+            left: 6px;
+            z-index: 3;
+            background: var(--color-success);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 1px 7px;
+            border-radius: var(--radius-pill);
+            line-height: 1.4;
+            pointer-events: none;
+        }
+
+        .series-issue-offline[hidden] {
+            display: none;
+        }
+
+        /* The Offline Comics dialog's list. */
+        .offline-comics-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .offline-comic-row {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            padding: 10px 12px;
+            border: 1px solid var(--border-secondary);
+            border-radius: var(--radius-md);
+        }
+
+        .offline-comic-name {
+            flex: 1 1 220px;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .offline-comic-name strong {
+            overflow-wrap: anywhere;
+        }
+
+        .offline-comic-name small,
+        .offline-comic-state {
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+
+        .offline-comic-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
         .series-issue-body {
             display: flex;
             flex-direction: column;

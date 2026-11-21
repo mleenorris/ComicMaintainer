@@ -127,6 +127,7 @@
         <nav class="sidebar-nav" aria-label="Primary">
             <button type="button" class="sidebar-link" id="sidebarOverviewBtn" onclick="navigate('#/home')"><svg class="icon" aria-hidden="true"><use href="#i-home"/></svg><span>Overview</span></button>
             <button type="button" class="sidebar-link" id="sidebarLibraryBtn" onclick="navigate('#/library')"><svg class="icon" aria-hidden="true"><use href="#i-library"/></svg><span>Library</span></button>
+            <button type="button" class="sidebar-link" id="sidebarOfflineBtn" onclick="openOfflineComicsModal()" title="Comics saved on this device for reading with no connection"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg><span>Offline Comics</span></button>
             <button type="button" class="sidebar-link" id="sidebarSettingsBtn" onclick="openSettings()"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></button>
             <button type="button" class="sidebar-link" id="sidebarJobsBtn" onclick="openScheduledJobs()"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><span>Scheduled Jobs</span></button>
             <button type="button" class="sidebar-link" id="sidebarUsersBtn" onclick="openUsers()"><svg class="icon" aria-hidden="true"><use href="#i-user"/></svg><span>Users</span></button>
@@ -2416,6 +2417,27 @@
          </div>
      </div>
 
+     <!-- Offline Comics Modal (js/app/offline.js): the comics this device keeps for reading with no connection. -->
+     <div class="modal" id="offlineComicsModal" role="dialog" aria-modal="true" aria-labelledby="offlineComicsModalTitle" aria-hidden="true">
+         <div class="modal-content" style="max-width: 760px;">
+             <div class="modal-header">
+                 <h2 id="offlineComicsModalTitle">Offline Comics</h2>
+                 <button class="close-btn" onclick="closeOfflineComicsModal()" aria-label="Close">&times;</button>
+             </div>
+             <div class="modal-body">
+                 <p class="combine-folders-meta" id="offlineComicsSummary"></p>
+                 <p class="combine-folders-meta" id="offlineComicsEmpty" hidden>
+                     No comics are saved on this device. Choose <strong>Save Offline</strong> on a series, or in an issue's menu, to
+                     keep it for reading with no connection.
+                 </p>
+                 <ul class="offline-comics-list" id="offlineComicsList"></ul>
+             </div>
+             <div class="modal-footer">
+                 <button class="btn" onclick="closeOfflineComicsModal()">Close</button>
+             </div>
+         </div>
+     </div>
+
      <div class="modal" id="chooseVolumeModal" role="dialog" aria-modal="true" aria-labelledby="chooseVolumeModalTitle" aria-hidden="true">
          <div class="modal-content" style="max-width: 760px;">
              <div class="modal-header">
@@ -2827,6 +2849,7 @@
     <script src="__BASE_PATH__/js/app/scheduled-jobs.js?v=__APP_VERSION__"></script>
     <script src="__BASE_PATH__/js/app/users.js?v=__APP_VERSION__"></script>
     <script src="__BASE_PATH__/js/app/email.js?v=__APP_VERSION__"></script>
+    <script src="__BASE_PATH__/js/app/offline.js?v=__APP_VERSION__"></script>
     <script src="__BASE_PATH__/js/app/menus.js?v=__APP_VERSION__"></script>
     <script src="__BASE_PATH__/js/app/series-metadata.js?v=__APP_VERSION__"></script>
     <script src="__BASE_PATH__/js/app/modals.js?v=__APP_VERSION__"></script>

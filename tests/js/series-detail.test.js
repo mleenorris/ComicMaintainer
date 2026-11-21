@@ -62,7 +62,7 @@ test('renders the series header, synopsis and one card per issue', async () => {
     assert.equal(first.querySelector('.series-issue-read-corner').title, 'Read');
     assert.equal(first.querySelector('.dropdown-menu').childElementCount, 0, 'a menu is only built when it is opened');
     assert.match(menuText(page, first), /Mark Unread/);
-    assert.equal(first.querySelector('.dropdown-menu').querySelectorAll('.dropdown-item').length, 12);
+    assert.equal(first.querySelector('.dropdown-menu').querySelectorAll('.dropdown-item').length, 13);
     // Opening it again keeps what was built.
     const built = first.querySelector('.dropdown-menu .dropdown-item');
     assert.match(menuText(page, first), /Mark Unread/);
@@ -430,9 +430,9 @@ test('read-only users are offered only the read actions of an issue and no Serie
     const readOnly = await boot({ canModifyLibrary: false, canAdminister: false, roles: ['ReadOnly'] });
     assert.ok(readOnly.document.body.classList.contains('user-read-only'));
     assert.deepEqual(await issueMenus(readOnly), [
-        ['Info', 'View/Edit', 'Read Comic', '—', 'Mark Read'],
-        ['Info', 'View/Edit', 'Read Comic', '—', 'Mark Unread'],
-        ['Info', 'View/Edit', 'Read Comic', 'Review Duplicate', 'Compare Duplicate', '—', 'Mark Read']
+        ['Info', 'View/Edit', 'Read Comic', '—', 'Mark Read', 'Save Offline'],
+        ['Info', 'View/Edit', 'Read Comic', '—', 'Mark Unread', 'Save Offline'],
+        ['Info', 'View/Edit', 'Read Comic', 'Review Duplicate', 'Compare Duplicate', '—', 'Mark Read', 'Save Offline']
     ]);
     // Every series action changes the library or sends mail, so the menu is
     // hidden, and each item is marked too for when it is open in <body>.
@@ -441,7 +441,7 @@ test('read-only users are offered only the read actions of an issue and no Serie
 
     const admin = await boot({});
     assert.deepEqual((await issueMenus(admin))[0], [
-        'Info', 'View/Edit', 'Read Comic', 'Email to Ereader…', '—', 'Mark Read',
+        'Info', 'View/Edit', 'Read Comic', 'Email to Ereader…', '—', 'Mark Read', 'Save Offline',
         '—', 'Process', 'Rename', 'Normalize', 'Remove Metadata', 'Replace Cover…', 'Remove Pages…', '—', 'Delete'
     ]);
     assert.ok(isDisplayed(seriesActions(admin)));

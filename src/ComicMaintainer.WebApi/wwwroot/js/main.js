@@ -14,7 +14,18 @@
             // Initialize non-async operations immediately
             initTheme();
             initializeLibraryHealthToggle();
-            
+
+            // With no connection the library cannot load (nor can anyone sign
+            // in): show the comics saved on this device instead, and start the
+            // library once the connection returns.
+            if (navigator.onLine === false) {
+                startOffline(startApp);
+                return;
+            }
+            return startApp();
+        }
+
+        async function startApp() {
             // Check authentication FIRST before doing anything else
             // This prevents race condition where SSE and API calls start before auth is verified
             const isAuthenticated = await checkAuth();
@@ -42,6 +53,9 @@
             }
             
             loadCurrentUser();
+
+            // Which comics this device keeps for offline reading, for their marks.
+            void initOfflineComics();
 
             // Decides whether the "Find on Suwayomi" actions are offered.
             refreshSuwayomiAvailability();

@@ -36,6 +36,7 @@ internal static class WwwrootFiles
         "js/app/scheduled-jobs.js",
         "js/app/users.js",
         "js/app/email.js",
+        "js/app/offline.js",
         "js/app/menus.js",
         "js/app/series-metadata.js",
         "js/app/modals.js",

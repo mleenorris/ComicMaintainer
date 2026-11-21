@@ -390,7 +390,14 @@
             text.className = 'app-update-banner-text';
             text.textContent = 'You are offline. Changes cannot be saved until the connection returns.';
 
-            banner.appendChild(text);
+            // The comics saved on this device still read with no connection.
+            const savedBtn = document.createElement('button');
+            savedBtn.type = 'button';
+            savedBtn.className = 'btn btn-primary btn-small';
+            savedBtn.textContent = 'Offline comics';
+            savedBtn.addEventListener('click', () => openOfflineComicsModal());
+
+            banner.append(text, savedBtn);
             document.body.appendChild(banner);
         }
 

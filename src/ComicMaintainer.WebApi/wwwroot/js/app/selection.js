@@ -281,6 +281,10 @@
                 emailBtn.hidden = selectedSeries.size === 0;
                 emailBtn.disabled = Array.from(selectedSeries).some(id => selectedSeriesPathLoads.has(id));
             }
+            const offlineBtn = document.getElementById('seriesSelectionOfflineBtn');
+            if (offlineBtn) {
+                offlineBtn.hidden = selectedSeries.size === 0;
+            }
         }
 
         function updateSelectAllCheckbox() {

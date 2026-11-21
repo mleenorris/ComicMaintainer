@@ -1059,6 +1059,7 @@
                     </span>
                     <button type="button" class="btn btn-small" id="seriesSelectionClearBtn" onclick="clearSeriesSelection()" ${selectedCount > 0 ? '' : 'hidden'}>Clear</button>
                     <button type="button" class="btn btn-small" id="seriesSelectionEmailBtn" data-requires-write onclick="openEmailSendModalForSelected()" ${selectedCount > 0 ? '' : 'hidden'}>📧 Email Selected</button>
+                    <button type="button" class="btn btn-small" id="seriesSelectionOfflineBtn" onclick="saveSelectedOffline()" title="Keep every issue of the selected series on this device for reading with no connection" ${selectedCount > 0 ? '' : 'hidden'}>${uiIcon('download')} Save Offline</button>
                 </div>
             `;
         }

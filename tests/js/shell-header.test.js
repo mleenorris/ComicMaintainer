@@ -245,7 +245,11 @@ test('going offline shows one assertive banner and coming back online removes it
     assert.equal(banners[0].getAttribute('role'), 'alert');
     assert.equal(banners[0].getAttribute('aria-live'), 'assertive');
     assert.equal(banners[0].className, 'app-update-banner app-offline-banner');
-    assert.equal(banners[0].textContent, 'You are offline. Changes cannot be saved until the connection returns.');
+    assert.equal(banners[0].querySelector('.app-update-banner-text').textContent, 'You are offline. Changes cannot be saved until the connection returns.');
+    // The comics saved on this device are one click away.
+    page.click(banners[0].querySelector('button'));
+    assert.ok(page.$('#offlineComicsModal').classList.contains('active'));
+    page.run('closeOfflineComicsModal()');
 
     setOnline(page, true);
     assert.equal(page.$('#appOfflineBanner'), null);

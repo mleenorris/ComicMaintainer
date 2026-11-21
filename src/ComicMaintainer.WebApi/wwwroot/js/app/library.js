@@ -691,11 +691,37 @@
             }
         }
 
-        function getSeriesCoverPath(filePath) {
+        function getSeriesCoverPath(filePath, version) {
             // Persistent server-side cache endpoint. Falls back automatically
             // (via the protected-image fallback machinery) to the legacy page
-            // extraction endpoint if the cache is unavailable.
-            return `/api/comicreader/cover?filePath=${encodeURIComponent(filePath)}`;
+            // extraction endpoint if the cache is unavailable. The file's
+            // version (size and modified time) is part of the address: the
+            // browser, the service worker and this page keep a cover by its
+            // address, and a rename can give a path to another file.
+            const v = version === undefined || version === null || version === '' ? '' : `&v=${encodeURIComponent(version)}`;
+            return `/api/comicreader/cover?filePath=${encodeURIComponent(filePath)}${v}`;
+        }
+
+        // The file a cover image token shows the cover of: the filePath of a cover
+        // address (whatever its version), a bare file path as older tokens were,
+        // or null for any other image.
+        function coverTokenFilePath(token) {
+            if (typeof token !== 'string' || !token) return null;
+            if (!token.startsWith('/api/')) return token;
+            if (!token.startsWith('/api/comicreader/cover?')) return null;
+            return new URLSearchParams(token.slice(token.indexOf('?') + 1)).get('filePath');
+        }
+
+        // The cover address of an issue as the library lists it, with its version.
+        function fileCoverPath(file) {
+            if (!file || !file.file_path) return '';
+            const known = typeof file.size === 'number' && typeof file.modified === 'number';
+            return getSeriesCoverPath(file.file_path, known ? `${file.size}-${file.modified}` : null);
+        }
+
+        // The cover address of a series' first issue, with its version.
+        function seriesFileCoverPath(series) {
+            return series && series.cover_file_path ? getSeriesCoverPath(series.cover_file_path, series.cover_version) : '';
         }
 
         /**
@@ -705,7 +731,7 @@
          * cover. The art URL already carries `?v=<hash>`.
          */
         function seriesCoverImage(series, width) {
-            if (!series.has_external_image || !series.external_image_url) return series.cover_file_path;
+            if (!series.has_external_image || !series.external_image_url) return seriesFileCoverPath(series);
             const url = series.external_image_url;
             return `${url}${url.includes('?') ? '&' : '?'}w=${width}`;
         }
@@ -1224,7 +1250,7 @@
                             ${renderSeriesSelectBox(series)}
                             <button class="series-card-open" ${seriesOpenButtonAttributes(series)}>
                                 <div class="series-cover-wrapper">
-                                    <img class="series-cover" data-protected-image="${escapeHtml(seriesCoverImage(series, 480))}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                    <img class="series-cover" data-protected-image="${escapeHtml(seriesCoverImage(series, 480))}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? seriesFileCoverPath(series) : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                     <div class="series-cover-overlay"></div>
                                     <span class="series-count-badge">${series.issue_count}</span>
                                     ${renderLookupStatusBadge(series)}
@@ -1250,7 +1276,7 @@
                             ${renderSeriesSelectBox(series)}
                             <button class="series-card-open" ${seriesOpenButtonAttributes(series)}>
                                 <div class="series-cover-wrapper">
-                                    <img class="series-cover" data-protected-image="${escapeHtml(seriesCoverImage(series, 480))}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                    <img class="series-cover" data-protected-image="${escapeHtml(seriesCoverImage(series, 480))}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? seriesFileCoverPath(series) : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                     <span class="series-count-badge">${series.issue_count}</span>
                                     ${renderLookupStatusBadge(series)}
                                 </div>
@@ -1276,7 +1302,7 @@
                             ${renderSeriesSelectBox(series)}
                             <button class="series-list-row-open" ${seriesOpenButtonAttributes(series)}>
                                 <div class="series-list-thumb-wrapper">
-                                    <img class="series-list-thumb" data-protected-image="${escapeHtml(seriesCoverImage(series, 160))}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                    <img class="series-list-thumb" data-protected-image="${escapeHtml(seriesCoverImage(series, 160))}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? seriesFileCoverPath(series) : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                 </div>
                                 <div class="series-list-info">
                                     <h3 class="series-list-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>

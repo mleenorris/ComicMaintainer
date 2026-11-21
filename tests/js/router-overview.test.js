@@ -6,6 +6,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+// A cover's address, which carries the file's version when the list gives it.
+const coverOf = (path, version) => `/api/comicreader/cover?filePath=${encodeURIComponent(path)}${version ? `&v=${encodeURIComponent(version)}` : ''}`;
 const { deferred } = require('./support/app');
 const { respond } = require('./support/dom');
 const { boot, requests, consoleLines, overview, seriesCard, seriesIssues, seriesPage } = require('./support/core-helpers');
@@ -88,17 +90,17 @@ test('cards show the cover, issue count, size and provider match of each series'
     assert.deepEqual(cards, [
         {
             label: 'Open series Saga', title: 'Saga', count: '3', size: '3.0 MB',
-            cover: 'Saga/Saga 001.cbz', fallback: '', alt: 'Saga cover',
+            cover: coverOf('Saga/Saga 001.cbz'), fallback: '', alt: 'Saga cover',
             lookup: ['series-lookup-badge series-lookup-badge--unmatched', 'Not yet matched to a provider']
         },
         {
             label: 'Open series Monstress', title: 'Monstress', count: '12', size: '512.0 KB',
-            cover: 'https://covers.example/monstress.jpg?w=480', fallback: 'Monstress/Monstress 001.cbz', alt: 'Monstress cover',
+            cover: 'https://covers.example/monstress.jpg?w=480', fallback: coverOf('Monstress/Monstress 001.cbz'), alt: 'Monstress cover',
             lookup: ['series-lookup-badge series-lookup-badge--success', 'Provider matched']
         },
         {
             label: 'Open series Paper "Girls" & Co', title: 'Paper "Girls" & Co', count: '1', size: '2.0 GB',
-            cover: 'Paper Girls/PG 001.cbz', fallback: '', alt: 'Paper "Girls" & Co cover',
+            cover: coverOf('Paper Girls/PG 001.cbz'), fallback: '', alt: 'Paper "Girls" & Co cover',
             lookup: ['series-lookup-badge series-lookup-badge--warn', 'No external match found']
         }
     ]);

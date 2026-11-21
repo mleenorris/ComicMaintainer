@@ -472,6 +472,7 @@ Filter values for the listing routes:
     "total_size": 123456,
     "latest_modified": 1760000000,
     "cover_file_path": "/watched_dir/Batman/Batman 001.cbz",
+    "cover_version": "52428800-1700000000",
     "has_external_image": true,
     "external_image_url": "/api/series-images/batman?v=3f2a9c0d81b4e7a5",
     "lookup_status": "success",
@@ -492,7 +493,7 @@ With `include_issues=true`, each entry also holds its `issues`. Leave it off for
 
 **`GET /api/files/series/facets`** returns `{"genres":[{"value","count"}],"statuses":[{"value","count"}],"series_without_genres","series_without_status"}`.
 
-**`GET /api/files/series/{seriesId}/issues`** takes `filter`, `page` and `per_page`. It returns `{"id","title","canonical_title","aliases","metadata_source","cover_file_path","has_external_image","external_image_url","issue_count","total_size","issues","page","per_page","total_pages","synopsis","genres","publication_status","site_url"}`. Each issue is `{"file_path","file_name","title","issue","volume","publisher","year","size","modified","processed","renamed","normalized","duplicate","read","format","annual","volume_year","volume_key","volume_label"}`. `format` is `Annual`, `Special`, `Giant-Size` or `null`; `annual` is true for an Annual.
+**`GET /api/files/series/{seriesId}/issues`** takes `filter`, `page` and `per_page`. It returns `{"id","title","canonical_title","aliases","metadata_source","cover_file_path","cover_version","has_external_image","external_image_url","issue_count","total_size","issues","page","per_page","total_pages","synopsis","genres","publication_status","site_url"}`. Each issue is `{"file_path","file_name","title","issue","volume","publisher","year","size","modified","processed","renamed","normalized","duplicate","read","format","annual","volume_year","volume_key","volume_label"}`. `format` is `Annual`, `Special`, `Giant-Size` or `null`; `annual` is true for an Annual. `cover_version` is the cover file's size and modified time (`size-modified`): the web app adds it to cover addresses as `v` (`/api/comicreader/cover?filePath=…&v=…`, an issue's from its own `size` and `modified`), so a cover the browser cached for a file that had the path before is never shown. The server ignores `v`.
 
 **`GET /api/files/series/{seriesId}/folders`** takes `filter` and returns `{"id","title","folders":[{"directory","file_count","total_size"}],"combine_group_key","suggested_destination_directory","combinable"}`. `combinable` is `true` when the folders are one of the groups `GET /api/files/combinable-folders` lists. The series page then shows a banner that offers to merge them. With two or more folders and no such group, `combine_group_key` is `series:<seriesId>` and `combinable` is `false`.
 

@@ -54,6 +54,7 @@ public partial class SeriesLibraryService
                     TotalSize = accumulator.TotalSize,
                     LatestModified = ToUnixTime(accumulator.LatestModified),
                     CoverFilePath = sortedIssues.FirstOrDefault()?.FilePath ?? string.Empty,
+                    CoverVersion = SeriesIssueDto.CoverVersionOf(sortedIssues.FirstOrDefault()),
                     HasExternalImage = accumulator.HasExternalImage,
                     ExternalImageUrl = BuildExternalImageUrl(accumulator),
                     Issues = sortedIssues,
@@ -194,6 +195,7 @@ public partial class SeriesLibraryService
                 TotalSize = accumulator.TotalSize,
                 LatestModified = ToUnixTime(accumulator.LatestModified),
                 CoverFilePath = accumulator.GetSortedIssues().FirstOrDefault()?.FilePath ?? string.Empty,
+                CoverVersion = SeriesIssueDto.CoverVersionOf(accumulator.GetSortedIssues().FirstOrDefault()),
                 HasExternalImage = accumulator.HasExternalImage,
                 ExternalImageUrl = BuildExternalImageUrl(accumulator),
                 LookupStatus = accumulator.LookupStatus,
@@ -300,6 +302,7 @@ public partial class SeriesLibraryService
         {
             var sortedIssues = accumulator.GetSortedIssues();
             var cover = sortedIssues.FirstOrDefault()?.FilePath ?? string.Empty;
+            var coverVersion = SeriesIssueDto.CoverVersionOf(sortedIssues.FirstOrDefault());
 
             entries.Add(new SharedOverviewEntry(
                 Summary: new SeriesSummaryDto
@@ -313,6 +316,7 @@ public partial class SeriesLibraryService
                     TotalSize = accumulator.TotalSize,
                     LatestModified = ToUnixTime(accumulator.LatestModified),
                     CoverFilePath = cover,
+                    CoverVersion = coverVersion,
                     HasExternalImage = accumulator.HasExternalImage,
                     ExternalImageUrl = BuildExternalImageUrl(accumulator),
                     LookupStatus = accumulator.LookupStatus,

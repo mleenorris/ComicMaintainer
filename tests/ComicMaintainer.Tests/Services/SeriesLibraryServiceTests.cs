@@ -558,6 +558,8 @@ public class SeriesLibraryServiceTests
         Assert.Equal("green-lantern", current!.Id);
         Assert.Equal("green-lantern", former!.Id);
         Assert.Equal(2, former.IssueCount);
+        // The cover's address carries the first issue's size and modified time.
+        Assert.Equal(("/library/Green Lantern (2023)/Green Lantern - Chapter 0001.cbz", "100-1704067200"), (former.CoverFilePath, former.CoverVersion));
 
         // A name no series goes by, or one too vague to be an id, finds nothing.
         Assert.Null(await service.GetSeriesIssuesAsync("green-lantern-1990"));

@@ -119,8 +119,8 @@ test('Replace Cover writes the chosen cover and shows it in place of the old one
     t.after(() => page.close());
     await page.settle();
     // The page holds the old cover as a blob, and an image shows it.
-    const coverImage = () => page.$$('img[data-protected-image]').find(image => image.dataset.protectedImage === FILE);
-    page.run(`protectedImageUrls.set(${JSON.stringify(FILE)}, 'blob:old-cover')`);
+    const coverImage = () => page.$$('img[data-protected-image]').find(image => image.dataset.protectedImage === COVER);
+    page.run(`protectedImageUrls.set(${JSON.stringify(COVER)}, 'blob:old-cover')`);
     coverImage().src = 'blob:old-cover';
     coverImage().dataset.protectedImageLoaded = '1';
 
@@ -137,7 +137,7 @@ test('Replace Cover writes the chosen cover and shows it in place of the old one
     // The cover is fetched again past the browser's copy, and drawn again.
     const reloads = page.fetchCalls.filter(c => c.url === COVER && c.init.cache === 'reload');
     assert.equal(reloads.length, 1);
-    assert.notEqual(page.run(`protectedImageUrls.get(${JSON.stringify(FILE)})`), 'blob:old-cover');
+    assert.notEqual(page.run(`protectedImageUrls.get(${JSON.stringify(COVER)})`), 'blob:old-cover');
     assert.notEqual(coverImage().getAttribute('src'), 'blob:old-cover');
 });
 

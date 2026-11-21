@@ -222,6 +222,7 @@ public partial class FilesController
             aliases = result.Aliases,
             metadata_source = result.MetadataSource,
             cover_file_path = result.CoverFilePath,
+            cover_version = result.CoverVersion,
             has_external_image = result.HasExternalImage,
             external_image_url = result.ExternalImageUrl,
             issue_count = result.IssueCount,

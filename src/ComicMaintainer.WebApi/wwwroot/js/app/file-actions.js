@@ -389,7 +389,7 @@
             renderHtml(content, files.map((file, side) => html`
                 <div class="duplicate-compare-side">
                     <span class="duplicate-review-badge">${side === 0 ? 'Flagged as duplicate' : 'Has the name'}</span>
-                    <img class="duplicate-compare-cover" data-protected-image="${file.file_path}" alt="${file.name} cover" loading="lazy" decoding="async">
+                    <img class="duplicate-compare-cover" data-protected-image="${fileCoverPath(file)}" alt="${file.name} cover" loading="lazy" decoding="async">
                     <h3>${file.name}</h3>
                     <p class="duplicate-compare-path">${file.file_path}</p>
                     <dl class="duplicate-compare-fields">

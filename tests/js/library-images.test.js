@@ -481,7 +481,7 @@ test('the cover cache keeps at most 150 images, evicting and revoking the oldest
     assert.equal(page.evaluate("protectedImageUrls.has('old-0')"), false);
     assert.equal(page.evaluate("protectedImageUrls.has('old-1')"), true);
     assert.equal(page.objectUrls.has(oldest), false);
-    assert.equal(page.evaluate("protectedImageUrls.get('Series 001/Series 001 #001.cbz')"), covers(page)[0].src);
+    assert.equal(page.evaluate(`protectedImageUrls.get(${JSON.stringify(covers(page)[0].dataset.protectedImage)})`), covers(page)[0].src);
 });
 
 test('without IntersectionObserver covers load eagerly, eight at a time', async () => {

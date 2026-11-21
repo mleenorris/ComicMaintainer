@@ -357,6 +357,7 @@
                                 aliases: data.aliases,
                                 metadata_source: data.metadata_source,
                                 cover_file_path: data.cover_file_path,
+                                cover_version: data.cover_version,
                                 has_external_image: data.has_external_image,
                                 external_image_url: data.external_image_url,
                                 issue_count: data.issue_count,
@@ -1142,7 +1143,7 @@
                                     ${issue.duplicate ? `<span class="series-issue-duplicate-badge" title="Duplicate">🔁 Duplicate</span>` : ''}
                                     <span class="series-issue-read-corner series-issue-read-corner--${issue.read ? 'read' : 'unread'}" title="${issue.read ? 'Read' : 'Unread'}" aria-label="${issue.read ? 'Read' : 'Unread'}"></span>
                                     <button type="button" class="series-issue-cover-button" aria-label="Read ${escapeHtml(issue.title || issue.file_name)}" onclick="readComic('${escapeJs(issue.file_path)}')">
-                                        <img class="series-issue-cover" data-protected-image="${escapeHtml(issue.file_path)}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                                        <img class="series-issue-cover" data-protected-image="${escapeHtml(fileCoverPath(issue))}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                         <div class="series-issue-cover-overlay"></div>
                                         ${issue.issue ? `<span class="series-issue-badge">#${escapeHtml(issue.issue)}</span>` : ''}
                                     </button>
@@ -2150,17 +2151,29 @@
         // the page keeps each as a blob, so the cover is fetched again past
         // the browser's copy, and every image of it is drawn again.
         async function refreshFileCover(filePath) {
-            try {
-                await apiFetch(getSeriesCoverPath(filePath), { json: false, cache: 'reload' });
-            } catch (error) {
-                // The images below ask for it again anyway.
+            // Every address the page shows the file's cover by (each carries the
+            // version the list had), and every copy it keeps.
+            const images = [...document.querySelectorAll('img[data-protected-image]')]
+                .filter(image => coverTokenFilePath(image.dataset.protectedImage) === filePath);
+            const tokens = new Set(images.map(image => image.dataset.protectedImage));
+            for (const key of protectedImageUrls.keys()) {
+                if (coverTokenFilePath(key) === filePath) tokens.add(key);
             }
-            if (protectedImageUrls.has(filePath)) {
-                URL.revokeObjectURL(protectedImageUrls.get(filePath));
-                protectedImageUrls.delete(filePath);
+            const paths = new Set([...tokens].map(resolveProtectedImagePath).filter(Boolean));
+            if (!paths.size) paths.add(getSeriesCoverPath(filePath));
+            for (const path of paths) {
+                try {
+                    await apiFetch(path, { json: false, cache: 'reload' });
+                } catch (error) {
+                    // The images below ask for it again anyway.
+                }
             }
-            for (const image of document.querySelectorAll('img[data-protected-image]')) {
-                if (image.dataset.protectedImage !== filePath) continue;
+            for (const key of tokens) {
+                if (!protectedImageUrls.has(key)) continue;
+                URL.revokeObjectURL(protectedImageUrls.get(key));
+                protectedImageUrls.delete(key);
+            }
+            for (const image of images) {
                 image.dataset.protectedImageLoaded = '';
                 image.removeAttribute('src');
             }
@@ -2257,7 +2270,7 @@
                     <div class="series-detail-header">
                         <button type="button" class="btn btn-small series-detail-back" onclick="closeSeriesDetail()">${uiIcon('arrow-left')} Back to Series</button>
                         <div class="series-detail-summary">
-                            <img class="series-detail-cover" data-protected-image="${seriesCoverImage(series, 480)}" data-protected-image-fallback="${series.has_external_image && series.external_image_url ? series.cover_file_path : ''}" alt="${series.title} cover" loading="lazy" decoding="async" fetchpriority="low">
+                            <img class="series-detail-cover" data-protected-image="${seriesCoverImage(series, 480)}" data-protected-image-fallback="${series.has_external_image && series.external_image_url ? seriesFileCoverPath(series) : ''}" alt="${series.title} cover" loading="lazy" decoding="async" fetchpriority="low">
                             <div class="series-detail-summary-body">
                                 <h2>${series.title} ${rawHtml(renderLookupStatusBadge(series))}</h2>
                                 <div class="series-detail-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>

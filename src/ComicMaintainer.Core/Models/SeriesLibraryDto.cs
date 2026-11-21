@@ -4,6 +4,10 @@ namespace ComicMaintainer.Core.Models;
 
 public class SeriesIssueDto
 {
+    /// <summary>The version of a file's cover: its size and modified time, as cover addresses carry it.</summary>
+    public static string? CoverVersionOf(SeriesIssueDto? issue) =>
+        issue is null ? null : $"{issue.Size.ToString(System.Globalization.CultureInfo.InvariantCulture)}-{issue.Modified.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+
     [JsonPropertyName("file_path")]
     public string FilePath { get; set; } = string.Empty;
 
@@ -177,6 +181,13 @@ public class SeriesLibraryDto
     [JsonPropertyName("cover_file_path")]
     public string CoverFilePath { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The cover file's version (its size and modified time): cover addresses carry it, so a
+    /// cover cached for a file that had this path before is never shown for this one.
+    /// </summary>
+    [JsonPropertyName("cover_version")]
+    public string? CoverVersion { get; set; }
+
     /// <summary>True when an external/user series image is available.</summary>
     [JsonPropertyName("has_external_image")]
     public bool HasExternalImage { get; set; }
@@ -248,6 +259,13 @@ public class SeriesSummaryDto
 
     [JsonPropertyName("cover_file_path")]
     public string CoverFilePath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The cover file's version (its size and modified time): cover addresses carry it, so a
+    /// cover cached for a file that had this path before is never shown for this one.
+    /// </summary>
+    [JsonPropertyName("cover_version")]
+    public string? CoverVersion { get; set; }
 
     /// <summary>True when an external/user series image is available.</summary>
     [JsonPropertyName("has_external_image")]
@@ -327,6 +345,8 @@ public class SeriesIssuesResult
     public List<string> Aliases { get; set; } = new();
     public string? MetadataSource { get; set; }
     public string CoverFilePath { get; set; } = string.Empty;
+    /// <summary>The cover file's version (see <see cref="SeriesLibraryDto.CoverVersion"/>).</summary>
+    public string? CoverVersion { get; set; }
     public bool HasExternalImage { get; set; }
     public string? ExternalImageUrl { get; set; }
     public int IssueCount { get; set; }

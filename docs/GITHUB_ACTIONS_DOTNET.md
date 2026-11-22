@@ -15,7 +15,7 @@ How the repository is tested and released. The workflows are in `.github/workflo
 | PR Test Check | `pr-test-check.yml` | Pull requests into `dotnet` |
 | Security Vulnerability Scanning | `security-scan.yml` | Pull requests, pushes to `dotnet`, weekly and by hand |
 | CodeQL Advanced Security Scanning | `codeql-analysis.yml` | Pull requests, pushes to `dotnet`, weekly and by hand |
-| Claude Code, Claude Code Review | `claude.yml`, `claude-code-review.yml` | `@claude` mentions; pull request updates |
+| Claude Code, Claude Code Review | `claude.yml`, `claude-code-review.yml` | `@claude` mentions; pull request updates, with fixes for what the review finds |
 | Cleanup Copilot Branches | `cleanup-copilot-branches.yml` | Pull request closed; deletes `copilot/` branches |
 
 [Dependabot](../.github/dependabot.yml) proposes dependency updates.
@@ -131,6 +131,21 @@ publishes the signed APK from `src/ComicMaintainer.Android.sln`.
 Both attach their files to the release of the tag they are given. Run either by hand with a tag to rebuild a release's
 downloads, or with no tag to build the selected branch and keep the result as a workflow artifact without publishing
 anything.
+
+## Claude code review
+
+`claude-code-review.yml` reviews every push to a pull request and posts the issues it finds, one inline comment each,
+then a summary comment. When it finds issues, its `claude-fix` job starts a Claude session on the pull request's branch:
+
+1. Claude reads the review's comments and checks each finding against the code.
+2. It fixes the real ones, with tests, and leaves a finding it thinks is wrong alone, saying why.
+3. It builds and runs the tests, then posts a "Claude review autofix" comment saying what it changed.
+4. It pushes the fix. The push is reviewed like any other.
+
+The loop stops after two fix rounds on a pull request, so a finding Claude cannot settle is left for a person. Each
+round is counted by the `Review-Autofix: true` line its commit ends with. A fix is never force-pushed, and pull requests
+from forks are reviewed but not fixed, because their branches cannot be pushed to. To fix a finding after the limit,
+mention `@claude` in a comment.
 
 ## Security scans
 

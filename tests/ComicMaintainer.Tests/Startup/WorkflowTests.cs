@@ -18,6 +18,7 @@ public sealed class WorkflowTests
     private const string DockerPublish = "docker-publish-dotnet.yml";
     private const string SecurityScan = "security-scan.yml";
     private const string PrTestCheck = "pr-test-check.yml";
+    private const string ClaudeReview = "claude-code-review.yml";
 
     public static TheoryData<string> WorkflowFiles()
     {
@@ -221,6 +222,38 @@ public sealed class WorkflowTests
         Assert.DoesNotContain("actions/create-release@", text);
         Assert.DoesNotContain("/blob/master/", text);
         Assert.DoesNotContain("on merge to master", text);
+    }
+
+    [Fact]
+    public void ClaudeReview_FixesItsOwnFindings_AtMostTwice_OnlyOnThisRepositorysBranches()
+    {
+        var jobs = Mapping(Load(ClaudeReview), "jobs");
+        var review = Mapping(jobs, "claude-review");
+        var fix = Mapping(jobs, "claude-fix");
+
+        // The fix runs after a review that reported issues, for at most two rounds, and never for a fork.
+        Assert.Equal(["claude-review"], Sequence(fix, "needs"));
+        var condition = Scalar(fix, "if")!;
+        Assert.Contains("needs.claude-review.outputs.issues != '0'", condition);
+        Assert.Contains("fromJSON(needs.claude-review.outputs.autofix-rounds) < 2", condition);
+        Assert.Contains("github.event.pull_request.head.repo.full_name == github.repository", condition);
+
+        // The review's marker is what the result step reads, and only claude[bot] can post it.
+        var reviewPrompt = Scalar(Mapping(JobSteps(review).Single(step => Scalar(step, "id") == "claude-review"), "with"), "prompt")!;
+        Assert.Contains("<!-- claude-code-review sha=${{ github.event.pull_request.head.sha }} issues=N -->", reviewPrompt);
+        var result = Scalar(JobSteps(review).Single(step => Scalar(step, "id") == "result"), "run")!;
+        Assert.Contains("<!-- claude-code-review sha=$HEAD_SHA issues=", result);
+        Assert.Contains("select(.user.login == \"claude[bot]\")", result);
+
+        // Each fix round is counted by its commit trailer; the push may never be forced.
+        Assert.Contains("grep -c '^Review-Autofix: true'", result);
+        var fixStep = Mapping(JobSteps(fix).Single(step => Scalar(step, "uses")?.StartsWith("anthropics/claude-code-action@") == true), "with");
+        Assert.Contains("`Review-Autofix: true`", Scalar(fixStep, "prompt"));
+        var tools = Scalar(fixStep, "claude_args")!;
+        Assert.Contains("Bash(git push origin HEAD:*)", tools);
+        Assert.DoesNotContain("--force", tools);
+        Assert.DoesNotContain("Bash(git push:*)", tools);
+        Assert.Equal("false", Scalar(Mapping(JobSteps(fix).First(), "with"), "persist-credentials"));
     }
 
     [Fact]

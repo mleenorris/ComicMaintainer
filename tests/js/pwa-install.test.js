@@ -108,3 +108,84 @@ test('a missing install button does not stop the other from being shown and hidd
     assert.equal(page.$('#installAppSidebarButton').style.display, 'none');
     assert.deepEqual(page.errors, []);
 });
+
+// Browsers that install by hand, with no install prompt to hold back.
+const AGENTS = {
+    iPhone: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1',
+    iPhoneChrome: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/139.0.7258.76 Mobile/15E148 Safari/604.1',
+    // An iPad asking for desktop sites (the default) names itself a Mac.
+    iPadDesktop: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
+    macSafari: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
+    macChrome: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',
+    macFirefox: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0'
+};
+
+/** boot() as a browser identifying itself as `agent`, with `touchPoints` and `standalone` as given. */
+function bootAs(agent, { touchPoints = 0, standalone, media } = {}) {
+    return boot({
+        media,
+        beforeScripts(window) {
+            Object.defineProperty(window.navigator, 'userAgent', { value: agent, configurable: true });
+            Object.defineProperty(window.navigator, 'maxTouchPoints', { value: touchPoints, configurable: true });
+            if (standalone !== undefined) Object.defineProperty(window.navigator, 'standalone', { value: standalone, configurable: true });
+        }
+    });
+}
+
+const shownSteps = page => page.$$('#installAppModal [data-install-platform]').filter(steps => !steps.hidden).map(steps => steps.dataset.installPlatform);
+
+test('on an iPhone or iPad, Install App is offered from the start and shows how to add the app to the Home Screen', async () => {
+    for (const [label, agent, touchPoints] of [
+        ['iPhone Safari', AGENTS.iPhone, 5],
+        ['iPhone Chrome', AGENTS.iPhoneChrome, 5],
+        ['iPad asking for desktop sites', AGENTS.iPadDesktop, 5]
+    ]) {
+        const page = await bootAs(agent, { touchPoints });
+        assert.deepEqual(installButtons(page), ['block', 'flex'], label);
+
+        page.click('#installAppButton');
+        assert.ok(page.$('#installAppModal').classList.contains('active'), label);
+        assert.deepEqual(shownSteps(page), ['ios'], label);
+        assert.match(page.$('#installAppModal [data-install-platform="ios"]').textContent, /Add to Home Screen/, label);
+        assert.deepEqual(messages(page), [], label);
+
+        page.run('closeInstallAppModal()');
+        assert.equal(page.$('#installAppModal').classList.contains('active'), false, label);
+    }
+});
+
+test('Safari on a Mac shows how to add the app to the Dock; other Mac browsers prompt or offer nothing', async () => {
+    const safari = await bootAs(AGENTS.macSafari);
+    assert.deepEqual(installButtons(safari), ['block', 'flex']);
+    safari.click('#installAppSidebarButton');
+    assert.deepEqual(shownSteps(safari), ['mac-safari']);
+    assert.match(safari.$('#installAppModal [data-install-platform="mac-safari"]').textContent, /File > Add to Dock/);
+
+    // Chrome and Edge prompt (beforeinstallprompt); Firefox cannot install at all.
+    for (const agent of [AGENTS.macChrome, AGENTS.macFirefox]) {
+        const page = await bootAs(agent);
+        assert.deepEqual(installButtons(page), ['none', 'none'], agent);
+        page.click('#installAppSidebarButton');
+        assert.deepEqual(messages(page), [UNAVAILABLE], agent);
+    }
+});
+
+test('once opened as the installed app there is nothing to install', async () => {
+    for (const [label, options] of [
+        ['from the Home Screen', { touchPoints: 5, standalone: true }],
+        ['in its own window', { touchPoints: 5, media: { '(display-mode: standalone)': true } }]
+    ]) {
+        const page = await bootAs(AGENTS.iPhone, options);
+        assert.deepEqual(installButtons(page), ['none', 'none'], label);
+        page.click('#installAppSidebarButton');
+        assert.deepEqual(messages(page), [UNAVAILABLE], label);
+    }
+});
+
+test("a browser's own install prompt still comes first", async () => {
+    const page = await bootAs(AGENTS.macSafari);
+    const offer = offerInstall(page);
+    page.click('#installAppSidebarButton');
+    assert.equal(offer.prompts, 1);
+    assert.equal(page.$('#installAppModal').classList.contains('active'), false);
+});

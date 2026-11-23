@@ -642,7 +642,20 @@ resumed within 7 days is removed.
 **Offline Comics** in the sidebar lists the comics saved on the device you are using, with the space they take, and lets
 you read, resume or remove each one. When the app is opened with no connection, it shows this list instead of the library,
 and starts normally once the connection returns. Saved comics stay on the device when you sign out, until you remove them.
-You can also install the site as an app from your browser.
+
+### Installing the app
+
+**Install App** (in the sidebar and the settings menu) installs the site as an app that opens in its own window. In Chrome
+and Edge it shows the browser's install prompt. Safari has no such prompt, so on an iPhone, an iPad or a Mac running Safari,
+**Install App** shows the steps instead:
+
+- **iPhone and iPad:** tap **Share** (in Safari on an iPhone it can be under **⋯**, beside the address bar), then
+  **Add to Home Screen**, then **Add**. If your browser's Share menu doesn't list it, use Safari.
+- **Mac, Safari 17 or later:** choose **File > Add to Dock**.
+
+On an iPhone or iPad, the app on the Home Screen keeps its own sign-in and offline comics, separate from the browser's:
+sign in once in the app, and save the comics you want for offline reading from there. **Install App** is hidden when the
+site is already running as the installed app.
 
 ## Suwayomi
 

@@ -2338,6 +2338,21 @@
             display: none;
         }
 
+        /* The Install App dialog's steps (js/app/service-worker.js). */
+        .install-app-steps {
+            margin: 0 0 12px;
+            padding-left: 22px;
+            line-height: 1.6;
+        }
+
+        .install-app-steps li + li {
+            margin-top: 6px;
+        }
+
+        .install-app-share-icon {
+            vertical-align: -0.2em;
+        }
+
         /* The Offline Comics dialog's list. */
         .offline-comics-list {
             list-style: none;

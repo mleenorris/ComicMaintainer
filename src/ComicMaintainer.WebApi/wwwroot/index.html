@@ -2438,6 +2438,44 @@
          </div>
      </div>
 
+     <!-- Install App Modal (js/app/service-worker.js): the steps for browsers that
+          install by hand, without an install prompt (Safari on iPhone, iPad and Mac). -->
+     <div class="modal" id="installAppModal" role="dialog" aria-modal="true" aria-labelledby="installAppModalTitle" aria-hidden="true">
+         <div class="modal-content" style="max-width: 520px;">
+             <div class="modal-header">
+                 <h2 id="installAppModalTitle">Install Comic Maintainer</h2>
+                 <button class="close-btn" onclick="closeInstallAppModal()" aria-label="Close">&times;</button>
+             </div>
+             <div class="modal-body">
+                 <div data-install-platform="ios" hidden>
+                     <p>Add the app to your Home Screen:</p>
+                     <ol class="install-app-steps">
+                         <li>Tap <strong>Share</strong>
+                             <svg class="icon install-app-share-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4M7 10H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>.
+                             In Safari on an iPhone it can be under <strong>⋯</strong>, beside the address bar.</li>
+                         <li>Scroll down and tap <strong>Add to Home Screen</strong>. If your browser does not list it, open this page in Safari.</li>
+                         <li>Leave <strong>Open as Web App</strong> on if it is shown, then tap <strong>Add</strong>.</li>
+                     </ol>
+                     <p class="combine-folders-meta">
+                         The app then opens full screen from its icon. It keeps its own sign-in and its own offline comics,
+                         apart from the browser's: sign in once in the app, and save the comics you want offline from there.
+                     </p>
+                 </div>
+                 <div data-install-platform="mac-safari" hidden>
+                     <p>Add the app to your Dock:</p>
+                     <ol class="install-app-steps">
+                         <li>Choose <strong>File &gt; Add to Dock</strong>, or click <strong>Share</strong> and choose <strong>Add to Dock</strong>.</li>
+                         <li>Click <strong>Add</strong>.</li>
+                     </ol>
+                     <p class="combine-folders-meta">This needs Safari 17 or later (macOS Sonoma).</p>
+                 </div>
+             </div>
+             <div class="modal-footer">
+                 <button class="btn" onclick="closeInstallAppModal()">Close</button>
+             </div>
+         </div>
+     </div>
+
      <div class="modal" id="chooseVolumeModal" role="dialog" aria-modal="true" aria-labelledby="chooseVolumeModalTitle" aria-hidden="true">
          <div class="modal-content" style="max-width: 760px;">
              <div class="modal-header">

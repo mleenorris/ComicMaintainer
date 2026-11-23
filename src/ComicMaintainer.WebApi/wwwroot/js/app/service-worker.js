@@ -271,9 +271,53 @@
             });
         }
         
+        // True when the page already runs as the installed app (from the Home
+        // Screen or the Dock), where there is nothing left to install.
+        function isRunningAsInstalledApp() {
+            return navigator.standalone === true
+                || (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
+        }
+
+        // Browsers that never offer an install prompt (no beforeinstallprompt)
+        // but install the app by hand: every browser on iPhone and iPad
+        // ('ios': Share > Add to Home Screen), and Safari on a Mac
+        // ('mac-safari': File > Add to Dock). Null anywhere else, and once
+        // installed. An iPad asking for desktop sites names itself a Mac, but
+        // a Mac has no touch screen.
+        function manualInstallPlatform() {
+            if (isRunningAsInstalledApp()) return null;
+            const ua = navigator.userAgent || '';
+            const mac = /Macintosh/.test(ua);
+            if (/iPhone|iPad|iPod/.test(ua) || (mac && navigator.maxTouchPoints > 1)) return 'ios';
+            if (mac && /Safari\//.test(ua) && !/Chrome|Chromium|Edg|Firefox|OPR/.test(ua)) return 'mac-safari';
+            return null;
+        }
+
+        // Safari offers no prompt to hold back, so the buttons are shown from
+        // the start and open the steps instead.
+        if (manualInstallPlatform()) {
+            setInstallAppButtonsVisible(true);
+        }
+
+        function openInstallAppModal(platform) {
+            for (const steps of document.querySelectorAll('#installAppModal [data-install-platform]')) {
+                steps.hidden = steps.dataset.installPlatform !== platform;
+            }
+            document.getElementById('installAppModal').classList.add('active');
+        }
+
+        function closeInstallAppModal() {
+            document.getElementById('installAppModal').classList.remove('active');
+        }
+
         // Function to trigger installation
         function installApp() {
             if (!deferredPrompt) {
+                const platform = manualInstallPlatform();
+                if (platform) {
+                    openInstallAppModal(platform);
+                    return;
+                }
                 showMessage('App is already installed or installation is not available.', 'info');
                 return;
             }

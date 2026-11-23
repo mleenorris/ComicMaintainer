@@ -626,6 +626,14 @@ The reader has **manga** mode, one page at a time, and **webcomic** mode, a cont
 On a touch screen, tap the middle of the page, or anywhere on the stream in webcomic mode, to show or hide the controls.
 Turning pages and scrolling leave them as they are. In webcomic mode the bar along the top shows your position.
 
+In manga mode the page is scaled to fit the whole screen. The controls float over it while shown, so hiding them leaves
+the page as it is. On a phone with a notch the page runs under the notch and home bar, and the controls stay clear of
+them.
+
+**Press and hold** a spot on a page to zoom in on it, 2.5 times. Move your finger (or the mouse) to look around, and let
+go to zoom back out. Letting go doesn't turn the page or toggle the controls. A tap, a swipe, a pinch or a right-click
+works as before.
+
 ### Offline reading
 
 You can keep comics on a device for reading with no connection:

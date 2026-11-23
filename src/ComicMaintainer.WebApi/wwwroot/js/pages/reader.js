@@ -272,6 +272,7 @@
                 // Wire up interactive UI helpers
                 setupTapZones();
                 setupChromeAutoHide();
+                setupHoldZoom();
             } catch (error) {
                 if (error.authHandled) return;
                 console.error('Error initializing reader:', error);
@@ -1823,6 +1824,115 @@
                 middle.addEventListener('click', () => { toggleChromeHidden(); });
                 middle._wired = true;
             }
+        }
+
+        // Press and hold to zoom: holding still on a page for a moment
+        // magnifies the spot under the finger (or the mouse), following it as
+        // it moves, until the press ends. The click that ends a zoom turns no
+        // page and leaves the controls as they are. Moving first (a scroll), a
+        // second finger (a pinch), or any press but the main one leave the
+        // page alone.
+        const HOLD_ZOOM_DELAY_MS = 350;
+        const HOLD_ZOOM_SLOP_PX = 10;
+        // The press being held: { pointerId, x, y, image, rect, zoomed, timer }.
+        let holdZoom = null;
+        let holdZoomSwallowsClick = false;
+
+        function setupHoldZoom() {
+            const content = document.getElementById('readerContent');
+            content.addEventListener('pointerdown', startHoldZoom);
+            content.addEventListener('pointermove', moveHoldZoom);
+            content.addEventListener('pointerup', endHoldZoom);
+            content.addEventListener('pointercancel', endHoldZoom);
+            // Once zoomed, a moving finger moves the zoom, not the stream.
+            content.addEventListener('touchmove', (event) => {
+                if (holdZoom && holdZoom.zoomed) event.preventDefault();
+            }, { passive: false });
+            // Nor does a long press open the browser's menu for the picture.
+            content.addEventListener('contextmenu', (event) => {
+                if (holdZoom) event.preventDefault();
+            });
+            // Captured ahead of the tap zones and the stream's own click.
+            content.addEventListener('click', (event) => {
+                if (!holdZoomSwallowsClick) return;
+                holdZoomSwallowsClick = false;
+                event.preventDefault();
+                event.stopPropagation();
+            }, true);
+        }
+
+        // The picture a press is on: the page in manga mode (under the tap
+        // zones), the one of the stream under it in webcomic mode.
+        function holdZoomImage(event) {
+            if (readingMode === 'manga') return document.querySelector('#readerContent .page-image');
+            return event.target.closest('.webcomic-container img:not(.webcomic-page-placeholder)');
+        }
+
+        function startHoldZoom(event) {
+            if (holdZoom) {
+                // A second finger: a pinch, not a hold.
+                stopHoldZoom(false);
+                return;
+            }
+            // A press after a zoom whose release made no click.
+            holdZoomSwallowsClick = false;
+            if (!event.isPrimary || event.button !== 0) return;
+            const image = holdZoomImage(event);
+            if (!image) return;
+            holdZoom = {
+                pointerId: event.pointerId,
+                x: event.clientX,
+                y: event.clientY,
+                image,
+                rect: null,
+                zoomed: false,
+                timer: setTimeout(zoomHeldPage, HOLD_ZOOM_DELAY_MS)
+            };
+        }
+
+        function zoomHeldPage() {
+            // Where the picture is unzoomed: a scaled one reports its scaled box.
+            holdZoom.rect = holdZoom.image.getBoundingClientRect();
+            holdZoom.zoomed = true;
+            placeHoldZoom(holdZoom.x, holdZoom.y);
+            holdZoom.image.classList.add('hold-zoomed');
+            try {
+                // A mouse dragged off the page still moves, and ends, the zoom.
+                document.getElementById('readerContent').setPointerCapture(holdZoom.pointerId);
+            } catch (error) {
+                // Without capture the zoom still ends when the press does.
+            }
+        }
+
+        // The spot under the press stays under it, magnified.
+        function placeHoldZoom(x, y) {
+            holdZoom.image.style.setProperty('--hold-zoom-origin', `${x - holdZoom.rect.left}px ${y - holdZoom.rect.top}px`);
+        }
+
+        function moveHoldZoom(event) {
+            if (!holdZoom || event.pointerId !== holdZoom.pointerId) return;
+            if (holdZoom.zoomed) {
+                placeHoldZoom(event.clientX, event.clientY);
+            } else if (Math.hypot(event.clientX - holdZoom.x, event.clientY - holdZoom.y) > HOLD_ZOOM_SLOP_PX) {
+                // Moving before the zoom: a scroll or a swipe, not a hold.
+                stopHoldZoom(false);
+            }
+        }
+
+        function endHoldZoom(event) {
+            if (!holdZoom || event.pointerId !== holdZoom.pointerId) return;
+            stopHoldZoom(event.type === 'pointerup');
+        }
+
+        // Ends the hold, and the zoom if it began. A zoom released (rather
+        // than cancelled) swallows the click its release makes.
+        function stopHoldZoom(swallowClick) {
+            clearTimeout(holdZoom.timer);
+            if (holdZoom.zoomed) {
+                holdZoom.image.classList.remove('hold-zoomed');
+                holdZoomSwallowsClick = swallowClick;
+            }
+            holdZoom = null;
         }
 
         // Keys that read (turn a page, scroll the stream) rather than ask for

@@ -376,8 +376,9 @@ The warning gives the reason:
 Docker network with ComicMaintainer, as in the [complete example](#example-complete-setup). If Authelia is served
 under a path (its `server.address` ends in one, such as `/authelia`), include the path:
 `http://authelia:9091/authelia`. The public address of the Authelia portal, such as `https://auth.yourdomain.com`,
-works too, but then the checks go through the reverse proxy. To test an address, run
-`docker exec comicmaintainer curl -fsS http://authelia:9091/api/health`, which prints `{"status":"OK"}`.
+works too, but then the checks go through the reverse proxy. To test an `http://` address, run
+`docker exec comicmaintainer http-get http://authelia:9091/api/health`, which prints `{"status":"OK"}`. The image has no
+`curl`, and `http-get` fetches plain `http://` only.
 
 ## Troubleshooting
 

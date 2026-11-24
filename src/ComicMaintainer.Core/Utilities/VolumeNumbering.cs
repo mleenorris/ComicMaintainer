@@ -128,12 +128,12 @@ public static class VolumeNumbering
     private static bool SharesAnIssueNumber<T>(IEnumerable<VolumeGroup<T>> groups, Func<T, string?> issueOf)
     {
         var seen = new HashSet<long>();
-        foreach (var group in groups)
+        var numbersOfEachGroup = groups.Select(group => group.Items
+            .Select(item => WholeIssueNumber(issueOf(item)))
+            .OfType<long>()
+            .ToHashSet());
+        foreach (var numbers in numbersOfEachGroup)
         {
-            var numbers = group.Items
-                .Select(item => WholeIssueNumber(issueOf(item)))
-                .OfType<long>()
-                .ToHashSet();
             if (numbers.Overlaps(seen))
             {
                 return true;

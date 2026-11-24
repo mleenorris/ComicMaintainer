@@ -6,8 +6,8 @@
         // <script> tags there); this file must not run code at load time that
         // depends on a script loaded after it.
 
-        // Shared state declared in state.js and reassigned here.
-        /* global libraryScrollBeforeSeries: true */
+        // Shared state declared in state.js (and seriesDetailOrigin in router.js) and reassigned here.
+        /* global libraryScrollBeforeSeries: true, seriesDetailOrigin: true */
 
         function openSeriesDetail(seriesId) {
             // Remember where we came from so Back returns to the right place,

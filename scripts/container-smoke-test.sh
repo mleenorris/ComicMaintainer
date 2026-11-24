@@ -134,6 +134,22 @@ done
 echo "${body}" | grep -q '".NET"' || fail "/api/version did not return platform=.NET"
 echo "${body}" | grep -q '"version"' || fail "/api/version missing version field"
 
+# The image's own health check (http-get, a bash script, as the image has no curl) must pass too: Docker restarts or
+# reports a container whose check fails. Its first run comes up to one interval (30s) after the start.
+log "Waiting for Docker to report the container healthy..."
+health=""
+for _ in $(seq 1 45); do
+    health="$(docker inspect --format '{{.State.Health.Status}}' "${CONTAINER_NAME}")"
+    [ "${health}" = "starting" ] || break
+    sleep 2
+done
+[ "${health}" = "healthy" ] || fail "Docker health check reported '${health}': $(docker inspect --format '{{json .State.Health.Log}}' "${CONTAINER_NAME}")"
+log "Docker health check: ${health}"
+# http-get reports a status that is not 2xx as a failure.
+if docker exec "${CONTAINER_NAME}" http-get "http://127.0.0.1:5000/api/no-such-endpoint" >/dev/null; then
+    fail "http-get reported success for a 404"
+fi
+
 # Verify the app wrote its database to the custom directory and kept private modes private.
 docker exec --user 10001 "${CONTAINER_NAME}" test -s "${APP_CONFIG_DIR}/comicmaintainer.db" \
     || fail "Database was not created in custom CONFIG_DIR"

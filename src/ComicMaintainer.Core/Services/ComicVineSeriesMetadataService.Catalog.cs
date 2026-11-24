@@ -131,16 +131,10 @@ public partial class ComicVineSeriesMetadataService
             return Array.Empty<ComicVineIssueSummary>();
         }
 
-        var issues = new List<ComicVineIssueSummary>();
-        foreach (var item in results.EnumerateArray())
-        {
-            if (ReadIssueSummary(item) is { } issue)
-            {
-                issues.Add(issue);
-            }
-        }
-
-        return issues;
+        return results.EnumerateArray()
+            .Select(ReadIssueSummary)
+            .OfType<ComicVineIssueSummary>()
+            .ToList();
     }
 
     /// <summary>One issue read by its id; null without an id, a number or a volume.</summary>

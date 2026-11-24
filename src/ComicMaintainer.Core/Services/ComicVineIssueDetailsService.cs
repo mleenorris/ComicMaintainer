@@ -1341,12 +1341,11 @@ public sealed class ComicVineIssueDetailsService : IComicVineIssueDetailsService
                                && listed < highestHeld;
                 // A volume left for review waits for the user, or the retry period, even on a run the
                 // user started: weighing it again would cost the same and decide the same.
-                if (link is not null
-                    && !tooShort
-                    && (link.VolumeId is not null
-                        || _searchedThisRun.Contains(key)
-                        || ((!retryNotFound || link.Decision == ComicVineVolumeDecision.Review)
-                            && DateTime.UtcNow - link.LinkedUtc < NotFoundRetry)))
+                var waitsForRetry = link is not null
+                                    && (!retryNotFound || link.Decision == ComicVineVolumeDecision.Review)
+                                    && DateTime.UtcNow - link.LinkedUtc < NotFoundRetry;
+                var settled = link is { VolumeId: not null } || _searchedThisRun.Contains(key) || waitsForRetry;
+                if (link is not null && !tooShort && settled)
                 {
                     return (link, false);
                 }

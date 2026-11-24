@@ -339,14 +339,15 @@ services:
 
 ### 3. Health Checks
 
-The image already has a health check that calls `/health`. To reproduce it in your own orchestration:
+The image already has a health check that calls `/health`. It runs `http-get`, a bash script in the image that fetches
+a plain `http://` URL: the image has no `curl`. To reproduce it in your own orchestration:
 
 ```yaml
 services:
   comicmaintainer:
     # ... other config ...
     healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:5000/health"]
+      test: ["CMD", "http-get", "http://127.0.0.1:5000/health"]
       interval: 30s
       timeout: 5s
       retries: 3

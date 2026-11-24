@@ -245,14 +245,9 @@ public class MetadataController : ControllerBase
         // Metron is checked alongside the series providers, so a slow Metron does not add to their time.
         var metron = _metron.CheckHealthAsync(cancellationToken);
         var series = SeriesHealthAsync();
-        try
-        {
-            await Task.WhenAll(series, metron);
-        }
-        catch when (series.IsFaulted || series.IsCanceled)
-        {
-            // Both are done (neither is left unobserved); the series check's own failure is thrown below.
-        }
+        // Both are done before either is read, so neither is left unobserved: each one's own failure is thrown where
+        // it is read below.
+        await Task.WhenAll(series, metron).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 
         // Metron is not a series provider: it checks ComicVine's volumes, and has its own entry.
         var merged = MergeAniListProviders(await series);

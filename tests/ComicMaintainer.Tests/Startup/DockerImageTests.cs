@@ -28,8 +28,21 @@ public sealed class DockerImageTests
         Assert.True(install.Success, "Dockerfile.dotnet installs no packages with apt-get");
         Assert.Contains("--no-install-recommends", install.Groups[1].Value);
         var packages = Regex.Matches(install.Groups[1].Value, @"(?<=\s)[a-z0-9][a-z0-9.+-]+(?=\s)").Select(match => match.Value).ToHashSet();
-        // gosu drops root in the entrypoint and curl runs the health check. Archives are read in-process.
-        Assert.Equal(["curl", "gosu"], packages.Order());
+        // gosu drops root in the entrypoint. Archives are read in-process, and the health check needs only bash.
+        Assert.Equal(["gosu"], packages.Order());
+    }
+
+    [Fact]
+    public void HealthCheck_NeedsNoCurl()
+    {
+        // curl brought GnuTLS, Kerberos, LDAP and SASL into the image for the health check alone, and most of the CVEs
+        // scanned in it with them. http-get fetches the URL with bash.
+        var healthCheck = Assert.Single(Regex.Matches(Dockerfile, @"(?m)^HEALTHCHECK [^\n]*\n\s+CMD (?<command>[^\n]+)$")).Groups["command"].Value;
+
+        Assert.Equal("""["http-get", "http://127.0.0.1:5000/health"]""", healthCheck);
+        Assert.Contains("COPY http-get.sh /usr/local/bin/http-get", Dockerfile, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"\bcurl\b", Regex.Replace(Dockerfile, @"(?m)^#.*$", string.Empty));
+        Assert.StartsWith("#!/bin/bash\n", File.ReadAllText(Path.Join(RepositoryRoot, "http-get.sh")).Replace("\r\n", "\n"), StringComparison.Ordinal);
     }
 
     [Fact]

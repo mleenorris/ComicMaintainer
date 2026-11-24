@@ -1,4 +1,4 @@
-# The image is built from src/ and entrypoint.dotnet.sh (see Dockerfile.dotnet). Everything else is kept out of the
+# The image is built from src/, entrypoint.dotnet.sh and http-get.sh (see Dockerfile.dotnet). Everything else is kept out of the
 # build context, so it is not sent to the builder and cannot invalidate the cached layers.
 
 # Local build output. A host build's bin/ and obj/ (including an obj/project.assets.json with host paths) would

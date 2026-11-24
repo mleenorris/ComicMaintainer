@@ -896,7 +896,7 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
         Assert.True(await _service.ProcessFileAsync(path));
 
         var info = ReadComicInfo(path);
-        Assert.Equal(("Annual", (string?)null, (string?)null), (info.Element("Title")?.Value, info.Element("Year")?.Value, info.Element("Number")?.Value));
+        Assert.Equal(("Annual", default(string?), default(string?)), (info.Element("Title")?.Value, info.Element("Year")?.Value, info.Element("Number")?.Value));
     }
 
     [Fact]
@@ -941,7 +941,7 @@ public sealed class ComicProcessorServiceIssueNumberTests : IDisposable
         Assert.True(await _service.ProcessFileAsync(path, forceReprocess: true));
 
         var info = ReadComicInfo(path);
-        Assert.Equal(("Annual", (string?)null), (info.Element("Title")?.Value, info.Element("Number")?.Value));
+        Assert.Equal(("Annual", default(string?)), (info.Element("Title")?.Value, info.Element("Number")?.Value));
         Assert.Equal(written, File.GetLastWriteTimeUtc(path));
     }
 

@@ -584,7 +584,7 @@ public class SeriesLibraryServiceTests
 
         var result = await service.GetSeriesIssuesAsync("saga");
 
-        Assert.Equal(new[] { ("1", false), ((string?)null, true) }, result!.Issues.Select(i => (i.Issue, i.Annual)).OrderBy(i => i.Annual));
+        Assert.Equal(new[] { ("1", false), (default(string?), true) }, result!.Issues.Select(i => (i.Issue, i.Annual)).OrderBy(i => i.Annual));
     }
 
     [Fact]

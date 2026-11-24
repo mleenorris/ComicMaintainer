@@ -3,10 +3,12 @@ FROM mcr.microsoft.com/dotnet/aspnet:11.0 AS base
 WORKDIR /app
 EXPOSE 5000
 
-# gosu switches from root to the PUID user after the entrypoint has prepared /Config, and curl runs the container
-# health check. Archives (ZIP and RAR) are read in-process by SharpCompress, so no unrar or 7-Zip tools are installed;
-# recommended packages are left out to keep the image, and the CVEs scanned in it, small. The upgrade applies OS
-# security fixes published since the base image was built, which the image scan in CI would otherwise fail on.
+# gosu switches from root to the PUID user after the entrypoint has prepared /Config. Archives (ZIP and RAR) are read
+# in-process by SharpCompress, so no unrar or 7-Zip tools are installed; recommended packages are left out to keep the
+# image, and the CVEs scanned in it, small. No curl either: it brought 24 packages (GnuTLS, Kerberos, LDAP, SASL,
+# p11-kit and more) only for the health check, and most of the image's open CVEs with them. The health check uses
+# http-get (below), a bash script. The upgrade applies OS security fixes published since the base image was built,
+# which the image scan in CI would otherwise fail on.
 # The Ubuntu base also ships Canonical's pebble service manager, a Go binary the app never runs (the entrypoint
 # starts it with gosu). It is removed: a Go security fix reaches pebble only when Canonical rebuilds it, and until
 # then the image scan fails on it (CVE-2026-97054, fixed in Go 1.27.4; pebble was built with Go 1.27.3).
@@ -14,7 +16,6 @@ RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends \
         gosu \
-        curl \
     && rm -f /usr/bin/pebble \
     && rm -rf /var/lib/apt/lists/*
 
@@ -68,9 +69,11 @@ ENV FIX_LIBRARY_PERMISSIONS=false
 ENV ADMIN_USERNAME=admin
 ENV ADMIN_EMAIL=admin@comicmaintainer.local
 
-# Copy entrypoint script
+# Copy the entrypoint, and http-get, which fetches a plain http:// URL with bash alone (the health check below, and
+# checks run with docker exec).
 COPY entrypoint.dotnet.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY http-get.sh /usr/local/bin/http-get
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/http-get
 
 # Create the mount points. User/group are created at runtime from PUID/PGID, and the entrypoint gives /Config to
 # them; a library folder mounted from the host keeps the host's ownership.
@@ -80,9 +83,10 @@ RUN mkdir -p /watched_dir /duplicates /Config && \
 # Report container health from the application's own liveness probe. "/health" is used rather
 # than "/health/ready" deliberately: readiness also checks the database, and a transient
 # database problem should not make Docker restart an otherwise healthy process.
-# start-period covers first-run startup, which applies migrations.
+# start-period covers first-run startup, which applies migrations. 127.0.0.1 rather than localhost: bash connects to
+# the first address localhost resolves to, which may be ::1.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD curl --fail --silent --show-error http://localhost:5000/health || exit 1
+    CMD ["http-get", "http://127.0.0.1:5000/health"]
 
 # Use entrypoint script to handle dynamic user creation and permission management
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

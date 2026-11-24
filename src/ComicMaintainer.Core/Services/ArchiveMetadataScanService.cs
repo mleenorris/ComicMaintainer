@@ -32,6 +32,7 @@ public sealed class ArchiveMetadataScanService
     /// <summary>Archives that could not be read, with the stored stats they had at the time.</summary>
     private readonly ConcurrentDictionary<string, (long Size, DateTime Modified)> _unreadable = new(StringComparer.Ordinal);
 
+    /// <summary>Creates the scan that records the metadata of archives new to the library, or changed.</summary>
     /// <param name="fileStore">The library's files.</param>
     /// <param name="processor">Reads an archive's metadata.</param>
     /// <param name="logger">Logger.</param>
